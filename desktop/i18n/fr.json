@@ -90,5 +90,8 @@
   "conflicted copy": "copie en conflit",
   "{count} files were deleted on the server. Delete them on this computer too?": "{count} fichiers ont été supprimés sur le serveur. Les supprimer aussi sur cet ordinateur ?",
   "{count} files were deleted on this computer. Delete them on the server too?": "{count} fichiers ont été supprimés sur cet ordinateur. Les supprimer aussi sur le serveur ?",
-  "{count} items could not be synced": "{count} éléments n'ont pas pu être synchronisés"
+  "{count} items could not be synced": "{count} éléments n'ont pas pu être synchronisés",
+  "The name is not allowed": "Ce nom n'est pas autorisé",
+  "Use an https:// address. Plain http:// only works for a server on your local network.": "Utilisez une adresse https://. Le simple http:// ne fonctionne que pour un serveur sur votre réseau local.",
+  "Choose \"Restart to update\" in the menu to install it.": "Choisissez « Redémarrer pour mettre à jour » dans le menu pour l'installer."
 }

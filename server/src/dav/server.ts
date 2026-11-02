@@ -135,7 +135,7 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
   const parentOf = async () => (segs.length ? F.resolvePath(user.id, segs.slice(0, -1)) : undefined);
   let usedCache: number | undefined;
   const used = async () => (usedCache ??= await F.usage(user.id));
-  // macOS's WebDAV client (Finder "Connect to Server", Cloudy Drive's "Mount as a drive") waits 90 s before
+  // macOS's WebDAV client (Finder "Connect to Server") waits 90 s before
   // finishing a mount when the folder reports quota, so it gets none (Finder then shows no free space).
   const quota = !String(req.headers['user-agent'] ?? '').startsWith('WebDAVFS/');
 
@@ -188,7 +188,7 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
       const parent = await parentOf();
       if (!parent || !parent.is_dir) throw new HttpError(409, 'Parent folder does not exist');
       if (node?.is_dir) throw new HttpError(405, 'Is a folder');
-      const { file, size } = await F.streamToTemp(req);
+      const { file, size } = await F.streamToTemp(req, await F.remainingQuota(parent.owner));
       const { node: saved, created } = await F.writeFile(parent, checkName(segs.at(-1)!), file, size);
       res.writeHead(created ? 201 : 204, { ETag: `"${saved.etag}"`, 'Content-Length': 0 });
       return void res.end();

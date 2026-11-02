@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import UIKit
 
 /// Debug builds only: opens a screen from the launch environment so App Store screenshots can be taken without
 /// tapping (see ios/appstore/README.md). `CLOUDY_OPEN` = `folder:<id>:<name>`, `text:<id>:<name>` or `share:<id>:<name>`
@@ -22,6 +23,21 @@ enum Screenshots {
     }
 
     static var contact: String? { env["CLOUDY_CONTACT"] }
+
+    /// `CLOUDY_SHARE_TEST=1`: opens the system share sheet with a small text file, to check that the "Cloudy"
+    /// share extension is offered and works (simulator testing).
+    @MainActor static func shareTest() {
+        guard env["CLOUDY_SHARE_TEST"] != nil else { return }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("share-test.txt")
+        try? "hello from the share sheet".write(to: url, atomically: true, encoding: .utf8)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            guard let root = scene?.keyWindow?.rootViewController else { return }
+            var top = root
+            while let p = top.presentedViewController { top = p }
+            top.present(UIActivityViewController(activityItems: [url], applicationActivities: nil), animated: true)
+        }
+    }
 
     enum Step {
         case tab(Int)

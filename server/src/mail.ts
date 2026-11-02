@@ -6,6 +6,7 @@ import type { Transporter } from 'nodemailer';
 import type { IncomingMessage } from 'node:http';
 import type { Router, Ctx } from './http.ts';
 import { json, noContent, readJson, HttpError, publicOrigin, clientIp } from './http.ts';
+import { config } from './config.ts';
 import { q, one } from './db.ts';
 import type { User } from './auth.ts';
 import { hashPassword, checkPasswordStrength, newToken, sha256, forgetBasicCache } from './auth.ts';
@@ -24,10 +25,23 @@ export interface MailConfig {
   password: string;
   fromName: string;
   fromEmail: string;
+  /** Address of the web app as the admin opened it when saving these settings (used for links in emails). */
+  origin?: string;
 }
 
 const RESET_MINUTES = 60;
-const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
+export const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
+
+/**
+ * Origin for links in emails. The Host header of an unauthenticated request (password reset) must not decide
+ * it: an attacker could request a reset for someone else with `Host: evil.example` and the victim would get a
+ * genuine Cloudy email pointing at the attacker's site. So only PUBLIC_URL counts, or the address the admin
+ * used when saving the email settings. Returns null when neither is known.
+ */
+export async function mailOrigin(): Promise<string | null> {
+  if (config.publicUrl) return new URL(config.publicUrl).origin;
+  return (await mailConfig())?.origin || null;
+}
 
 // ---------------------------------------------------------------- settings
 
@@ -132,7 +146,7 @@ export async function notifyShare(req: IncomingMessage, sharer: User, nodeId: nu
       to: r.email, lang,
       subject: mailText(lang, 'shareSubject', vars),
       text: mailText(lang, node.is_dir ? 'shareFolder' : 'shareFile', vars),
-      action: { label: mailText(lang, 'open'), url: `${publicOrigin(req)}/#/shared-in` },
+      action: { label: mailText(lang, 'open'), url: `${(await mailOrigin()) ?? publicOrigin(req)}/#/shared-in` },
     });
   }
 }
@@ -147,7 +161,7 @@ export async function notifyPasswordChanged(req: IncomingMessage, userId: string
     to: u.email, lang,
     subject: mailText(lang, 'pwSubject'),
     text: mailText(lang, 'pwText', { user: u.display_name || userId, id: userId, ip: clientIp(req) }),
-    action: { label: mailText(lang, 'open'), url: publicOrigin(req) },
+    action: { label: mailText(lang, 'open'), url: (await mailOrigin()) ?? publicOrigin(req) },
   });
 }
 
@@ -180,6 +194,11 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     const login = String((await readJson(req)).login ?? '').trim();
     if (!login || !(await mailEnabled())) return noContent(res);
     if (!allowReset(`ip:${clientIp(req)}`, 5, 3600_000)) throw new HttpError(429, 'Too many requests, try again later');
+    const origin = await mailOrigin();
+    if (!origin) {
+      console.warn('Password reset requested but neither PUBLIC_URL nor the email settings know the address of this server: set PUBLIC_URL or save the email settings again.');
+      return noContent(res);
+    }
     const u = await one<{ id: string; email: string; display_name: string; language: string | null }>(
       `SELECT id, email, display_name, language FROM users WHERE (id = $1 OR lower(email) = lower($1)) AND NOT disabled AND email <> '' LIMIT 1`, [login]);
     if (u && allowReset(`user:${u.id}`, 3, 3600_000)) {
@@ -192,7 +211,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
         to: u.email, lang,
         subject: mailText(lang, 'resetSubject'),
         text: mailText(lang, 'resetText', { user: u.display_name || u.id, id: u.id, minutes: RESET_MINUTES }),
-        action: { label: mailText(lang, 'resetAction'), url: `${publicOrigin(req)}/#/reset/${token}` },
+        action: { label: mailText(lang, 'resetAction'), url: `${origin}/#/reset/${token}` },
       });
     }
     noContent(res);
@@ -238,6 +257,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
       password: typeof b.password === 'string' && b.password ? b.password : (b.clearPassword ? '' : prev?.password ?? ''),
       fromName: String(b.fromName ?? '').trim().slice(0, 80) || 'Cloudy',
       fromEmail,
+      origin: publicOrigin(req), // the admin's own request: a trustworthy address for links in emails
     });
     noContent(res);
   }));

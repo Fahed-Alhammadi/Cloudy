@@ -54,7 +54,7 @@ export class Router {
       pathMatched = true;
       if (r.method !== method && !(method === 'HEAD' && r.method === 'GET')) continue;
       const params: Record<string, string> = {};
-      r.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
+      r.keys.forEach((k, i) => (params[k] = decodePath(m[i + 1])));
       return { handler: r.handler, params };
     }
     if (pathMatched) throw new HttpError(405, 'Method not allowed');
@@ -106,12 +106,13 @@ export function parseCookies(req: IncomingMessage): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (req.headers.cookie ?? '').split(';')) {
     const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+    if (i > 0) try { out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch { /* malformed: ignored */ }
   }
   return out;
 }
 
 export function isHttps(req: IncomingMessage): boolean {
+  if (config.publicUrl.startsWith('https://')) return true; // the address users open: cookies must be Secure
   if (config.trustProxy) return req.headers['x-forwarded-proto'] === 'https';
   return 'encrypted' in req.socket && !!req.socket.encrypted;
 }
@@ -183,6 +184,21 @@ export function clientIp(req: IncomingMessage): string {
   ].filter(Boolean);
   for (let i = chain.length - 1; i >= 0; i--) if (!isLocalIp(chain[i])) return chain[i];
   return chain[0] || 'unknown';
+}
+
+/** `decodeURIComponent` that answers 400 instead of crashing the request on `%ZZ`. */
+export function decodePath(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    throw new HttpError(400, 'Bad URL encoding');
+  }
+}
+
+/** A numeric id from the URL; anything else is 404 (not a database error). */
+export function numId(s: string): string {
+  if (!/^\d{1,18}$/.test(s)) throw new HttpError(404, 'Not found');
+  return s;
 }
 
 /** Validates a single file/folder name. */

@@ -46,7 +46,9 @@ export class Updater {
   constructor(onChange: (s: UpdateState) => void) {
     this.onChange = onChange;
     autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
+    // macOS updates are verified by Squirrel against the running app's signature. Windows builds are unsigned and
+    // Linux has no signature check, so there a downloaded update is installed only when the user asks for it.
+    autoUpdater.autoInstallOnAppQuit = process.platform === 'darwin';
     autoUpdater.on('download-progress', (p) => {
       if (this.state.state === 'downloading') this.set({ ...this.state, percent: Math.round(p.percent) });
     });

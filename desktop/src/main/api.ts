@@ -32,7 +32,21 @@ export function normalizeServer(input: string): string {
   let s = input.trim().replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
   const u = new URL(s);
+  // Plain http:// would send the password and the device token in the clear: only on the local network.
+  if (u.protocol === 'http:' && !isPrivateHost(u.hostname)) throw new Error('HTTPS_REQUIRED');
   return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+}
+
+/** localhost, .local/.lan/.home.arpa names and private IPv4/IPv6 ranges (like the iPhone app's local-network rule). */
+export function isPrivateHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.home.arpa') || h === '::1') return true;
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    return a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  return h.startsWith('fe80:') || h.startsWith('fd') || h.startsWith('fc');
 }
 
 export class Api {

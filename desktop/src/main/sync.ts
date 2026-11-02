@@ -52,10 +52,11 @@ export interface EngineOptions {
   live?: boolean;
 }
 
-type MessageKey = 'case' | 'windowsName' | 'spaces' | 'noParent' | 'locked';
+type MessageKey = 'case' | 'windowsName' | 'spaces' | 'noParent' | 'locked' | 'badName';
 const MESSAGES: Record<MessageKey, string> = {
   case: 'Another item has the same name with different upper/lower case',
   windowsName: 'The name is not allowed on Windows',
+  badName: 'The name is not allowed',
   spaces: 'Names cannot start or end with a space',
   noParent: 'Its folder is not on the server yet',
   locked: 'The file is in use by another program',
@@ -272,6 +273,8 @@ export class SyncEngine extends EventEmitter {
   }
 
   private checkName(name: string): string | null {
+    // Never let a name (local or from the server) escape the sync folder or break a path.
+    if (!name || name === '.' || name === '..' || /[\/\\\0]/.test(name)) return this.msg('badName');
     if (name !== name.trim()) return this.msg('spaces');
     if ((this.o.platform ?? process.platform) === 'win32' && WINDOWS_BAD.test(name)) return this.msg('windowsName');
     return null;

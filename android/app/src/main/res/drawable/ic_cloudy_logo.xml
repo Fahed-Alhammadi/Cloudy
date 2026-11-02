@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Cloudy mark as shown in the app (login, welcome): the launcher artwork on its rounded sky tile. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="72dp" android:height="72dp"
+    android:viewportWidth="72" android:viewportHeight="72">
+    <path android:pathData="M16,0h40a16,16 0 0,1 16,16v40a16,16 0 0,1 -16,16h-40a16,16 0 0,1 -16,-16v-40a16,16 0 0,1 16,-16z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:startColor="#4DA3FF" android:endColor="#0A55C4" android:startY="0" android:endY="72" android:type="linear" />
+        </aapt:attr>
+    </path>
+    <group android:translateX="-18" android:translateY="-16.2">
+        <path android:fillColor="#063B8C" android:fillAlpha="0.45" android:pathData="M34.64,57.98a7.04,7.04 0 1,1 14.08,0a7.04,7.04 0 1,1 -14.08,0ZM40.8,52.7a10.56,10.56 0 1,1 21.12,0a10.56,10.56 0 1,1 -21.12,0ZM52.68,54.46a9.24,9.24 0 1,1 18.48,0a9.24,9.24 0 1,1 -18.48,0ZM63.68,58.86a6.16,6.16 0 1,1 12.32,0a6.16,6.16 0 1,1 -12.32,0ZM39.48,56.22H71.16a4.84,4.84 0 0,1 4.84,4.84V61.06a4.84,4.84 0 0,1 -4.84,4.84H39.48a4.84,4.84 0 0,1 -4.84,-4.84V61.06a4.84,4.84 0 0,1 4.84,-4.84Z" />
+    </group>
+    <group android:translateX="-18" android:translateY="-18">
+        <path android:fillColor="#FFFFFF" android:pathData="M34.64,57.98a7.04,7.04 0 1,1 14.08,0a7.04,7.04 0 1,1 -14.08,0ZM40.8,52.7a10.56,10.56 0 1,1 21.12,0a10.56,10.56 0 1,1 -21.12,0ZM52.68,54.46a9.24,9.24 0 1,1 18.48,0a9.24,9.24 0 1,1 -18.48,0ZM63.68,58.86a6.16,6.16 0 1,1 12.32,0a6.16,6.16 0 1,1 -12.32,0ZM39.48,56.22H71.16a4.84,4.84 0 0,1 4.84,4.84V61.06a4.84,4.84 0 0,1 -4.84,4.84H39.48a4.84,4.84 0 0,1 -4.84,-4.84V61.06a4.84,4.84 0 0,1 4.84,-4.84Z" />
+    </group>
+</vector>

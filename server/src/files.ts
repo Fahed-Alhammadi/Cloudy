@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile } from 'node:fs/promises';
+import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile, readdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Transform } from 'node:stream';
@@ -80,13 +80,14 @@ export async function dropBlobs(blobs: (string | null)[]): Promise<void> {
 }
 
 /** Streams a request body into a temp file. */
-export async function streamToTemp(stream: Readable): Promise<{ file: string; size: number }> {
+/** Spools a request body to DATA_DIR/tmp; `max` (bytes, e.g. the owner's remaining quota) stops it before the disk fills. */
+export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ file: string; size: number }> {
   const file = tmpPath(randomUUID());
   let size = 0;
   const counter = new Transform({
     transform(chunk, _enc, cb) {
       size += chunk.length;
-      cb(null, chunk);
+      cb(size > max ? new HttpError(507, 'Storage quota exceeded') : null, chunk);
     },
   });
   try {
@@ -290,6 +291,14 @@ export async function usage(owner: string, db: Db = pool): Promise<number> {
   return r?.used ?? 0;
 }
 
+/** Bytes the owner may still store (Infinity without a quota); counts uploads in progress as used. */
+export async function remainingQuota(owner: string): Promise<number> {
+  const u = await one<{ quota_bytes: number | null }>(`SELECT quota_bytes FROM users WHERE id = $1`, [owner]);
+  if (u?.quota_bytes == null) return Infinity;
+  const pending = await one<{ n: number }>(`SELECT COALESCE(sum(size), 0)::bigint AS n FROM uploads WHERE owner = $1`, [owner]);
+  return Math.max(0, Number(u.quota_bytes) - (await usage(owner)) - Number(pending?.n ?? 0));
+}
+
 async function checkQuota(db: Db, owner: string, extra: number): Promise<void> {
   const u = await one<{ quota_bytes: number | null }>(`SELECT quota_bytes FROM users WHERE id = $1`, [owner], db);
   if (u?.quota_bytes != null && (await usage(owner, db)) + extra > u.quota_bytes) {
@@ -479,16 +488,22 @@ export async function restoreNode(node: Node): Promise<Node> {
 
 /** Permanently deletes a node, its subtree, versions and blobs. */
 export async function purgeNode(id: number): Promise<void> {
-  const blobs = await q<{ blob: string }>(
+  const rows = await q<{ id: string; blob: string | null }>(
     `WITH RECURSIVE s AS (
        SELECT id, blob FROM nodes WHERE id = $1
        UNION ALL SELECT n.id, n.blob FROM nodes n JOIN s ON n.parent_id = s.id)
-     SELECT blob FROM s WHERE blob IS NOT NULL
-     UNION ALL SELECT v.blob FROM versions v WHERE v.node_id IN (SELECT id FROM s)`,
+     SELECT id::text, blob FROM s
+     UNION ALL SELECT NULL, v.blob FROM versions v WHERE v.node_id IN (SELECT id FROM s)`,
     [id],
   );
   await q(`DELETE FROM nodes WHERE id = $1`, [id]);
-  await dropBlobs(blobs.map((b) => b.blob));
+  await dropBlobs(rows.map((r) => r.blob));
+  // Office previews of the purged files (cache/previews/<id>-<etag>.pdf) go too.
+  const ids = new Set(rows.map((r) => r.id).filter(Boolean));
+  const previews = path.join(config.dataDir, 'cache', 'previews');
+  for (const f of await readdir(previews).catch(() => [] as string[])) {
+    if (ids.has(f.split('-')[0])) await rm(path.join(previews, f), { force: true });
+  }
 }
 
 export async function listTrash(owner: string): Promise<Node[]> {

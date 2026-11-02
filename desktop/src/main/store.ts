@@ -33,7 +33,7 @@ async function readJson<T>(name: string): Promise<T | null> {
 
 async function writeJson(name: string, data: unknown): Promise<void> {
   const tmp = file(`${name}.tmp`);
-  await writeFile(tmp, JSON.stringify(data));
+  await writeFile(tmp, JSON.stringify(data), { mode: 0o600 }); // settings hold the device token: this user only
   await rename(tmp, file(name));
 }
 

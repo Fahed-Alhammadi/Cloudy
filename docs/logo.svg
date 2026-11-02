@@ -1,15 +1,2 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Cloudy">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#0B6BCB"/>
-      <stop offset="1" stop-color="#2952B7"/>
-    </linearGradient>
-  </defs>
-  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
-  <g fill="#fff">
-    <circle cx="340" cy="570" r="140"/>
-    <circle cx="530" cy="500" r="190"/>
-    <circle cx="700" cy="580" r="130"/>
-    <rect x="340" y="560" width="360" height="150"/>
-  </g>
-</svg>
+<!-- Cloudy mark (generated: scratch icon.py, one geometry for every platform). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4DA3FF"/><stop offset="1" stop-color="#0A55C4"/></linearGradient></defs><rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#sky)"/><path fill="#063B8C" fill-opacity="0.45" d="M214.63,601.29a108.13,108.13 0 1,1 216.27,0a108.13,108.13 0 1,1 -216.27,0ZM309.25,520.19a162.2,162.2 0 1,1 324.4,0a162.2,162.2 0 1,1 -324.4,0ZM491.72,547.23a141.93,141.93 0 1,1 283.85,0a141.93,141.93 0 1,1 -283.85,0ZM660.68,614.81a94.62,94.62 0 1,1 189.24,0a94.62,94.62 0 1,1 -189.24,0ZM288.97,574.26H775.58a74.34,74.34 0 0,1 74.34,74.34V648.6a74.34,74.34 0 0,1 -74.34,74.34H288.97a74.34,74.34 0 0,1 -74.34,-74.34V648.6a74.34,74.34 0 0,1 74.34,-74.34Z"/><path fill="#fff" d="M214.63,572.62a108.13,108.13 0 1,1 216.27,0a108.13,108.13 0 1,1 -216.27,0ZM309.25,491.52a162.2,162.2 0 1,1 324.4,0a162.2,162.2 0 1,1 -324.4,0ZM491.72,518.55a141.93,141.93 0 1,1 283.85,0a141.93,141.93 0 1,1 -283.85,0ZM660.68,586.14a94.62,94.62 0 1,1 189.24,0a94.62,94.62 0 1,1 -189.24,0ZM288.97,545.59H775.58a74.34,74.34 0 0,1 74.34,74.34V619.93a74.34,74.34 0 0,1 -74.34,74.34H288.97a74.34,74.34 0 0,1 -74.34,-74.34V619.93a74.34,74.34 0 0,1 74.34,-74.34Z"/></svg>

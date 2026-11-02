@@ -83,6 +83,7 @@
     <string name="login_code">Código de verificación</string>
     <string name="login_code_hint">De tu app de autenticación o un código de recuperación</string>
     <string name="login_cannot_reach">No se puede conectar con el servidor: %1$s</string>
+    <string name="login_https_required">Usa una dirección https://. El http:// simple solo funciona con un servidor en tu red local.</string>
     <string name="login_button">Iniciar sesión</string>
     <string name="login_forgot">¿Has olvidado la contraseña?</string>
     <string name="login_token_note">Tu contraseña se cambia por un token del dispositivo, visible en la web en Ajustes → Contraseñas de aplicación.</string>
@@ -254,4 +255,21 @@
     <string name="move_copy_n">Mover o copiar %1$d elementos</string>
     <string name="send_files_only">No se pueden enviar carpetas. Selecciona archivos.</string>
     <string name="n_failed">%1$d fallaron</string>
+    <!-- First launch -->
+    <string name="welcome_title">Bienvenido a Cloudy</string>
+    <string name="welcome_intro">Antes de iniciar sesión, elige qué puede usar Cloudy en este teléfono. Nada es obligatorio y puedes cambiar cada opción más tarde en los ajustes del sistema.</string>
+    <string name="welcome_network">Red</string>
+    <string name="welcome_network_text">Cloudy solo se conecta al servidor en el que inicias sesión, por Wi-Fi o datos móviles. Si tu teléfono pregunta si Cloudy puede usar la red, permítelo.</string>
+    <string name="welcome_offline">Sin conexión</string>
+    <string name="welcome_photos">Fotos y vídeos</string>
+    <string name="welcome_photos_text">Copia automáticamente las fotos y vídeos nuevos a tu servidor (Copia de fotos en Más).</string>
+    <string name="welcome_scanner">Escáner de documentos</string>
+    <string name="welcome_scanner_text">Escanea documentos en papel a PDF en su propia pantalla de cámara; no necesita permiso.</string>
+    <string name="welcome_lock">Bloqueo de la app</string>
+    <string name="welcome_lock_text">Bloquea la app con tu huella, tu cara o el bloqueo de pantalla (Bloqueo de la app en Más); no necesita permiso.</string>
+    <string name="welcome_footer">Cloudy solo se conecta al servidor en el que inicias sesión y no recopila datos.</string>
+    <string name="welcome_allow">Permitir</string>
+    <string name="welcome_allowed">Permitido</string>
+    <string name="welcome_settings">Ajustes</string>
+    <string name="welcome_continue">Continuar</string>
 </resources>

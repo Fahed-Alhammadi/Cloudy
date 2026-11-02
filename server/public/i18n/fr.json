@@ -358,6 +358,7 @@
  "You have unsaved changes.": "Vous avez des modifications non enregistrées.",
  "You will no longer be able to sign in with \"{name}\". Also delete it from the device or password manager.": "Vous ne pourrez plus vous connecter avec « {name} ». Supprimez-la aussi de l’appareil ou du gestionnaire de mots de passe.",
  "Your device will ask you to confirm with your fingerprint, face, screen lock or security key.": "Votre appareil vous demandera de confirmer avec votre empreinte, votre visage, le verrouillage de l'écran ou une clé de sécurité.",
+ "Your files, calendars and contacts, on your own server.": "Vos fichiers, calendriers et contacts, sur votre propre serveur.",
  "Your language is used here, in the Android app and in emails. Your email is also used for password reset links and security notices.": "Votre langue est utilisée ici, dans l'application Android et dans les e-mails. Votre e-mail sert aussi aux liens de réinitialisation du mot de passe et aux alertes de sécurité.",
  "Your password was changed. Log in with the new one.": "Votre mot de passe a été modifié. Connectez-vous avec le nouveau.",
  "Your session has expired. Please log in again.": "Votre session a expiré. Veuillez vous reconnecter.",

@@ -42,7 +42,11 @@ object AppLock {
         if (backgroundSince == 0L || SystemClock.elapsedRealtime() - backgroundSince > TIMEOUT_MS) _locked.value = true
     }
 
-    fun onStop() { backgroundSince = SystemClock.elapsedRealtime() }
+    fun onStop() {
+        backgroundSince = SystemClock.elapsedRealtime()
+        // A prompt that disappears without a callback (activity recreated under it) must not block the next one.
+        prompting = false
+    }
 
     /** Asks for the fingerprint / face / screen lock and unlocks on success. */
     fun unlock(activity: FragmentActivity, title: String, subtitle: String) {

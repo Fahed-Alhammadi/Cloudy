@@ -50,23 +50,34 @@ export function checkPasswordStrength(pw: unknown): string {
   return pw;
 }
 
-// ---- brute-force protection (per IP, in memory) ----
+// ---- brute-force protection (in memory): per client IP, and per account when one is named ----
+// The account counter stops guessing from many addresses (passwords, 2FA codes, recovery codes); it is
+// looser than the IP one so that a stranger can't lock someone out for long.
 const failures = new Map<string, { n: number; first: number }>();
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILURES = 10;
+const MAX_ACCOUNT_FAILURES = 30;
 
-export function checkRate(req: IncomingMessage): void {
-  const f = failures.get(clientIp(req));
-  if (f && Date.now() - f.first < WINDOW_MS && f.n >= MAX_FAILURES) {
+function limited(key: string, max: number): boolean {
+  const f = failures.get(key);
+  return !!f && Date.now() - f.first < WINDOW_MS && f.n >= max;
+}
+
+export function checkRate(req: IncomingMessage, account?: string): void {
+  if (limited(`ip:${clientIp(req)}`, MAX_FAILURES) || (account && limited(`acct:${account.toLowerCase()}`, MAX_ACCOUNT_FAILURES))) {
     throw new HttpError(429, 'Too many failed attempts, try again later');
   }
 }
 
-export function recordFailure(req: IncomingMessage): void {
-  const ip = clientIp(req);
-  const f = failures.get(ip);
-  if (!f || Date.now() - f.first >= WINDOW_MS) failures.set(ip, { n: 1, first: Date.now() });
-  else f.n++;
+/** `req` null: count against the account only (a signed-in user re-typing their password, not a stranger). */
+export function recordFailure(req: IncomingMessage | null, account?: string): void {
+  const now = Date.now();
+  if (failures.size > 5000) for (const [k, f] of failures) if (now - f.first >= WINDOW_MS) failures.delete(k);
+  for (const key of [...(req ? [`ip:${clientIp(req)}`] : []), ...(account ? [`acct:${account.toLowerCase()}`] : [])]) {
+    const f = failures.get(key);
+    if (!f || now - f.first >= WINDOW_MS) failures.set(key, { n: 1, first: now });
+    else f.n++;
+  }
 }
 
 // ---- server secret for signing link-share cookies ----
@@ -89,13 +100,13 @@ export async function sign(value: string): Promise<string> {
  * answered with 401 + { twoFactor: true } so clients know to ask for it.
  */
 export async function login(req: IncomingMessage, id: string, password: string, code?: string): Promise<User> {
-  checkRate(req);
+  checkRate(req, id);
   const row = await one<User & { password_hash: string; totp_secret: string | null; totp_last_step: number }>(
     `SELECT ${USER_COLS}, password_hash, totp_secret, totp_last_step FROM users WHERE id = $1`,
     [id],
   );
   if (!row || row.disabled || !(await verifyPassword(password, row.password_hash))) {
-    recordFailure(req);
+    recordFailure(req, id);
     throw new HttpError(401, 'Invalid username or password');
   }
   if (row.totp_enabled) await checkSecondFactor(req, row, code);
@@ -120,7 +131,7 @@ async function checkSecondFactor(
       [row.id, sha256(normalizeRecoveryCode(c))]);
     if (used) return;
   }
-  recordFailure(req);
+  recordFailure(req, row.id);
   throw new HttpError(401, 'Invalid two-factor code', { twoFactor: true });
 }
 
@@ -142,13 +153,14 @@ export async function loginWithPasskey(req: IncomingMessage, body: Record<string
     recordFailure(req);
     throw new HttpError(401, 'This passkey is not registered with Cloudy');
   }
+  checkRate(req, key.user_id);
   let count: number;
   try {
     count = verifyAssertion(req, {
       publicKey: key.public_key, alg: key.alg, signCount: Number(key.sign_count), userHandle: await passkeyUserHandle(key.user_id),
     }, body);
   } catch (e) {
-    recordFailure(req);
+    recordFailure(req, key.user_id);
     throw e;
   }
   // Conditional update: a replayed or parallel assertion with the same counter loses.
@@ -167,6 +179,22 @@ export async function createSession(req: IncomingMessage, res: ServerResponse, u
     [sha256(token), userId, config.sessionDays],
   );
   setCookie(req, res, SESSION_COOKIE, token, config.sessionDays * 86400);
+}
+
+/** Signs the user out everywhere except the browser making this request (after a password change). */
+export async function dropOtherSessions(req: IncomingMessage, userId: string): Promise<void> {
+  const token = parseCookies(req)[SESSION_COOKIE];
+  await q(`DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, [userId, token ? sha256(token) : '']);
+}
+
+/** The user's password, checked with the same brute-force limits as signing in. */
+export async function requirePassword(req: IncomingMessage, userId: string, password: unknown, message = 'Wrong password'): Promise<void> {
+  checkRate(req, userId);
+  const row = await one<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+  if (!row || !(await verifyPassword(String(password ?? ''), row.password_hash))) {
+    recordFailure(null, userId);
+    throw new HttpError(403, message);
+  }
 }
 
 export async function destroySession(req: IncomingMessage, res: ServerResponse): Promise<void> {

@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, checkName, parseCookies, setCookie, HttpError } from '../http.ts';
+import { json, noContent, readJson, checkName, parseCookies, setCookie, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
 import { newToken, hashPassword, verifyPassword, sign, checkRate, recordFailure } from '../auth.ts';
@@ -50,7 +50,7 @@ function parseExpiry(v: unknown): Date | null {
 }
 
 async function ownShare(user: User, id: string): Promise<Share> {
-  const s = await one<Share>(`SELECT * FROM shares WHERE id = $1`, [id]);
+  const s = await one<Share>(`SELECT * FROM shares WHERE id = $1`, [numId(id)]);
   if (!s || s.owner !== user.id) throw new HttpError(404, 'Share not found');
   return s;
 }
@@ -233,6 +233,6 @@ export function registerShares(r: Router, authed: Wrap) {
     const b = await readJson(req);
     const { s, node } = await linkNode(req, params.token, String(b.parentId));
     if (!s.can_edit) throw new HttpError(403, 'Read-only link');
-    json(res, await startUpload(node, b.name, b.size), 201);
+    json(res, await startUpload(node, b.name, b.size, { shareId: s.id }), 201);
   });
 }

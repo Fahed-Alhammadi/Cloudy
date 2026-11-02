@@ -27,7 +27,7 @@ struct MainView: View {
             await Live.run()
         }
         #if DEBUG
-        .task { await Screenshots.runTour() }
+        .task { Screenshots.shareTest(); await Screenshots.runTour() }
         .onReceive(NotificationCenter.default.publisher(for: .tour)) { note in
             if case .tab(let t) = note.object as? Screenshots.Step { withAnimation { tab = t } }
         }

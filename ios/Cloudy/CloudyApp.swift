@@ -18,19 +18,23 @@ struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
     @AppStorage("appLock") private var appLock = false
+    @AppStorage("welcomed") private var welcomed = false
     @State private var locked = UserDefaults.standard.bool(forKey: "appLock")
 
     var body: some View {
-        ZStack {
+        Group {
             if session.isLoggedIn {
                 MainView()
+            } else if !welcomed {
+                WelcomeView { welcomed = true }
             } else {
                 LoginView()
             }
-            if locked && session.isLoggedIn {
-                LockView(unlock: unlock)
-            }
         }
+        // The lock lives in its own window above everything, including sheets, the share sheet and Quick Look,
+        // which are presented above the root view and would otherwise stay visible and usable while "locked".
+        .onChange(of: locked, initial: true) { _, l in LockWindow.shared.set(visible: l && session.isLoggedIn, unlock: unlock) }
+        .onChange(of: session.isLoggedIn) { _, on in LockWindow.shared.set(visible: locked && on, unlock: unlock) }
         .onChange(of: phase) { _, p in
             // Lock on leaving the app; the lock screen also hides content in the app switcher.
             // Only prompt when coming back from the background: Face ID itself makes the app inactive.
@@ -57,6 +61,25 @@ struct RootView: View {
                 if ok { locked = false }
             }
         }
+    }
+}
+
+/// A window at alert level that shows `LockView` while the app is locked.
+@MainActor
+private final class LockWindow {
+    static let shared = LockWindow()
+    private var window: UIWindow?
+
+    func set(visible: Bool, unlock: @escaping () -> Void) {
+        if !visible { window?.isHidden = true; window = nil; return }
+        guard window == nil else { return }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        let w = UIWindow(windowScene: scene)
+        w.windowLevel = .alert + 1
+        w.rootViewController = UIHostingController(rootView: LockView(unlock: unlock))
+        w.isHidden = false
+        window = w
     }
 }
 

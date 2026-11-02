@@ -358,6 +358,7 @@
  "You have unsaved changes.": "Du hast ungespeicherte Änderungen.",
  "You will no longer be able to sign in with \"{name}\". Also delete it from the device or password manager.": "Du kannst dich dann nicht mehr mit „{name}“ anmelden. Lösche ihn auch auf dem Gerät oder im Passwortmanager.",
  "Your device will ask you to confirm with your fingerprint, face, screen lock or security key.": "Dein Gerät bittet dich, mit Fingerabdruck, Gesicht, Displaysperre oder Sicherheitsschlüssel zu bestätigen.",
+ "Your files, calendars and contacts, on your own server.": "Deine Dateien, Kalender und Kontakte, auf deinem eigenen Server.",
  "Your language is used here, in the Android app and in emails. Your email is also used for password reset links and security notices.": "Deine Sprache gilt hier, in der Android-App und in E-Mails. Deine E-Mail-Adresse wird auch für Links zum Zurücksetzen des Passworts und Sicherheitshinweise verwendet.",
  "Your password was changed. Log in with the new one.": "Dein Passwort wurde geändert. Melde dich mit dem neuen an.",
  "Your session has expired. Please log in again.": "Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.",

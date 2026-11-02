@@ -90,5 +90,8 @@
   "conflicted copy": "نسخة متعارضة",
   "{count} files were deleted on the server. Delete them on this computer too?": "حُذف {count} ملف على الخادم. هل تريد حذفها على هذا الكمبيوتر أيضًا؟",
   "{count} files were deleted on this computer. Delete them on the server too?": "حُذف {count} ملف على هذا الكمبيوتر. هل تريد حذفها على الخادم أيضًا؟",
-  "{count} items could not be synced": "تعذّرت مزامنة {count} عنصر"
+  "{count} items could not be synced": "تعذّرت مزامنة {count} عنصر",
+  "The name is not allowed": "الاسم غير مسموح به",
+  "Use an https:// address. Plain http:// only works for a server on your local network.": "استخدم عنوانًا يبدأ بـ https://‎. يعمل http://‎ فقط مع خادم على شبكتك المحلية.",
+  "Choose \"Restart to update\" in the menu to install it.": "اختر «إعادة التشغيل للتحديث» من القائمة لتثبيته."
 }

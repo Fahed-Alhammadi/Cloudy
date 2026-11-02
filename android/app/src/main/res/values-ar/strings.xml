@@ -83,6 +83,7 @@
     <string name="login_code">رمز التحقق</string>
     <string name="login_code_hint">من تطبيق المصادقة، أو رمز استرداد</string>
     <string name="login_cannot_reach">تعذّر الوصول إلى الخادم: %1$s</string>
+    <string name="login_https_required">استخدم عنوانًا يبدأ بـ https://‎. يعمل http://‎ فقط مع خادم على شبكتك المحلية.</string>
     <string name="login_button">تسجيل الدخول</string>
     <string name="login_forgot">نسيت كلمة المرور؟</string>
     <string name="login_token_note">يتم استبدال كلمة المرور برمز للجهاز، يظهر ضمن الإعدادات ← كلمات مرور التطبيقات على الويب.</string>
@@ -254,4 +255,21 @@
     <string name="move_copy_n">نقل أو نسخ %1$d عناصر</string>
     <string name="send_files_only">لا يمكن إرسال المجلدات. حدّد ملفات.</string>
     <string name="n_failed">فشل %1$d</string>
+    <!-- First launch -->
+    <string name="welcome_title">مرحبًا بك في Cloudy</string>
+    <string name="welcome_intro">قبل تسجيل الدخول، اختر ما يمكن لـ Cloudy استخدامه على هذا الهاتف. لا شيء إلزامي، ويمكنك تغيير كل خيار لاحقًا في إعدادات النظام.</string>
+    <string name="welcome_network">الشبكة</string>
+    <string name="welcome_network_text">يتصل Cloudy فقط بالخادم الذي تسجّل الدخول إليه عبر Wi-Fi أو بيانات الهاتف. إذا سألك هاتفك هل يُسمح لـ Cloudy باستخدام الشبكة، فاسمح له.</string>
+    <string name="welcome_offline">غير متصل</string>
+    <string name="welcome_photos">الصور ومقاطع الفيديو</string>
+    <string name="welcome_photos_text">انسخ الصور ومقاطع الفيديو الجديدة احتياطيًا إلى خادمك تلقائيًا (النسخ الاحتياطي للصور في المزيد).</string>
+    <string name="welcome_scanner">ماسح المستندات</string>
+    <string name="welcome_scanner_text">يمسح المستندات الورقية إلى PDF في شاشة كاميرا خاصة به؛ لا يحتاج إلى إذن.</string>
+    <string name="welcome_lock">قفل التطبيق</string>
+    <string name="welcome_lock_text">اقفل التطبيق ببصمة الإصبع أو الوجه أو قفل الشاشة (قفل التطبيق في المزيد)؛ لا يحتاج إلى إذن.</string>
+    <string name="welcome_footer">يتصل Cloudy فقط بالخادم الذي تسجّل الدخول إليه ولا يجمع أي بيانات.</string>
+    <string name="welcome_allow">السماح</string>
+    <string name="welcome_allowed">مسموح</string>
+    <string name="welcome_settings">الإعدادات</string>
+    <string name="welcome_continue">متابعة</string>
 </resources>

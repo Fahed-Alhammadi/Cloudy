@@ -91,7 +91,6 @@ final class API: @unchecked Sendable {
 
     // MARK: auth
 
-    /// Shared with the macOS Cloudy Drive app (drive/), which names its token "Cloudy Drive (<Mac name>)".
     static var deviceName: String {
         #if os(iOS)
         var info = utsname()
@@ -99,7 +98,7 @@ final class API: @unchecked Sendable {
         let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         return "\(UIDevice.current.model) (\(machine))"
         #else
-        return "Cloudy Drive (\(Host.current().localizedName ?? "Mac"))"
+        return "Mac (\(Host.current().localizedName ?? "Mac"))"
         #endif
     }
 

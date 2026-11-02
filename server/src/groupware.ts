@@ -3,6 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { q, one, tx } from './db.ts';
 import { HttpError } from './http.ts';
 
+let registeredZones = 0;
+const MAX_ZONES = 500;
+
 export interface Kind {
   key: 'cal' | 'card';
   coll: 'calendars' | 'addressbooks';
@@ -92,9 +95,13 @@ export function parseComponent(data: string): ICAL.Component {
   }
   if (Array.isArray(parsed) && Array.isArray(parsed[0])) parsed = parsed[0];
   const comp = new ICAL.Component(parsed);
+  // The registry is process-wide: a user's VTIMEZONE must not redefine a zone others already use, and it stays bounded.
   for (const tz of comp.getAllSubcomponents('vtimezone')) {
     try {
+      const tzid = String(tz.getFirstPropertyValue('tzid') ?? '');
+      if (!tzid || ICAL.TimezoneService.has(tzid) || registeredZones >= MAX_ZONES) continue;
       ICAL.TimezoneService.register(tz);
+      registeredZones++;
     } catch {
       /* ignore broken timezone definitions */
     }

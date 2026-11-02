@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import Security
 
 /// Server address and signed-in user (UserDefaults); the device token lives in the Keychain.
 @Observable
@@ -12,9 +11,15 @@ final class Session {
     var isLoggedIn: Bool { user != nil && API.shared.token != nil }
 
     private let defaults = UserDefaults.standard
+    /// Shared with the share extension (App Group): where the server is; the device token is in the shared Keychain.
+    static let sharedDefaults = UserDefaults(suiteName: appGroup) ?? .standard
 
     private init() {
-        server = defaults.string(forKey: "server") ?? ""
+        // The server address moved to the App Group so that "Share to Cloudy" can reach the server too.
+        if Session.sharedDefaults.string(forKey: "server") == nil, let old = defaults.string(forKey: "server") {
+            Session.sharedDefaults.set(old, forKey: "server")
+        }
+        server = Session.sharedDefaults.string(forKey: "server") ?? ""
         user = defaults.data(forKey: "user").flatMap { try? JSONDecoder().decode(User.self, from: $0) }
         API.shared.server = server
         API.shared.token = Keychain.get("token")
@@ -37,7 +42,7 @@ final class Session {
 
     func signIn(server: String, token: String, user: User) {
         self.server = server
-        defaults.set(server, forKey: "server")
+        Session.sharedDefaults.set(server, forKey: "server")
         Keychain.set("token", token)
         API.shared.server = server
         API.shared.token = token
@@ -63,30 +68,4 @@ final class Session {
         FileCache.clear()
         Task { await Thumbnails.shared.clear() }
     }
-}
-
-/// Minimal generic-password Keychain wrapper (this device only, readable after first unlock).
-enum Keychain {
-    private static func query(_ key: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "io.cloudy.app", kSecAttrAccount as String: key]
-    }
-
-    static func get(_ key: String) -> String? {
-        var q = query(key)
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func set(_ key: String, _ value: String) {
-        delete(key)
-        var q = query(key)
-        q[kSecValueData as String] = Data(value.utf8)
-        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(q as CFDictionary, nil)
-    }
-
-    static func delete(_ key: String) { SecItemDelete(query(key) as CFDictionary) }
 }

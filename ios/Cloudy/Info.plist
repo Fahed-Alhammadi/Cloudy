@@ -42,6 +42,11 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Cloudy connects to your Cloudy server when it is on your local network.</string>
+	<!-- Only used to show the local network permission dialog on first launch (Data/LocalNetwork.swift). -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_cloudy._tcp</string>
+	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Cloudy uses Face ID to unlock the app when App lock is on.</string>
 	<key>NSCameraUsageDescription</key>

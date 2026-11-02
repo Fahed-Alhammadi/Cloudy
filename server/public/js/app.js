@@ -138,7 +138,7 @@ function renderLogin(message, notice = false) {
         passkeyAutofillAvailable().then((ok) => ok && passkeyAbort?.signal.aborted && app.contains(user) && passkeyLogin(true));
       }
     } },
-      h('div', { class: 'brand big' }, icon('cloud'), 'Cloudy'),
+      loginHero(),
       h('label', { class: 'field' }, h('span', {}, t('Username')), user),
       h('label', { class: 'field' }, h('span', {}, t('Password')), pass),
       forgot,
@@ -156,8 +156,16 @@ function renderLogin(message, notice = false) {
 
 function authCard(...kids) {
   passkeyAbort?.abort();
-  app.replaceChildren(h('main', { class: 'login' }, h('form', { class: 'login-card' }, h('div', { class: 'brand big' }, icon('cloud'), 'Cloudy'), ...kids.filter(Boolean))));
+  app.replaceChildren(h('main', { class: 'login' }, h('form', { class: 'login-card' }, loginHero(), ...kids.filter(Boolean))));
   return app.querySelector('form');
+}
+
+/** The mark, the name and what Cloudy is, above the sign-in form. */
+function loginHero() {
+  return h('div', { class: 'login-hero' },
+    h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 64, height: 64 }),
+    h('h1', {}, 'Cloudy'),
+    h('p', { class: 'tagline' }, t('Your files, calendars and contacts, on your own server.')));
 }
 
 function renderForgot(initial = '') {
@@ -244,7 +252,7 @@ function renderShell() {
   main = h('main', { class: 'content', id: 'content', tabindex: -1 });
   const header = h('header', { class: 'topbar' },
     h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), onclick: () => document.body.classList.toggle('nav-open') }, icon('menu')),
-    h('a', { class: 'brand', href: '#/files' }, icon('cloud'), 'Cloudy'),
+    h('a', { class: 'brand', href: '#/files' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
     h('div', { class: 'search' }, icon('search'), search),
     h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), onclick: (e) => showMenu(e.currentTarget, [
       { label: ctx.me.displayName, icon: 'contacts', onclick: () => (location.hash = '#/settings') },

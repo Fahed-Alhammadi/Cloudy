@@ -34,6 +34,7 @@ function messages() {
   return {
     case: t('Another item has the same name with different upper/lower case'),
     windowsName: t('The name is not allowed on Windows'),
+    badName: t('The name is not allowed'),
     spaces: t('Names cannot start or end with a space'),
     noParent: t('Its folder is not on the server yet'),
     locked: t('The file is in use by another program'),
@@ -268,6 +269,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
       return { ok: true };
     } catch (e: any) {
       if (e instanceof ApiError) return { error: e.message, twoFactor: !!e.body?.twoFactor };
+      if (e?.message === 'HTTPS_REQUIRED') return { error: t('Use an https:// address. Plain http:// only works for a server on your local network.') };
       return { error: t('Could not reach the server: {message}', { message: e?.cause?.message ?? e?.message ?? String(e) }) };
     }
   },
@@ -361,7 +363,8 @@ app.whenReady().then(async () => {
   await pickDefaultFolder();
   setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale());
   updater = new Updater((s: UpdateState) => {
-    if (s.state === 'ready') notify(t('Cloudy {version} is ready', { version: s.version }), t('It is installed when you restart or quit Cloudy.'));
+    if (s.state === 'ready') notify(t('Cloudy {version} is ready', { version: s.version }),
+      process.platform === 'darwin' ? t('It is installed when you restart or quit Cloudy.') : t('Choose "Restart to update" in the menu to install it.'));
     refresh();
   });
   tray = new Tray(trayIcon());

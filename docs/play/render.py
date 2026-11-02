@@ -4,7 +4,7 @@ import os, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-CLOUD = '<path fill="#fff" d="M70,72H45a16,16 0,1 1,15.3 -20.6h4A10.3,10.3 0,1 1,70 72Z"/>'
+CLOUD = '<path fill="#fff" d="M34.64,57.98a7.04,7.04 0 1,1 14.08,0a7.04,7.04 0 1,1 -14.08,0ZM40.8,52.7a10.56,10.56 0 1,1 21.12,0a10.56,10.56 0 1,1 -21.12,0ZM52.68,54.46a9.24,9.24 0 1,1 18.48,0a9.24,9.24 0 1,1 -18.48,0ZM63.68,58.86a6.16,6.16 0 1,1 12.32,0a6.16,6.16 0 1,1 -12.32,0ZM39.48,56.22H71.16a4.84,4.84 0 0,1 4.84,4.84V61.06a4.84,4.84 0 0,1 -4.84,4.84H39.48a4.84,4.84 0 0,1 -4.84,-4.84V61.06a4.84,4.84 0 0,1 4.84,-4.84Z"/>'
 BASE = '''<!doctype html><meta charset="utf-8"><style>
 * { margin: 0; box-sizing: border-box; }
 html, body { width: %dpx; height: %dpx; overflow: hidden; }

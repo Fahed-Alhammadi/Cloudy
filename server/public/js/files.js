@@ -186,7 +186,7 @@ function fileTable(opts) {
     tbody,
   );
   if (!opts.items.length) {
-    return h('div', {}, h('div', { class: 'empty' }, icon(opts.emptyIcon || 'folder'), h('p', {}, opts.emptyText || t('Nothing here yet'))));
+    return h('div', {}, h('div', { class: 'empty' }, icon(opts.emptyIcon || 'folder'), h('p', {}, opts.emptyText || t('Nothing here yet')), opts.emptyAction || null));
   }
   return h('div', {}, bar, table);
 }
@@ -405,6 +405,7 @@ export async function renderFolder(main, id, ctx) {
     onOpen: (item) => openItem(item, data.children, opts),
     emptyText: canEdit ? t('Drop files here or use the Upload button') : t('This folder is empty'),
   };
+  if (canEdit) opts.emptyAction = h('button', { class: 'btn primary', type: 'button', onclick: () => fileInput.click() }, icon('upload'), t('Upload files'));
 
   const fileInput = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e) => { uploadAll(filesFromInput(e.target), userUploadTarget(id), reload); e.target.value = ''; } });
   const dirInput = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, onchange: (e) => { uploadAll(filesFromInput(e.target), userUploadTarget(id), reload); e.target.value = ''; } });

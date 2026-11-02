@@ -14,7 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -42,8 +43,27 @@ import androidx.compose.ui.res.stringResource
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.material3.TextButton
+import io.cloudy.app.data.ConnectionCheck
 import io.cloudy.app.work.Jobs
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.IOException
+
+/**
+ * Runs [work], trying again a few times when the connection itself failed (not when the server answered): on the
+ * very first use a phone may still be showing its "allow network access" dialog, and the user's answer arrives
+ * seconds later.
+ */
+suspend fun <T> retryingConnection(attempts: Int = 4, work: suspend () -> T): T {
+    var attempt = 0
+    while (true) {
+        try { return work() } catch (e: IOException) {
+            if (++attempt >= attempts) throw e
+            delay(attempt * 1500L)
+        }
+    }
+}
 
 @Composable
 fun LoginScreen() {
@@ -60,12 +80,19 @@ fun LoginScreen() {
     fun submit() {
         var url = server.trim().trimEnd('/')
         if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://$url"
+        // Plain http:// would send the password and the device token in the clear: only on the local network.
+        if (url.startsWith("http://") && !ConnectionCheck.isPrivateHost(runCatching { java.net.URI(url).host ?: "" }.getOrDefault(""))) {
+            error = context.getString(R.string.login_https_required)
+            return
+        }
         busy = true
         error = null
         scope.launch {
             try {
-                Services.api.checkServer(url)
-                val r = Services.api.login(url, user.trim(), password, "${Build.MANUFACTURER} ${Build.MODEL}", if (needCode) code else null)
+                val r = retryingConnection {
+                    Services.api.checkServer(url)
+                    Services.api.login(url, user.trim(), password, "${Build.MANUFACTURER} ${Build.MODEL}", if (needCode) code else null)
+                }
                 Services.session.signIn(url, r.token, r.user)
                 Jobs.schedule(context)
             } catch (e: io.cloudy.app.data.ApiException) {
@@ -78,6 +105,16 @@ fun LoginScreen() {
         }
     }
 
+    // Reach the server as soon as its address is typed: some phones ask whether the app may use the network on its
+    // first connection, and this way that question comes before "Log in" instead of failing the first attempt.
+    LaunchedEffect(server) {
+        val url = server.trim().trimEnd('/')
+        val host = url.substringAfter("://", "").substringBefore('/')
+        if (host.length < 4 || !(host.contains('.') || host.contains(':'))) return@LaunchedEffect
+        delay(1200)
+        runCatching { Services.api.checkServer(if (url.contains("://")) url else "https://$url") }
+    }
+
     Scaffold { pad ->
         Column(
             Modifier.fillMaxSize().padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -86,7 +123,7 @@ fun LoginScreen() {
         ) {
             Column(Modifier.widthIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp)) {
-                    Icon(Icons.Filled.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                    Image(painterResource(R.drawable.ic_cloudy_logo), null, modifier = Modifier.size(44.dp))
                     Text("  Cloudy", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 }
                 OutlinedTextField(server, { server = it }, label = { Text(stringResource(R.string.login_server)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),

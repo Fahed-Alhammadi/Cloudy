@@ -4,12 +4,11 @@ title: Privacy Policy
 
 # Privacy Policy
 
-Last updated: October 27, 2026
+Last updated: November 2, 2026
 
 This privacy policy explains how the **Cloudy** apps for Android (package `io.cloudy.app`), iPhone (bundle ID `io.cloudy.app`) and
-desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`; Cloudy Drive for macOS, `io.cloudy.drive`) handle your information.
-The table below describes the Android app; the [iPhone app](#iphone-app), [desktop app](#desktop-app) and
-[Cloudy Drive](#cloudy-drive-macos) sections list where they differ.
+desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`) handle your information.
+The table below describes the Android app; the [iPhone app](#iphone-app) and [desktop app](#desktop-app) sections list where they differ.
 Cloudy is developed by Fahed Alhammadi ("we", "us"). The source code is public at
 <https://github.com/Fahed-Alhammadi/cloudy>.
 
@@ -43,6 +42,8 @@ Your files, photos, calendars, contacts and account live on the Cloudy server yo
 
 The app does **not** request access to your location, camera, microphone, phone calls, SMS or phone contacts (the document scanner uses the camera through Google Play services, as described above), and it does not collect advertising IDs or device identifiers.
 
+When you open the app for the first time, a welcome screen explains these uses and lets you grant the *Photos and videos* permission right away or later; you can change it any time in Android's app settings.
+
 ## iPhone app
 
 The iPhone app works like the Android app above, with these differences:
@@ -56,7 +57,13 @@ The iPhone app works like the Android app above, with these differences:
   iPhone and only the finished PDF is uploaded to your server. No Google services are used.
 - **App lock** uses Face ID, Touch ID or your passcode through iOS. The app only learns whether it succeeded.
 - **Language** is chosen in the iOS Settings app (Settings → Cloudy → Language) and stays on the phone.
+- **Share to Cloudy:** the app's share extension appears in other apps' share sheets. The files you choose there are uploaded to your
+  server with the same device token as the app, into the folder you pick; the extension reads nothing else and keeps no copy.
 - **Local network:** iOS may ask to allow access to devices on your local network. This is only used to reach a Cloudy server at a local address.
+- **First launch:** a welcome screen lets you answer the iOS permission dialogs (local network, camera, photos, Face ID) before you sign in,
+  so your first sign-in to a server on your network works right away. Each one is optional and can be changed later in the iOS Settings app.
+  To show the local-network dialog the app briefly announces and looks for a Bonjour service named `_cloudy._tcp` on your network; nothing
+  is sent to your server or anyone else.
 - The app contains no advertising, analytics or tracking, and does not use Apple's advertising identifier. Apple's privacy policy applies
   to the App Store.
 
@@ -73,25 +80,11 @@ The desktop app (macOS, Windows, Linux) only syncs files; it has no calendar, co
 - **Language** follows your account's language on your server, else your computer's.
 - **Updates:** see below. There is no advertising, analytics or tracking.
 
-## Cloudy Drive (macOS)
-
-Cloudy Drive shows your files in Finder and only has files; no calendar, contacts, photo backup or scanner. Where it differs:
-
-- **Files:** Finder lists your files and the files shared with you. A file is downloaded from your server when you open it
-  and kept on your Mac until you choose *Remove Download* or macOS needs the space. Files you add, change, rename, move or
-  delete in the Cloudy location are sent to your server (deleted files go to your server's trash). The app reads nothing
-  outside that location.
-- **Device name:** your Mac's name (for example "Cloudy Drive (my-mac)") labels the device token on your server.
-- **Device token:** stored in the app's own group container on your Mac, which macOS keeps other apps out of. Signing out
-  revokes it on the server and removes the Cloudy location and its downloaded files from your Mac.
-- **Updates:** like the desktop app it asks GitHub once a day whether a newer version exists (see below); it doesn't
-  download anything by itself. There is no advertising, analytics or tracking.
-
 ## App updates
 
 The Android and iPhone apps are updated by Google Play and the App Store; they do not check for or download updates themselves. Google's and Apple's privacy policies apply to their stores.
 
-The desktop app and Cloudy Drive check for a new version once a day (and when you click *Check for updates*) by asking GitHub for the list of
+The desktop app checks for a new version once a day (and when you click *Check for updates*) by asking GitHub for the list of
 Cloudy releases, and downloads new versions from GitHub. These requests carry no account or file information; like any website,
 GitHub sees your IP address and the app's name and version ([GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement)).
 
@@ -101,7 +94,7 @@ We do not sell, rent or share your information with anyone, and we do not have a
 
 - the Cloudy server you sign in to (see above);
 - Google Play services, only when you use the document scanner (see above);
-- GitHub, only for the desktop app's and Cloudy Drive's update check and downloads (see [App updates](#app-updates)).
+- GitHub, only for the desktop app's update check and downloads (see [App updates](#app-updates)).
 
 When you share a file or a link, or export contacts, the information goes only to the people or apps you choose.
 

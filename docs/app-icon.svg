@@ -1,7 +1,2 @@
-<!-- Google Play icon: same artwork as the launcher icon (res/drawable/ic_launcher_foreground.xml on
-     @color/ic_launcher_background), cropped to the 72dp area a launcher shows. Square, no rounded corners:
-     Play applies its own mask. Render to app-icon-512.png (512×512). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="512" height="512">
-  <rect x="18" y="18" width="72" height="72" fill="#0B6BCB"/>
-  <path fill="#FFFFFF" d="M70,72H45a16,16 0,1 1,15.3 -20.6h4A10.3,10.3 0,1 1,70 72Z"/>
-</svg>
+<!-- Google Play icon: square, Play applies its own mask. Render to app-icon-512.png. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4DA3FF"/><stop offset="1" stop-color="#0A55C4"/></linearGradient></defs><rect x="0" y="0" width="512" height="512" rx="0" fill="url(#sky)"/><path fill="#063B8C" fill-opacity="0.45" d="M107.32,300.65a54.07,54.07 0 1,1 108.13,0a54.07,54.07 0 1,1 -108.13,0ZM154.62,260.1a81.1,81.1 0 1,1 162.2,0a81.1,81.1 0 1,1 -162.2,0ZM245.86,273.61a70.96,70.96 0 1,1 141.93,0a70.96,70.96 0 1,1 -141.93,0ZM330.34,307.4a47.31,47.31 0 1,1 94.62,0a47.31,47.31 0 1,1 -94.62,0ZM144.49,287.13H387.79a37.17,37.17 0 0,1 37.17,37.17V324.3a37.17,37.17 0 0,1 -37.17,37.17H144.49a37.17,37.17 0 0,1 -37.17,-37.17V324.3a37.17,37.17 0 0,1 37.17,-37.17Z"/><path fill="#fff" d="M107.32,286.31a54.07,54.07 0 1,1 108.13,0a54.07,54.07 0 1,1 -108.13,0ZM154.62,245.76a81.1,81.1 0 1,1 162.2,0a81.1,81.1 0 1,1 -162.2,0ZM245.86,259.28a70.96,70.96 0 1,1 141.93,0a70.96,70.96 0 1,1 -141.93,0ZM330.34,293.07a47.31,47.31 0 1,1 94.62,0a47.31,47.31 0 1,1 -94.62,0ZM144.49,272.79H387.79a37.17,37.17 0 0,1 37.17,37.17V309.96a37.17,37.17 0 0,1 -37.17,37.17H144.49a37.17,37.17 0 0,1 -37.17,-37.17V309.96a37.17,37.17 0 0,1 37.17,-37.17Z"/></svg>

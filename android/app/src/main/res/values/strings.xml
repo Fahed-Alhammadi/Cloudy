@@ -85,6 +85,7 @@
     <string name="login_code">Authentication code</string>
     <string name="login_code_hint">From your authenticator app, or a recovery code</string>
     <string name="login_cannot_reach">Cannot reach server: %1$s</string>
+    <string name="login_https_required">Use an https:// address. Plain http:// only works for a server on your local network.</string>
     <string name="login_button">Log in</string>
     <string name="login_forgot">Forgot password?</string>
     <string name="login_token_note">Your password is exchanged for a device token, visible under Settings → App passwords on the web.</string>
@@ -256,4 +257,21 @@
     <string name="move_copy_n">Move or copy %1$d items</string>
     <string name="send_files_only">Folders can\'t be sent. Select files.</string>
     <string name="n_failed">%1$d failed</string>
+    <!-- First launch -->
+    <string name="welcome_title">Welcome to Cloudy</string>
+    <string name="welcome_intro">Before you sign in, choose what Cloudy may use on this phone. Nothing is required, and you can change each one later in the system settings.</string>
+    <string name="welcome_network">Network</string>
+    <string name="welcome_network_text">Cloudy connects only to the server you sign in to, over Wi-Fi or mobile data. If your phone asks whether Cloudy may use the network, allow it.</string>
+    <string name="welcome_offline">Offline</string>
+    <string name="welcome_photos">Photos and videos</string>
+    <string name="welcome_photos_text">Back up new photos and videos to your server automatically (Photo backup in More).</string>
+    <string name="welcome_scanner">Document scanner</string>
+    <string name="welcome_scanner_text">Scans paper documents to PDF in its own camera screen; no permission needed.</string>
+    <string name="welcome_lock">App lock</string>
+    <string name="welcome_lock_text">Lock the app with your fingerprint, face or screen lock (App lock in More); no permission needed.</string>
+    <string name="welcome_footer">Cloudy connects only to the server you sign in to and collects no data.</string>
+    <string name="welcome_allow">Allow</string>
+    <string name="welcome_allowed">Allowed</string>
+    <string name="welcome_settings">Settings</string>
+    <string name="welcome_continue">Continue</string>
 </resources>

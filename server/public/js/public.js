@@ -12,7 +12,7 @@ const url = (node, inline) => `${base}/nodes/${node.id}/download${inline ? '?inl
 
 function frame(title, subtitle, ...content) {
   app.replaceChildren(
-    h('header', { class: 'topbar' }, h('span', { class: 'brand' }, icon('cloud'), 'Cloudy'),
+    h('header', { class: 'topbar' }, h('span', { class: 'brand' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
       h('div', { class: 'public-title' }, h('strong', {}, title), subtitle && h('small', { class: 'muted' }, subtitle))),
     h('main', { class: 'content public' }, ...content),
   );

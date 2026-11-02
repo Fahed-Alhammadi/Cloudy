@@ -18,19 +18,15 @@ source, and the apps talk only to your server: no ads, no analytics, no tracking
 |---|---|---|
 | **Web** | built into the server | Files, sharing, calendar, contacts, administration |
 | **Android** | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) | Files, offline files, photo backup, document scanner, calendar, contacts |
-| **iPhone** | [TestFlight beta](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) | Files with Quick Look, document scanner, sharing, calendar, contacts, Face ID lock |
-| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/cloudy/releases/tag/desktop-v1.0.1) (GitHub releases) | Keeps a folder on your computer in sync with your files |
-| **Cloudy Drive (macOS)** | [Download](https://github.com/Fahed-Alhammadi/cloudy/releases/tag/drive-v1.0.4) (GitHub releases) | All your files in Finder, downloaded only when you open them (saves disk space) |
+| **iPhone** | [TestFlight beta](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock |
+| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/cloudy/releases/tag/desktop-v1.1.0) (GitHub releases) | Keeps a folder on your computer in sync with your files |
 | **Other apps** | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar/Contacts |
 
 Desktop downloads: `.dmg` (macOS, Apple silicon or Intel) or `.pkg` (all Macs), `.exe` (Windows), `.AppImage` or
 `.deb` (Linux). The Mac app is signed and notarized by Apple. The Windows installer isn't signed yet, so Windows may
 show "Unknown publisher" the first time. The desktop app updates itself.
 
-Desktop app or Cloudy Drive? The desktop app keeps a full copy of the folders you pick (good for working offline);
-Cloudy Drive shows everything in Finder but keeps only the files you open (good for a small disk). Both can be installed.
-
-More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · [Desktop](desktop/README.md) · [Cloudy Drive](drive/README.md).
+More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · [Desktop](desktop/README.md).
 
 ## Features
 
@@ -41,10 +37,8 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
 - **Desktop sync:** pick which folders to sync; changes go up and down within seconds; renames and moves aren't
   transferred again; edits in two places keep both copies; deletions go to the trash. It runs in the menu bar or
   system tray.
-- **Cloudy Drive (macOS):** your files in Finder's sidebar as placeholders that take no space; a file downloads when
-  you open it, "Remove Download" frees it again; changes go both ways within seconds. *Mount as a drive* in its menu
-  also mounts Cloudy as a network drive (WebDAV) under Locations and on the desktop.
-- **Phone apps:** browse, preview and share files, send them to other apps, scan documents to PDF, calendar and
+- **Phone apps:** browse, preview and share files, send them to other apps and receive files from any app's share
+  sheet ("Share to Cloudy"), scan documents to PDF, calendar and
   contacts, text editing, app lock. On Android you also get offline files and automatic photo backup.
 - **Live updates:** file lists in the browser, the phone apps and the desktop app update by themselves when files
   change anywhere (another device, a share, WebDAV).
@@ -180,8 +174,7 @@ The database schema migrates itself at startup. Your data stays in the volumes.
 
 **Apps.** Android and iPhone update through Google Play and the App Store (TestFlight for the beta). The desktop app
 checks GitHub once a day for a new version, downloads it in the background and installs it when you restart or quit
-(*Settings → Check for updates* checks right away). Cloudy Drive checks once a day too and shows *Update to
-Cloudy Drive X.Y.Z…* in its menu, which installs the new version and relaunches (*Check for Updates…* checks right away).
+(*Settings → Check for updates* checks right away).
 
 ## Two-factor authentication
 
@@ -217,6 +210,10 @@ Set up an SMTP server under *Administration → Email (SMTP)* (server, port, enc
 
 Emails go to the address in each user's profile. Leave the SMTP server empty to turn email off. The SMTP password
 is stored in the database and never shown again in the web UI.
+
+Links in emails point at `PUBLIC_URL`, or, when that isn't set, at the address you were using when you saved the
+email settings (never at whatever address a request came in on). Set one of them, or password reset emails are
+not sent.
 
 ## Passkeys
 
@@ -264,7 +261,6 @@ Set these in `docker-compose.yml` (the value after `:-`) or in a `.env` file nex
 | Android debug build | `cd android && ./gradlew assembleDebug` (JDK 17+, Android SDK 36) |
 | iOS simulator build | `ios/build.sh` (Xcode 16+, `brew install xcodegen`) |
 | Desktop app | `cd desktop && npm install && npm start` (tests and packages: [desktop/README.md](desktop/README.md)) |
-| Cloudy Drive (macOS) | `drive/build.sh` (Xcode 16+, `brew install xcodegen`; see [drive/README.md](drive/README.md)) |
 | Translations complete | `python3 tests/i18n_check.py` |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Cloudy works inside.
@@ -276,7 +272,6 @@ server/              server (Node.js/TypeScript) + HTML5 web app (server/public)
 android/             native Android app (Kotlin, Jetpack Compose) → Google Play           tag android-vX.Y.Z
 ios/                 native iPhone app (Swift, SwiftUI) → App Store                      tag ios-vX.Y.Z
 desktop/             desktop sync app (Electron, TypeScript) → GitHub releases           tag desktop-vX.Y.Z
-drive/               Cloudy Drive for macOS (Swift, File Provider) → GitHub releases    tag drive-vX.Y.Z
 deploy/              docker-compose.yml that builds the image from source
 docs/                website (screenshots), privacy policy, architecture notes
 tests/               end-to-end API/WebDAV/CalDAV/CardDAV tests, translation check

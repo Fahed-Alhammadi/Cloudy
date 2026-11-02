@@ -4,11 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, checkName, HttpError } from '../http.ts';
+import { json, noContent, readJson, checkName, numId, HttpError } from '../http.ts';
 import { config } from '../config.ts';
 import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
-import { newToken } from '../auth.ts';
+import { newToken, sha256 } from '../auth.ts';
 import * as F from '../files.ts';
 import { sendNodeFile, sendBlob, sendZip } from '../download.ts';
 
@@ -51,7 +51,7 @@ export function registerFiles(r: Router, authed: Wrap) {
     const { node } = await F.requireAccess(user.id, params.id, 'edit');
     if (node.is_dir) throw new HttpError(400, 'Not a file');
     const parent = await F.mustNode(node.parent_id!);
-    const { file, size } = await F.streamToTemp(req);
+    const { file, size } = await F.streamToTemp(req, await F.remainingQuota(node.owner));
     const { node: saved } = await F.writeFile(parent, node.name, file, size);
     json(res, (await F.toJson([saved], user.id))[0]);
   }));
@@ -98,7 +98,7 @@ export function registerFiles(r: Router, authed: Wrap) {
   }));
 
   r.delete('/api/nodes/:id/favorite', authed(async ({ res, params }, user) => {
-    await q(`DELETE FROM favorites WHERE user_id = $1 AND node_id = $2`, [user.id, params.id]);
+    await q(`DELETE FROM favorites WHERE user_id = $1 AND node_id = $2`, [user.id, numId(params.id)]);
     noContent(res);
   }));
 
@@ -110,14 +110,14 @@ export function registerFiles(r: Router, authed: Wrap) {
 
   r.post('/api/nodes/:id/versions/:vid/restore', authed(async ({ res, params }, user) => {
     const { node } = await F.requireAccess(user.id, params.id, 'edit');
-    json(res, (await F.toJson([await F.restoreVersion(node, params.vid)], user.id))[0]);
+    json(res, (await F.toJson([await F.restoreVersion(node, numId(params.vid))], user.id))[0]);
   }));
 
   r.get('/api/nodes/:id/versions/:vid/download', authed(async ({ req, res, params }, user) => {
     const { node } = await F.requireAccess(user.id, params.id, 'read');
     const v = (await F.listVersions(node.id)).find((x) => String(x.id) === params.vid);
     if (!v) throw new HttpError(404, 'Version not found');
-    sendBlob(req, res, v.blob, { size: v.size, mime: node.mime, etag: v.blob, mtime: v.mtime, name: node.name });
+    sendBlob(req, res, v.blob, { size: v.size, mime: node.mime, etag: sha256(v.blob).slice(0, 32), mtime: v.mtime, name: node.name });
   }));
 
   // ---------------------------------------------------------------- views
@@ -166,22 +166,49 @@ export function registerFiles(r: Router, authed: Wrap) {
   r.post('/api/uploads', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
     const { node: parent } = await F.requireAccess(user.id, b.parentId, 'edit');
-    json(res, await startUpload(parent, b.name, b.size), 201);
+    json(res, await startUpload(parent, b.name, b.size, { userId: user.id }), 201);
   }));
 }
 
-export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unknown) {
+/** Who started an upload: a signed-in user, or a public link (its share id). Checked again when the file lands. */
+export type UploadBy = { userId: string } | { shareId: number };
+
+export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unknown, by: UploadBy) {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
-  const name = checkName(rawName);
+  let name = checkName(rawName);
   const size = Number(rawSize);
   if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, 'Invalid size');
+  if (size > (await F.remainingQuota(parent.owner))) throw new HttpError(507, 'Storage quota exceeded');
   const existing = await F.childByName(parent.id, name);
   if (existing?.is_dir) throw new HttpError(409, 'A folder with that name exists');
+  // Visitors of an "allow upload" link add files; they never replace (and version away) the owner's files.
+  if (existing && 'shareId' in by) name = await F.uniqueName(parent.id, name);
   const id = newToken(24);
   await fsWriteFile(F.uploadPath(id), '');
-  await q(`INSERT INTO uploads (id, owner, parent_id, name, size) VALUES ($1, $2, $3, $4, $5)`,
-    [id, parent.owner, parent.id, name, size]);
+  await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null]);
   return { id, chunkSize: config.chunkSize, received: 0, size };
+}
+
+// newToken(24) → 32 base64url characters. Anything else never names an upload (and never reaches the file system).
+const UPLOAD_ID_RE = /^[A-Za-z0-9_-]{32}$/;
+const uploadId = (s: string) => {
+  if (!UPLOAD_ID_RE.test(s)) throw new HttpError(404, 'Upload not found');
+  return s;
+};
+
+/** The access that started the upload must still exist when the file lands (revoked share, expired link…). */
+async function stillAllowed(u: { parent_id: number; user_id: string | null; share_id: number | null }, parent: F.Node): Promise<boolean> {
+  if (u.user_id) {
+    const a = await F.access(u.user_id, parent);
+    return !!a && a.perm !== 'read';
+  }
+  if (u.share_id) {
+    const s = await one<{ node_id: number }>(
+      `SELECT node_id FROM shares WHERE id = $1 AND type = 'link' AND can_edit AND (expires_at IS NULL OR expires_at > now())`, [u.share_id]);
+    return !!s && (await F.ancestors(parent.id)).some((n) => n.id === s.node_id);
+  }
+  return true; // rows from before this column existed
 }
 
 /**
@@ -193,14 +220,14 @@ export function registerUploadChunks(r: Router) {
   const busy = new Set<string>();
 
   r.get('/api/uploads/:id', async ({ res, params }) => {
-    const u = await one(`SELECT received, size FROM uploads WHERE id = $1`, [params.id]);
+    const u = await one(`SELECT received, size FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
     json(res, u);
   });
 
   r.put('/api/uploads/:id', async ({ req, res, params }) => {
-    const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number }>(
-      `SELECT id, parent_id, name, size, received FROM uploads WHERE id = $1`, [params.id]);
+    const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null }>(
+      `SELECT id, parent_id, name, size, received, user_id, share_id FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
     if (busy.has(u.id)) throw new HttpError(409, 'Chunk already in progress');
     const offset = Number(req.headers['upload-offset'] ?? u.received);
@@ -232,13 +259,18 @@ export function registerUploadChunks(r: Router) {
       await rm(file, { force: true });
       throw new HttpError(409, 'Target folder no longer exists');
     }
+    if (!(await stillAllowed(u, parent))) {
+      await rm(file, { force: true });
+      throw new HttpError(403, 'No longer allowed to upload here');
+    }
     const { node } = await F.writeFile(parent, u.name, file, received);
     json(res, { received, done: true, node: { id: node.id, name: node.name, size: node.size } });
   });
 
   r.delete('/api/uploads/:id', async ({ res, params }) => {
-    await q(`DELETE FROM uploads WHERE id = $1`, [params.id]);
-    await rm(F.uploadPath(params.id), { force: true });
+    const id = uploadId(params.id);
+    const row = await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [id]);
+    if (row) await rm(F.uploadPath(id), { force: true });
     noContent(res);
   });
 }

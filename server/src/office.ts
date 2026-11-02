@@ -3,8 +3,8 @@
 // Results are cached per file version (DATA_DIR/cache/previews/<id>-<etag>.pdf), so a document is
 // converted once after each change. One conversion runs at a time; LibreOffice is started per file.
 import { spawn } from 'node:child_process';
-import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rename, rm, stat, symlink, utimes } from 'node:fs/promises';
+import { createReadStream, existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Router, Ctx } from './http.ts';
 import { json, HttpError } from './http.ts';
@@ -36,17 +36,46 @@ const SOFFICE = process.env.SOFFICE_PATH || 'soffice';
 let queue: Promise<unknown> = Promise.resolve();
 const inFlight = new Map<string, Promise<string>>();
 
+// Own profile outside DATA_DIR (which may be NFS); reused between runs so startup stays fast.
+const PROFILE = path.join(process.env.TMPDIR || '/tmp', 'cloudy-libreoffice');
+// Address-space cap for one conversion (crafted documents can make LibreOffice allocate without end).
+const MAX_MEMORY = 6 * 1024 * 1024 * 1024;
+let profileReady = false;
+
+/**
+ * Documents come from users: links in them must not be fetched (no requests from inside the container) and
+ * macros never run. LibreOffice reads these from the profile; written once per process start.
+ */
+async function prepareProfile(): Promise<void> {
+  if (profileReady) return;
+  await mkdir(path.join(PROFILE, 'user'), { recursive: true });
+  const item = (p: string, name: string, v: string | number) =>
+    `<item oor:path="${p}"><prop oor:name="${name}" oor:op="fuse"><value>${v}</value></prop></item>`;
+  await writeFile(path.join(PROFILE, 'user', 'registrymodifications.xcu'),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n`
+    + item('/org.openoffice.Office.Common/Security/Scripting', 'MacroSecurityLevel', 3)
+    + item('/org.openoffice.Office.Writer/Content/Update', 'Link', 0) // never
+    + item('/org.openoffice.Office.Calc/Content/Update', 'Link', 1) // never
+    + `\n</oor:items>\n`);
+  profileReady = true;
+}
+
 function runSoffice(input: string, outDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(SOFFICE, [
+    const args = [
       '--headless', '--norestore', '--nolockcheck', '--nodefault', '--nologo',
-      // Own profile outside DATA_DIR (which may be NFS); reused between runs so startup stays fast.
-      `-env:UserInstallation=file://${path.join(process.env.TMPDIR || '/tmp', 'cloudy-libreoffice')}`,
+      `-env:UserInstallation=file://${PROFILE}`,
       '--convert-to', 'pdf', '--outdir', outDir, input,
-    ], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, HOME: process.env.TMPDIR || '/tmp' } });
+    ];
+    // util-linux's prlimit (in the image) caps the memory of the whole conversion; absent on a dev Mac.
+    const limited = existsSync('/usr/bin/prlimit');
+    const p = spawn(limited ? '/usr/bin/prlimit' : SOFFICE, limited ? [`--as=${MAX_MEMORY}`, SOFFICE, ...args] : args,
+      { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, HOME: process.env.TMPDIR || '/tmp' }, detached: true });
     let err = '';
     p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
-    const timer = setTimeout(() => p.kill('SIGKILL'), TIMEOUT_MS);
+    // Kill the whole process group: soffice is a wrapper around soffice.bin, which would otherwise live on.
+    const kill = () => { try { process.kill(-p.pid!, 'SIGKILL'); } catch { p.kill('SIGKILL'); } };
+    const timer = setTimeout(kill, TIMEOUT_MS);
     p.on('error', (e) => { clearTimeout(timer); reject(e); });
     p.on('close', (code, signal) => {
       clearTimeout(timer);
@@ -64,6 +93,7 @@ async function convert(node: F.Node): Promise<string> {
   if (running) return running;
   const job = (queue = queue.catch(() => {}).then(async () => {
     await mkdir(cacheDir(), { recursive: true });
+    await prepareProfile();
     const work = await mkdtemp(path.join(config.dataDir, 'tmp', 'preview-'));
     try {
       // LibreOffice picks the import filter from the extension; blobs have none, so link with the real one.

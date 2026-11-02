@@ -49,7 +49,8 @@ throwaway server with the demo account, `appstore/render.py` frames the captures
 | `project.yml` | XcodeGen spec (targets, versions, build settings) |
 | `Cloudy/Info.plist` | Permissions texts, ATS (local networking only), export compliance, languages |
 | `Cloudy/Data/API.swift` | JSON API client (URLSession, bearer token, chunked uploads, SSE) |
-| `Cloudy/Data/Session.swift` | Server address, user, Keychain token |
+| `Cloudy/Data/Session.swift` | Server address (App Group), user; `Keychain.swift` = device token (shared keychain group) |
+| `CloudyShare/` | Share extension "Share to Cloudy" (`io.cloudy.app.share`): files from other apps' share sheets → folder picker → chunked upload with the app's token |
 | `Cloudy/Data/Live.swift` | Live updates (SSE → `.cloudyChange` notifications), download cache |
 | `Cloudy/Data/Uploads.swift` | Uploads in progress (with background time) |
 | `Cloudy/UI/*.swift` | SwiftUI screens: Files, FileActions (menus, Quick Look), ShareSheet, Lists (favorites, recent, shared, trash), Calendar, Contacts, More |

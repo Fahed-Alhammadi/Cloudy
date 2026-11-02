@@ -83,6 +83,7 @@
     <string name="login_code">Code d\'authentification</string>
     <string name="login_code_hint">Depuis votre application d\'authentification, ou un code de récupération</string>
     <string name="login_cannot_reach">Serveur injoignable : %1$s</string>
+    <string name="login_https_required">Utilisez une adresse https://. Le simple http:// ne fonctionne que pour un serveur sur votre réseau local.</string>
     <string name="login_button">Se connecter</string>
     <string name="login_forgot">Mot de passe oublié ?</string>
     <string name="login_token_note">Votre mot de passe est échangé contre un jeton d\'appareil, visible sur le web sous Paramètres → Mots de passe d\'application.</string>
@@ -254,4 +255,21 @@
     <string name="move_copy_n">Déplacer ou copier %1$d éléments</string>
     <string name="send_files_only">Les dossiers ne peuvent pas être envoyés. Sélectionnez des fichiers.</string>
     <string name="n_failed">%1$d en échec</string>
+    <!-- First launch -->
+    <string name="welcome_title">Bienvenue dans Cloudy</string>
+    <string name="welcome_intro">Avant de vous connecter, choisissez ce que Cloudy peut utiliser sur ce téléphone. Rien n\'est obligatoire, et vous pourrez modifier chaque choix plus tard dans les paramètres du système.</string>
+    <string name="welcome_network">Réseau</string>
+    <string name="welcome_network_text">Cloudy ne se connecte qu\'au serveur auquel vous vous connectez, en Wi-Fi ou en données mobiles. Si votre téléphone demande si Cloudy peut utiliser le réseau, autorisez-le.</string>
+    <string name="welcome_offline">Hors ligne</string>
+    <string name="welcome_photos">Photos et vidéos</string>
+    <string name="welcome_photos_text">Sauvegarder automatiquement les nouvelles photos et vidéos sur votre serveur (Sauvegarde des photos dans Plus).</string>
+    <string name="welcome_scanner">Scanner de documents</string>
+    <string name="welcome_scanner_text">Numérise des documents papier en PDF dans son propre écran caméra ; aucune autorisation nécessaire.</string>
+    <string name="welcome_lock">Verrouillage de l\'app</string>
+    <string name="welcome_lock_text">Verrouillez l\'app avec votre empreinte, votre visage ou le verrouillage de l\'écran (Verrouillage dans Plus) ; aucune autorisation nécessaire.</string>
+    <string name="welcome_footer">Cloudy ne se connecte qu\'au serveur auquel vous vous connectez et ne collecte aucune donnée.</string>
+    <string name="welcome_allow">Autoriser</string>
+    <string name="welcome_allowed">Autorisé</string>
+    <string name="welcome_settings">Paramètres</string>
+    <string name="welcome_continue">Continuer</string>
 </resources>

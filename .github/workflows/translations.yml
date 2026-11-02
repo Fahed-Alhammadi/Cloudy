@@ -11,8 +11,6 @@ on:
       - 'android/app/src/main/java/io/cloudy/app/data/Lang.kt'
       - 'ios/Cloudy/Resources/*.xcstrings'
       - 'ios/Cloudy/Info.plist'
-      - 'drive/Resources/*.xcstrings'
-      - 'drive/CloudyDrive/Info.plist'
       - 'desktop/i18n/**'
       - 'desktop/src/**'
       - 'tests/i18n_check.py'

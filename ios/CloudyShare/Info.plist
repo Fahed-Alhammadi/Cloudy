@@ -20,8 +20,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>CloudyAppGroup</key>
-	<string>$(TeamIdentifierPrefix)io.cloudy.drive</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ar</string>
+		<string>de</string>
+		<string>fr</string>
+		<string>es</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -29,12 +35,23 @@
 	</dict>
 	<key>NSExtension</key>
 	<dict>
-		<key>NSExtensionFileProviderSupportsEnumeration</key>
-		<true/>
 		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.fileprovider-nonui</string>
+		<string>com.apple.share-services</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>$(PRODUCT_MODULE_NAME).FileProviderExtension</string>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- Files, photos and videos from any app; links and plain text are not files. -->
+			<key>NSExtensionActivationRule</key>
+			<dict>
+				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+				<integer>50</integer>
+				<key>NSExtensionActivationSupportsImageWithMaxCount</key>
+				<integer>50</integer>
+				<key>NSExtensionActivationSupportsMovieWithMaxCount</key>
+				<integer>50</integer>
+			</dict>
+		</dict>
 	</dict>
 </dict>
 </plist>

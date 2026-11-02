@@ -358,6 +358,7 @@
  "You have unsaved changes.": "لديك تغييرات غير محفوظة.",
  "You will no longer be able to sign in with \"{name}\". Also delete it from the device or password manager.": "لن تتمكن بعد الآن من تسجيل الدخول باستخدام «{name}». احذفه أيضًا من الجهاز أو مدير كلمات المرور.",
  "Your device will ask you to confirm with your fingerprint, face, screen lock or security key.": "سيطلب منك جهازك التأكيد ببصمة الإصبع أو الوجه أو قفل الشاشة أو مفتاح الأمان.",
+ "Your files, calendars and contacts, on your own server.": "ملفاتك وتقويماتك وجهات اتصالك، على خادمك أنت.",
  "Your language is used here, in the Android app and in emails. Your email is also used for password reset links and security notices.": "تُستخدم لغتك هنا وفي تطبيق Android وفي الرسائل. ويُستخدم بريدك الإلكتروني أيضًا لروابط إعادة تعيين كلمة المرور وتنبيهات الأمان.",
  "Your password was changed. Log in with the new one.": "تم تغيير كلمة المرور. سجّل الدخول بكلمة المرور الجديدة.",
  "Your session has expired. Please log in again.": "انتهت جلستك. يُرجى تسجيل الدخول مرة أخرى.",

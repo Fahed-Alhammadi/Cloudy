@@ -88,7 +88,9 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL):
   let rel = url.pathname;
   if (rel === '/' || rel.startsWith('/app')) rel = '/index.html';
   else if (/^\/s\/[\w-]+$/.test(rel)) rel = '/public.html';
-  const file = path.join(config.publicDir, path.normalize(decodeURIComponent(rel)).replace(/^(\.\.[\/\\])+/, ''));
+  let decoded: string;
+  try { decoded = decodeURIComponent(rel); } catch { return false; }
+  const file = path.join(config.publicDir, path.normalize(decoded).replace(/^(\.\.[\/\\])+/, ''));
   if (!file.startsWith(config.publicDir)) return false;
   const st = await stat(file).catch(() => null);
   if (!st?.isFile()) return false;

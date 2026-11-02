@@ -2,7 +2,7 @@
 import type { Router, Ctx } from '../http.ts';
 import { json, noContent, readJson, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
-import { loginWithPasskey, createSession, passkeyUserHandle, verifyPassword } from '../auth.ts';
+import { loginWithPasskey, createSession, passkeyUserHandle, requirePassword } from '../auth.ts';
 import type { User } from '../auth.ts';
 import { userJson } from '../users.ts';
 import { ALGORITHMS, newChallenge, relyingParty, verifyRegistration } from '../webauthn.ts';
@@ -26,8 +26,7 @@ export function registerPasskeys(r: Router, authed: (h: Authed) => (ctx: Ctx) =>
 
   // Registration: options for navigator.credentials.create(); adding a sign-in method needs the password.
   r.post('/api/me/passkeys/options', authed(async ({ req, res }, user) => {
-    const row = await one<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = $1`, [user.id]);
-    if (!(await verifyPassword(String((await readJson(req)).password ?? ''), row!.password_hash))) throw new HttpError(403, 'Wrong password');
+    await requirePassword(req, user.id, (await readJson(req)).password);
     const existing = await q<{ credential_id: string; transports: string[] }>(
       `SELECT credential_id, transports FROM passkeys WHERE user_id = $1`, [user.id]);
     const rp = relyingParty(req);

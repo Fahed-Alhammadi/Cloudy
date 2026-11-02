@@ -93,8 +93,10 @@ struct LoginView: View {
         error = nil
         Task {
             do {
-                let r = try await API.shared.login(server: address, user: user.trimmingCharacters(in: .whitespaces),
-                                                   password: password, code: needsCode ? code : nil)
+                let r = try await retryingConnection {
+                    try await API.shared.login(server: address, user: user.trimmingCharacters(in: .whitespaces),
+                                               password: password, code: needsCode ? code : nil)
+                }
                 session.signIn(server: address, token: r.token, user: r.user)
             } catch let e as APIError where e.twoFactor {
                 if needsCode { error = e.message }
@@ -104,6 +106,20 @@ struct LoginView: View {
                 self.error = errorText(error)
             }
             busy = false
+        }
+    }
+}
+
+/// Runs `work`, trying again a few times when the connection itself failed: on the very first use the request can
+/// fail while iOS is still showing the Local Network permission dialog, and the user's "Allow" arrives seconds later.
+func retryingConnection<T>(attempts: Int = 4, _ work: () async throws -> T) async throws -> T {
+    var attempt = 0
+    while true {
+        do { return try await work() } catch let e as URLError {
+            attempt += 1
+            let transient: [URLError.Code] = [.notConnectedToInternet, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .timedOut, .dnsLookupFailed]
+            guard attempt < attempts, transient.contains(e.code) else { throw e }
+            try await Task.sleep(for: .seconds(Double(attempt) * 1.5))
         }
     }
 }

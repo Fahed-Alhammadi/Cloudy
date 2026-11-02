@@ -2,21 +2,16 @@ import type { Router, Ctx } from '../http.ts';
 import { json, noContent, readJson, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import {
-  login, createSession, destroySession, hashPassword, verifyPassword, checkPasswordStrength,
-  newToken, sha256, forgetBasicCache, createAppToken, bearerToken,
+  login, createSession, destroySession, hashPassword, checkPasswordStrength,
+  newToken, sha256, forgetBasicCache, createAppToken, bearerToken, requirePassword, dropOtherSessions,
 } from '../auth.ts';
 import type { User } from '../auth.ts';
 import { createUser, deleteUser, setGroups, userJson, USER_ID_RE } from '../users.ts';
 import { rootOf } from '../files.ts';
 import { newSecret, otpauthUri, verifyTotp, newRecoveryCodes, normalizeRecoveryCode } from '../totp.ts';
 import QRCode from 'qrcode';
-import { notifyPasswordChanged } from '../mail.ts';
+import { notifyPasswordChanged, EMAIL_RE } from '../mail.ts';
 import { isLanguage } from '../i18n.ts';
-
-async function requirePassword(userId: string, password: unknown): Promise<void> {
-  const row = await one<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
-  if (!row || !(await verifyPassword(String(password ?? ''), row.password_hash))) throw new HttpError(403, 'Wrong password');
-}
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
   const codes = newRecoveryCodes();
@@ -68,6 +63,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
+    if (typeof b.email === 'string' && b.email.trim() && !EMAIL_RE.test(b.email.trim())) throw new HttpError(400, 'Invalid email address');
     await q(`UPDATE users SET display_name = COALESCE($2, display_name), email = COALESCE($3, email),
                               notify_shares = COALESCE($4, notify_shares) WHERE id = $1`,
       [user.id, typeof b.displayName === 'string' ? b.displayName.trim() || user.id : null,
@@ -105,23 +101,23 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   }));
 
   r.post('/api/me/2fa/recovery-codes', authed(async ({ req, res }, user) => {
-    await requirePassword(user.id, (await readJson(req)).password);
+    await requirePassword(req, user.id, (await readJson(req)).password);
     if (!user.totp_enabled) throw new HttpError(400, 'Two-factor authentication is off');
     json(res, { recoveryCodes: await replaceRecoveryCodes(user.id) });
   }));
 
   r.post('/api/me/2fa/disable', authed(async ({ req, res }, user) => {
-    await requirePassword(user.id, (await readJson(req)).password);
+    await requirePassword(req, user.id, (await readJson(req)).password);
     await resetTwoFactor(user.id);
     noContent(res);
   }));
 
   r.post('/api/me/password', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
-    const row = await one<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = $1`, [user.id]);
-    if (!(await verifyPassword(String(b.current ?? ''), row!.password_hash))) throw new HttpError(403, 'Current password is wrong');
+    await requirePassword(req, user.id, b.current, 'Current password is wrong');
     await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [user.id, await hashPassword(checkPasswordStrength(b.password))]);
     forgetBasicCache();
+    await dropOtherSessions(req, user.id); // a stolen browser session dies with the old password
     await notifyPasswordChanged(req, user.id);
     noContent(res);
   }));

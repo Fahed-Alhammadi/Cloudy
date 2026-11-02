@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import type { ServerResponse } from 'node:http';
+import { HttpError } from '../http.ts';
 
 export const NS = {
   d: 'DAV:',
@@ -91,6 +92,8 @@ export const esc = (s: unknown) =>
 export function el(k: string, content = ''): string {
   const m = /^\{(.*)\}(.+)$/.exec(k)!;
   const [ns, name] = [m[1], m[2]];
+  // Names come from the client's PROPFIND/PROPPATCH body: only XML names, so nothing can break out of the tag.
+  if (!/^[A-Za-z_][\w.-]*$/.test(name)) throw new HttpError(400, `Invalid property name`);
   const p = PREFIX[ns];
   const tag = p ? `${p}:${name}` : `x:${name}`;
   const decl = p ? '' : ` xmlns:x="${esc(ns)}"`;

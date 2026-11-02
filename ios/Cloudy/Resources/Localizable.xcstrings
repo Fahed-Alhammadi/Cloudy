@@ -536,6 +536,34 @@
         }
       }
     },
+    "Allow" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "السماح"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlauben"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autoriser"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permitir"
+          }
+        }
+      }
+    },
     "Allow uploads" : {
       "localizations" : {
         "ar" : {
@@ -560,6 +588,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Autoriser l’envoi de fichiers"
+          }
+        }
+      }
+    },
+    "Allowed" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مسموح"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaubt"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisé"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permitido"
           }
         }
       }
@@ -676,6 +732,34 @@
         }
       }
     },
+    "Before you sign in, choose what Cloudy may use on this iPhone. Nothing is required, and you can change each one later in Settings." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "قبل تسجيل الدخول، اختر ما يمكن لـ Cloudy استخدامه على هذا الهاتف. لا شيء إلزامي، ويمكنك تغيير كل خيار لاحقًا في الإعدادات."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lege vor der Anmeldung fest, was Cloudy auf diesem iPhone verwenden darf. Nichts ist Pflicht, und du kannst jede Einstellung später in den Einstellungen ändern."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avant de vous connecter, choisissez ce que Cloudy peut utiliser sur cet iPhone. Rien n'est obligatoire, et vous pourrez modifier chaque choix plus tard dans Réglages."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Antes de iniciar sesión, elige qué puede usar Cloudy en este iPhone. Nada es obligatorio y puedes cambiar cada opción más tarde en Ajustes."
+          }
+        }
+      }
+    },
     "Birthday" : {
       "localizations" : {
         "ar" : {
@@ -728,6 +812,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Calendrier"
+          }
+        }
+      }
+    },
+    "Camera" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "الكاميرا"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kamera"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appareil photo"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cámara"
           }
         }
       }
@@ -928,8 +1040,64 @@
         }
       }
     },
+    "Choose this folder" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اختيار هذا المجلد"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diesen Ordner wählen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choisir ce dossier"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elegir esta carpeta"
+          }
+        }
+      }
+    },
     "Cloudy" : {
       "shouldTranslate" : false
+    },
+    "Cloudy connects only to the server you sign in to and collects no data." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يتصل Cloudy فقط بالخادم الذي تسجّل الدخول إليه ولا يجمع أي بيانات."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudy verbindet sich nur mit dem Server, bei dem du dich anmeldest, und sammelt keine Daten."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudy ne se connecte qu'au serveur auquel vous vous connectez et ne collecte aucune donnée."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloudy solo se conecta al servidor en el que inicias sesión y no recopila datos."
+          }
+        }
+      }
     },
     "Cloudy doesn't collect any data. Everything stays between this app and the server you sign in to." : {
       "localizations" : {
@@ -1039,6 +1207,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Contacts"
+          }
+        }
+      }
+    },
+    "Continue" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "متابعة"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weiter"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuer"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continuar"
           }
         }
       }
@@ -2107,6 +2303,34 @@
         }
       }
     },
+    "Face ID" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Face ID"
+          }
+        }
+      }
+    },
     "Favorites" : {
       "localizations" : {
         "ar" : {
@@ -2243,6 +2467,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prénom"
+          }
+        }
+      }
+    },
+    "Folder" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "المجلد"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dossier"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carpeta"
           }
         }
       }
@@ -2723,6 +2975,34 @@
         }
       }
     },
+    "Local network" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "الشبكة المحلية"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lokales Netzwerk"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réseau local"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Red local"
+          }
+        }
+      }
+    },
     "Location" : {
       "localizations" : {
         "ar" : {
@@ -2747,6 +3027,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lieu"
+          }
+        }
+      }
+    },
+    "Lock the app with Face ID, Touch ID or your passcode (App lock in More)." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اقفل التطبيق بـ Face ID أو Touch ID أو رمز الدخول (قفل التطبيق في المزيد)."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die App mit Face ID, Touch ID oder deinem Code sperren (App-Sperre unter Mehr)."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verrouillez l'app avec Face ID, Touch ID ou votre code (Verrouillage dans Plus)."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bloquea la app con Face ID, Touch ID o tu código (Bloqueo de la app en Más)."
           }
         }
       }
@@ -2971,6 +3279,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nom"
+          }
+        }
+      }
+    },
+    "Needed to reach a server on your home or office network (an address like http://192.168.1.10:8080). Servers on the internet work without it." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مطلوب للوصول إلى خادم في شبكة منزلك أو مكتبك (عنوان مثل http://192.168.1.10:8080). الخوادم على الإنترنت تعمل بدونه."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nötig, um einen Server in deinem Heim- oder Büronetzwerk zu erreichen (eine Adresse wie http://192.168.1.10:8080). Server im Internet funktionieren auch ohne."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nécessaire pour joindre un serveur sur votre réseau domestique ou de bureau (une adresse comme http://192.168.1.10:8080). Les serveurs sur Internet fonctionnent sans."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Necesario para llegar a un servidor en la red de tu casa u oficina (una dirección como http://192.168.1.10:8080). Los servidores en Internet funcionan sin él."
           }
         }
       }
@@ -3255,6 +3591,34 @@
         }
       }
     },
+    "No folders" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لا توجد مجلدات"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Ordner"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun dossier"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin carpetas"
+          }
+        }
+      }
+    },
     "No links yet" : {
       "localizations" : {
         "ar" : {
@@ -3311,6 +3675,34 @@
         }
       }
     },
+    "Not available" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "غير متاح"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nicht verfügbar"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Non disponible"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No disponible"
+          }
+        }
+      }
+    },
     "Notes" : {
       "localizations" : {
         "ar" : {
@@ -3363,6 +3755,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rien n’a encore été partagé avec vous"
+          }
+        }
+      }
+    },
+    "Nothing to upload" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لا يوجد ما يُرفع"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nichts zum Hochladen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rien à envoyer"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nada que subir"
           }
         }
       }
@@ -3559,6 +3979,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Téléphone"
+          }
+        }
+      }
+    },
+    "Photos" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "الصور"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos"
           }
         }
       }
@@ -3843,6 +4291,34 @@
         }
       }
     },
+    "Save photos and videos from Cloudy to your photo library." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "احفظ الصور ومقاطع الفيديو من Cloudy في مكتبة الصور."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos und Videos aus Cloudy in deiner Fotomediathek sichern."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enregistrez des photos et vidéos de Cloudy dans votre photothèque."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Guarda fotos y vídeos de Cloudy en tu fototeca."
+          }
+        }
+      }
+    },
     "Save scan as PDF" : {
       "localizations" : {
         "ar" : {
@@ -3923,6 +4399,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Numériser un document"
+          }
+        }
+      }
+    },
+    "Scan paper documents and upload them as a PDF." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "امسح المستندات الورقية وارفعها كملف PDF."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierdokumente scannen und als PDF hochladen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Numérisez des documents papier et envoyez-les en PDF."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Escanea documentos en papel y súbelos como PDF."
           }
         }
       }
@@ -4095,6 +4599,34 @@
         }
       }
     },
+    "Settings" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "الإعدادات"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einstellungen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Réglages"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajustes"
+          }
+        }
+      }
+    },
     "Share" : {
       "localizations" : {
         "ar" : {
@@ -4203,6 +4735,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Se connecter"
+          }
+        }
+      }
+    },
+    "Sign in to Cloudy first, then share again." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "سجّل الدخول إلى Cloudy أولًا، ثم شارك مرة أخرى."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Melde dich zuerst in Cloudy an und teile dann erneut."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous d'abord à Cloudy, puis partagez à nouveau."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicia sesión en Cloudy primero y vuelve a compartir."
           }
         }
       }
@@ -4963,6 +5523,62 @@
         }
       }
     },
+    "Upload to Cloudy" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "رفع إلى Cloudy"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In Cloudy hochladen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyer vers Cloudy"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subir a Cloudy"
+          }
+        }
+      }
+    },
+    "Uploaded" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تم الرفع"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hochgeladen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoyé"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subido"
+          }
+        }
+      }
+    },
     "Uploading" : {
       "localizations" : {
         "ar" : {
@@ -4987,6 +5603,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Envoi en cours"
+          }
+        }
+      }
+    },
+    "Uploading %lld of %lld…" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "جارٍ رفع %lld من %lld…"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lade %lld von %lld hoch…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Envoi de %lld sur %lld…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subiendo %lld de %lld…"
           }
         }
       }
@@ -5127,6 +5771,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vidéos"
+          }
+        }
+      }
+    },
+    "Welcome to Cloudy" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مرحبًا بك في Cloudy"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Willkommen bei Cloudy"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bienvenue dans Cloudy"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bienvenido a Cloudy"
           }
         }
       }
