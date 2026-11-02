@@ -33,6 +33,11 @@ export function openStream(userId: string, res: ServerResponse): void {
   });
 }
 
+/** Ends every stream (shutdown): browsers and apps reconnect to the new process after `retry`. */
+export function closeStreams(): void {
+  for (const set of clients.values()) for (const res of set) res.end();
+}
+
 function send(userId: string, ev: ChangeEvent): void {
   const data = `event: change\ndata: ${JSON.stringify(ev)}\n\n`;
   for (const res of clients.get(userId) ?? []) res.write(data);

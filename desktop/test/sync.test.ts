@@ -3,7 +3,7 @@
 // Without CLOUDY_TEST_URL the tests are skipped.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, rm, symlink, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Api } from '../src/main/api.ts';
@@ -226,4 +226,50 @@ test('sync folder missing (drive not mounted): stops instead of deleting on the 
   assert.equal(engine.status.phase, 'error');
   assert.match(engine.status.error ?? '', /Folder not found/);
   assert.equal(deleted, false);
+});
+
+test('paths the scan cannot read are left alone on the server', { skip }, async () => {
+  const { a, b } = await setup('unknown');
+  await mkdir(path.join(a.dir, 'Photos'));
+  await writeFile(path.join(a.dir, 'Photos/p.txt'), 'p');
+  await mkdir(path.join(a.dir, 'Locked'));
+  await writeFile(path.join(a.dir, 'Locked/l.txt'), 'l');
+  await writeFile(path.join(a.dir, 'note.txt'), 'n');
+  await a.sync();
+
+  // Photos moved to an external disk and replaced by a symlink; Locked made unreadable: neither is "deleted".
+  const elsewhere = await mkdtemp(path.join(tmpdir(), 'cloudy-elsewhere-'));
+  await rename(path.join(a.dir, 'Photos'), path.join(elsewhere, 'Photos'));
+  await symlink(path.join(elsewhere, 'Photos'), path.join(a.dir, 'Photos'));
+  await chmod(path.join(a.dir, 'Locked'), 0o000);
+  try {
+    const problems = await a.sync();
+    assert.ok(problems.some((p) => p.path === 'Locked'), 'unreadable folder is reported');
+  } finally {
+    await chmod(path.join(a.dir, 'Locked'), 0o755);
+  }
+  await b.sync();
+  assert.deepEqual(await tree(b.dir), { 'Locked/': '', 'Locked/l.txt': 'l', 'Photos/': '', 'Photos/p.txt': 'p', 'note.txt': 'n' }, 'still all on the server');
+
+  // readable again: back to normal, nothing lost
+  await a.sync();
+  assert.deepEqual(a.trashed, []);
+});
+
+test('a second spelling of a name on the server does not delete the local file', { skip, }, async () => {
+  const { a, folder } = await setup('case');
+  await writeFile(path.join(a.dir, 'Photo.jpg'), 'one');
+  await a.sync();
+  const dup = await api.mkdir(folder.id, 'photo.jpg'); // the web app allows it; macOS/Windows cannot hold both
+  const engine = new SyncEngine({
+    api, root: a.dir, rootId: folder.id, live: false, platform: 'darwin', state: a.state!,
+    saveState: async () => {}, trash: async () => { throw new Error('must not delete'); },
+  });
+  await engine.sync();
+  assert.equal(engine.status.phase, 'idle', engine.status.error);
+  assert.ok(engine.problems.some((p) => p.path.toLowerCase() === 'photo.jpg'), 'the duplicate is reported');
+  assert.equal(await readFile(path.join(a.dir, 'Photo.jpg'), 'utf8'), 'one');
+  const listing = await api.node(folder.id);
+  assert.equal(listing.children!.filter((c) => c.name.toLowerCase() === 'photo.jpg').length, 2, 'nothing removed on the server');
+  await api.trash(dup.id);
 });

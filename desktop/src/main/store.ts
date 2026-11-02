@@ -1,6 +1,7 @@
 // Settings and sync state in the app's data folder (userData). The device token is encrypted with the OS keychain
 // (safeStorage: Keychain on macOS, DPAPI on Windows, libsecret/kwallet on Linux) when available.
 import { app, safeStorage } from 'electron';
+import { randomBytes } from 'node:crypto';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { SyncState } from './sync.ts';
@@ -32,7 +33,7 @@ async function readJson<T>(name: string): Promise<T | null> {
 }
 
 async function writeJson(name: string, data: unknown): Promise<void> {
-  const tmp = file(`${name}.tmp`);
+  const tmp = file(`${name}.${randomBytes(4).toString('hex')}.tmp`); // writes can overlap (worker save + settings change)
   await writeFile(tmp, JSON.stringify(data), { mode: 0o600 }); // settings hold the device token: this user only
   await rename(tmp, file(name));
 }

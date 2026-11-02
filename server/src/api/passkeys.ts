@@ -1,6 +1,6 @@
 // Passkeys: passwordless browser login and per-user passkey management.
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, HttpError } from '../http.ts';
+import { json, noContent, readJson, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import { loginWithPasskey, createSession, passkeyUserHandle, requirePassword } from '../auth.ts';
 import type { User } from '../auth.ts';
@@ -63,12 +63,12 @@ export function registerPasskeys(r: Router, authed: (h: Authed) => (ctx: Ctx) =>
   r.patch('/api/me/passkeys/:id', authed(async ({ req, res, params }, user) => {
     const name = String((await readJson(req)).name ?? '').trim().slice(0, 60);
     if (!name) throw new HttpError(400, 'Name is required');
-    await q(`UPDATE passkeys SET name = $3 WHERE id = $1 AND user_id = $2`, [params.id, user.id, name]);
+    await q(`UPDATE passkeys SET name = $3 WHERE id = $1 AND user_id = $2`, [numId(params.id), user.id, name]);
     noContent(res);
   }));
 
   r.delete('/api/me/passkeys/:id', authed(async ({ res, params }, user) => {
-    await q(`DELETE FROM passkeys WHERE id = $1 AND user_id = $2`, [params.id, user.id]);
+    await q(`DELETE FROM passkeys WHERE id = $1 AND user_id = $2`, [numId(params.id), user.id]);
     noContent(res);
   }));
 }

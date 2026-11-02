@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS uploads (
 -- Who started it (a user, or a public link): checked again when the last chunk lands.
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS user_id text REFERENCES users(id) ON DELETE CASCADE;
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS share_id bigint REFERENCES shares(id) ON DELETE CASCADE;
+-- Last chunk received: unfinished uploads expire a day after they last made progress.
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 -- Groupware (CalDAV / CardDAV). ctag doubles as the RFC 6578 sync token.
 CREATE TABLE IF NOT EXISTS calendars (

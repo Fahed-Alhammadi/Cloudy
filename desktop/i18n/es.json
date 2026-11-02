@@ -9,7 +9,6 @@
   "Choose a folder to sync": "Elige una carpeta para sincronizar",
   "Choose the folder to keep in sync": "Elige la carpeta que se sincronizará",
   "Choose what to sync": "Elige qué sincronizar",
-  "Cloudy is up to date.": "Cloudy está actualizado.",
   "Cloudy signed you out": "Cloudy cerró tu sesión",
   "Cloudy {version} is available.": "Cloudy {version} está disponible.",
   "Cloudy {version} is ready": "Cloudy {version} está listo",
@@ -93,5 +92,8 @@
   "{count} items could not be synced": "No se pudieron sincronizar {count} elementos",
   "The name is not allowed": "El nombre no está permitido",
   "Use an https:// address. Plain http:// only works for a server on your local network.": "Usa una dirección https://. El http:// simple solo funciona con un servidor en tu red local.",
-  "Choose \"Restart to update\" in the menu to install it.": "Elige «Reiniciar para actualizar» en el menú para instalarla."
+  "Choose \"Restart to update\" in the menu to install it.": "Elige «Reiniciar para actualizar» en el menú para instalarla.",
+  "Cloudy is up to date. Checked at {time}.": "Cloudy está actualizado. Comprobado a las {time}.",
+  "Could not load the folders: {message}": "No se pudieron cargar las carpetas: {message}",
+  "Try again": "Reintentar"
 }

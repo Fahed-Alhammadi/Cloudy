@@ -11,7 +11,9 @@ const TAG = 'desktop-v';
 const DAY = 24 * 3600 * 1000;
 
 export type UpdateState =
-  | { state: 'idle' | 'checking' | 'none' }
+  | { state: 'idle' | 'checking' }
+  /** up to date; `checkedAt` changes on every check so a manual check is visibly acknowledged */
+  | { state: 'none'; checkedAt: number }
   | { state: 'downloading' | 'ready'; version: string; percent?: number }
   /** newer version, but this build can't install it (development run, .tar.gz): link to the release page */
   | { state: 'available'; version: string; url: string }
@@ -42,6 +44,8 @@ export class Updater {
   state: UpdateState = { state: 'idle' };
   private onChange: (s: UpdateState) => void;
   private busy = false;
+  /** last GitHub answer, reused for repeated manual checks (unauthenticated API: 60 requests per hour) */
+  private last: { at: number; rel: Awaited<ReturnType<typeof latestRelease>> } | null = null;
 
   constructor(onChange: (s: UpdateState) => void) {
     this.onChange = onChange;
@@ -76,17 +80,22 @@ export class Updater {
     if (this.busy || this.state.state === 'ready') return;
     this.busy = true;
     this.set({ state: 'checking' });
+    // Keep "Checking…" on screen for a moment: a check that answers in 100 ms otherwise looks like a dead button.
+    const visible = new Promise((r) => setTimeout(r, 700));
     try {
-      const rel = await latestRelease();
-      if (!rel || !newer(rel.version, app.getVersion())) return this.set({ state: 'none' });
+      const rel = this.last && Date.now() - this.last.at < 30_000 ? this.last.rel : await latestRelease();
+      this.last = { at: Date.now(), rel };
+      await visible;
+      if (!rel || !newer(rel.version, app.getVersion())) return this.set({ state: 'none', checkedAt: Date.now() });
       if (!this.canInstall) return this.set({ state: 'available', version: rel.version, url: rel.url });
       autoUpdater.setFeedURL({ provider: 'generic', url: `https://github.com/${REPO}/releases/download/${rel.tag}` });
       this.set({ state: 'downloading', version: rel.version, percent: 0 });
       const found = await autoUpdater.checkForUpdates();
-      if (!found?.isUpdateAvailable || !found.downloadPromise) return this.set({ state: 'none' });
+      if (!found?.isUpdateAvailable || !found.downloadPromise) return this.set({ state: 'none', checkedAt: Date.now() });
       await found.downloadPromise;
       this.set({ state: 'ready', version: rel.version });
     } catch (e: any) {
+      await visible;
       this.set({ state: 'error', message: e?.message ?? String(e) });
     } finally {
       this.busy = false;

@@ -208,5 +208,8 @@ export function checkName(name: unknown): string {
   if (!n || n === '.' || n === '..' || n.length > 255 || /[\/\\\0]/.test(n)) {
     throw new HttpError(400, 'Invalid name');
   }
+  // Stored under a different name than asked for, a DAV client (Finder, Explorer, rclone) sees its PUT "fail" and
+  // retries for ever, and sync clients make duplicates: say no instead of silently trimming.
+  if (n !== name) throw new HttpError(400, 'Names cannot start or end with a space');
   return n;
 }

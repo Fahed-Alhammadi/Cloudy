@@ -43,7 +43,10 @@ export function sendBlob(
   let start = 0;
   let end = opts.size - 1;
   let status = 200;
-  const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
+  // A resume (If-Range) of a file that changed since gets the whole new file, not a mix of two versions.
+  const ifRange = req.headers['if-range'];
+  const changed = ifRange !== undefined && ifRange !== etag && ifRange !== headers['Last-Modified'];
+  const range = changed ? null : /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
   if (range && opts.size > 0) {
     if (range[1] === '') {
       start = Math.max(0, opts.size - Number(range[2]));
@@ -97,11 +100,17 @@ export async function sendZip(res: ServerResponse, root: Node): Promise<void> {
   let offset = 0;
   let count = 0;
 
+  // A client that goes away must end the walk (the catch below destroys the response): a destroyed response never
+  // drains, and a write waiting for it would keep the blob's read stream and its file descriptor open for good.
   const write = (buf: Buffer) =>
-    new Promise<void>((resolve) => {
+    new Promise<void>((resolve, reject) => {
+      if (res.destroyed || res.writableEnded) return reject(new Error('client disconnected'));
       offset += buf.length;
-      if (res.write(buf)) resolve();
-      else res.once('drain', resolve);
+      if (res.write(buf)) return resolve();
+      const onDrain = () => { res.off('close', onClose); resolve(); };
+      const onClose = () => { res.off('drain', onDrain); reject(new Error('client disconnected')); };
+      res.once('drain', onDrain);
+      res.once('close', onClose);
     });
 
   const addEntry = async (name: string, node: Node | null) => {

@@ -6,6 +6,9 @@ import { config } from './config.ts';
 pg.types.setTypeParser(20, (v: string) => Number(v));
 
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10 });
+// An idle connection dropped by the server (restart, failover, idle timeout) is an 'error' event on the pool;
+// without a listener it would bring the whole process down. The pool discards the client and reconnects on demand.
+pool.on('error', (e) => console.error('database connection lost', e.message));
 
 export type Db = pg.Pool | pg.PoolClient;
 

@@ -22,7 +22,9 @@ Each side "changed" if it differs from base. Here is what each case does:
 | Same size, no history | The bytes are compared first, so a first sync into a folder that already has the files doesn't duplicate them. |
 | Renamed or moved | Detected by inode (local) or node id (server) and repeated on the other side, not transferred again. |
 | Deleted | Goes to the server trash or the computer's trash. |
-| ≥ 100 files and ≥ half the folder deleted at once | The app asks first. "Keep" copies the files back. |
+| ≥ 100 files (or every file of a folder with ≥ 10) and ≥ half of them deleted at once | The app asks first. "Keep" copies the files back. |
+| Cannot be read | Unreadable folders, symlinks, names not allowed on this OS and case duplicates are reported and left alone on both sides. They are never treated as deleted. |
+| Sync folder missing after something was synced | A disk that is not mounted or a moved folder: syncing stops with "Sync folder not found" instead of emptying the server. |
 
 A pass is triggered by:
 

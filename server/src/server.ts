@@ -17,7 +17,7 @@ import { registerPasskeys } from './api/passkeys.ts';
 import { registerFiles, registerUploadChunks, expireUploads } from './api/files.ts';
 import { registerShares } from './api/shares.ts';
 import { registerGroupware } from './api/groupware.ts';
-import { openStream, startLiveUpdates } from './events.ts';
+import { openStream, startLiveUpdates, closeStreams } from './events.ts';
 import { registerOffice, pruneOfficeCache } from './office.ts';
 import { registerMail, expirePasswordResets } from './mail.ts';
 
@@ -86,7 +86,7 @@ const CSP = [
 async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   let rel = url.pathname;
-  if (rel === '/' || rel.startsWith('/app')) rel = '/index.html';
+  if (rel === '/' || rel === '/app' || rel.startsWith('/app/')) rel = '/index.html';
   else if (/^\/s\/[\w-]+$/.test(rel)) rel = '/public.html';
   let decoded: string;
   try { decoded = decodeURIComponent(rel); } catch { return false; }
@@ -173,6 +173,14 @@ server.listen(config.port, () => console.log(`Cloudy ${config.version} listening
 setInterval(jobs, 60 * 60 * 1000).unref();
 void jobs();
 
+// Shutdown: stop accepting, end the live-update streams (they would hold the server open for ever), give uploads
+// and downloads a few seconds, then go. Docker waits 10 s before SIGKILL, so this stays well under that.
 for (const sig of ['SIGTERM', 'SIGINT']) {
-  process.on(sig, () => server.close(() => process.exit(0)));
+  process.on(sig, () => {
+    server.close(() => process.exit(0));
+    closeStreams();
+    server.closeIdleConnections();
+    setTimeout(() => server.closeAllConnections(), 5000).unref();
+    setTimeout(() => process.exit(0), 7000).unref();
+  });
 }

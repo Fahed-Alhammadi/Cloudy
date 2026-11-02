@@ -250,7 +250,7 @@ export function registerUploadChunks(r: Router) {
     } finally {
       busy.delete(u.id);
     }
-    await q(`UPDATE uploads SET received = $2 WHERE id = $1`, [u.id, received]);
+    await q(`UPDATE uploads SET received = $2, updated_at = now() WHERE id = $1`, [u.id, received]);
 
     if (received < u.size) return json(res, { received, done: false });
     const parent = await F.getNode(u.parent_id);
@@ -276,6 +276,7 @@ export function registerUploadChunks(r: Router) {
 }
 
 export async function expireUploads(): Promise<void> {
-  const old = await q<{ id: string }>(`DELETE FROM uploads WHERE created_at < now() - interval '1 day' RETURNING id`);
+  // Keyed on the last chunk, not the start: a big upload resumed over days keeps its session while it makes progress.
+  const old = await q<{ id: string }>(`DELETE FROM uploads WHERE updated_at < now() - interval '1 day' RETURNING id`);
   await Promise.all(old.map((u) => rm(F.uploadPath(u.id), { force: true })));
 }

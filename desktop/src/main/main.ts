@@ -1,6 +1,6 @@
 // Cloudy desktop: a tray (menu bar) app that keeps one local folder in sync with the user's Cloudy files.
 // The settings window (src/ui) talks to this process through the `cloudy` IPC channel (src/preload/preload.ts).
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification, powerMonitor } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification, powerMonitor, net } from 'electron';
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
@@ -22,11 +22,16 @@ let problems: Problem[] = [];
 
 // Development runs can use a separate profile: CLOUDY_USER_DATA=/tmp/cloudy-test npm start
 if (!app.isPackaged && process.env.CLOUDY_USER_DATA) app.setPath('userData', process.env.CLOUDY_USER_DATA);
-if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => showWindow());
+// A second copy only brings the first one's window to the front. (`quit` is asynchronous: `ready` can still fire,
+// so the start-up below is guarded too.)
+const primary = app.requestSingleInstanceLock();
+if (!primary) app.quit();
+else app.on('second-instance', () => showWindow());
+if (process.platform === 'win32') app.setAppUserModelId('io.cloudy.desktop'); // notifications under the Start-menu shortcut's identity
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
-const api = () => new Api(settings.server!, decodeToken(settings) ?? '', userAgent);
+// Electron's fetch goes through Chromium: the system proxy and the OS certificate store (company CAs) work like in a browser.
+const api = () => new Api(settings.server!, decodeToken(settings) ?? '', userAgent, net.fetch);
 const signedIn = () => !!(settings.server && decodeToken(settings) && settings.rootId);
 const configured = () => signedIn() && !!settings.folder;
 
@@ -43,17 +48,25 @@ function messages() {
 
 // ---------------------------------------------------------------- sync engine
 
-async function startEngine(): Promise<void> {
-  engine?.stop();
+async function stopEngine(): Promise<void> {
+  const e = engine;
   engine = null;
+  await e?.stop();
+}
+
+async function startEngine(): Promise<void> {
+  await stopEngine();
   if (!configured()) return refresh();
-  await mkdir(settings.folder!, { recursive: true }).catch(() => {});
+  const state = await loadState();
+  // Only a fresh start gets its folder created. Once something was synced, a missing folder means a disk that is not
+  // mounted or a folder that was moved: syncing a new, empty one would delete everything on the server.
+  if (!state?.base || !Object.keys(state.base).length) await mkdir(settings.folder!, { recursive: true }).catch(() => {});
   engine = new SyncEngine({
     api: api(),
     root: settings.folder!,
     rootId: settings.rootId!,
     excluded: settings.excluded,
-    state: await loadState(),
+    state,
     saveState,
     trash: async (file) => {
       try {
@@ -78,15 +91,22 @@ async function startEngine(): Promise<void> {
     conflictLabel: t('conflicted copy'),
     messages: messages(),
   });
+  // UI failures (a window closing mid-send) must never reach the engine's cycle: the handlers swallow them.
+  let lastPhase = '';
   engine.on('status', (s: Status) => {
-    if (s.phase === 'auth') notify(t('Cloudy signed you out'), t('Sign in again to keep your files in sync.'));
-    refresh();
+    try {
+      if (s.phase === 'auth' && lastPhase !== 'auth') notify(t('Cloudy signed you out'), t('Sign in again to keep your files in sync.'));
+      lastPhase = s.phase;
+      refresh();
+    } catch {}
   });
   engine.on('activity', (a: Activity) => {
-    if (a.kind === 'conflict') notify(t('Edited in two places'), t('Kept both versions of {name}.', { name: path.basename(a.path) }));
-    send({ activity: engine?.activity });
+    try {
+      if (a.kind === 'conflict') notify(t('Edited in two places'), t('Kept both versions of {name}.', { name: path.basename(a.path) }));
+      send({ activity: engine?.activity });
+    } catch {}
   });
-  engine.on('problems', (p: Problem[]) => { problems = p; refresh(); });
+  engine.on('problems', (p: Problem[]) => { problems = p; try { refresh(); } catch {} });
   engine.start();
   if (settings.paused) engine.pause();
 }
@@ -187,7 +207,7 @@ function showWindow(): void {
 }
 
 function send(data: object): void {
-  win?.webContents.send('cloudy:update', data);
+  if (win && !win.isDestroyed()) win.webContents.send('cloudy:update', data);
 }
 
 function snapshot() {
@@ -255,7 +275,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   async login(server: string, user: string, password: string, code?: string) {
     try {
       const url = normalizeServer(server);
-      const r = await Api.login(url, user.trim(), password, code || undefined, `Desktop (${hostname()})`, userAgent);
+      const r = await Api.login(url, user.trim(), password, code || undefined, `Desktop (${hostname()})`, userAgent, net.fetch);
       settings.server = url;
       settings.user = r.user.id;
       settings.displayName = r.user.displayName;
@@ -294,7 +314,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
     const bad = badFolder(folder);
     if (bad) return { error: bad };
     await mkdir(folder, { recursive: true });
-    if (settings.folder !== folder) await clearState();
+    if (settings.folder !== folder) { await stopEngine(); await clearState(); } // the old engine must not save its state again
     settings.folder = folder;
     settings.excluded = excluded;
     await saveSettings(settings);
@@ -339,8 +359,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
       cancelId: 1,
     });
     if (response !== 0) return;
-    engine?.stop();
-    engine = null;
+    await stopEngine();
     await api().revoke().catch(() => {});
     settings = { excluded: [], paused: false, openAtLogin: settings.openAtLogin, server: settings.server, user: settings.user };
     await saveSettings(settings);
@@ -358,6 +377,7 @@ ipcMain.handle('cloudy', (e, name: string, ...args: unknown[]) => {
 // ---------------------------------------------------------------- start
 
 app.whenReady().then(async () => {
+  if (!primary) return;
   if (process.platform === 'darwin') app.dock?.hide();
   settings = await loadSettings();
   await pickDefaultFolder();

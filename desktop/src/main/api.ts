@@ -49,20 +49,25 @@ export function isPrivateHost(host: string): boolean {
   return h.startsWith('fe80:') || h.startsWith('fd') || h.startsWith('fc');
 }
 
+export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
+
 export class Api {
   server: string;
   token: string;
   userAgent: string;
+  /** The app passes Electron's `net.fetch` (system proxy and certificate store); tests use Node's. */
+  fetch: Fetch;
 
-  constructor(server: string, token: string, userAgent = 'Cloudy Desktop') {
+  constructor(server: string, token: string, userAgent = 'Cloudy Desktop', fetchImpl: Fetch = globalThis.fetch) {
     this.server = server;
     this.token = token;
     this.userAgent = userAgent;
+    this.fetch = fetchImpl;
   }
 
   /** Exchanges a username and password (and 2FA code) for a device token. */
-  static async login(server: string, user: string, password: string, code: string | undefined, deviceName: string, userAgent?: string) {
-    const api = new Api(server, '', userAgent);
+  static async login(server: string, user: string, password: string, code: string | undefined, deviceName: string, userAgent?: string, fetchImpl?: Fetch) {
+    const api = new Api(server, '', userAgent, fetchImpl);
     return api.json<{ token: string; user: Me }>('POST', '/api/auth/token', { user, password, code, deviceName });
   }
 
@@ -73,7 +78,7 @@ export class Api {
   }
 
   async request(method: string, path: string, body?: BodyInit, headers: Record<string, string> = {}, signal?: AbortSignal): Promise<Response> {
-    const res = await fetch(this.server + path, { method, headers: this.headers(headers), body, signal });
+    const res = await this.fetch(this.server + path, { method, headers: this.headers(headers), body, signal });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new ApiError(res.status, data?.error || `HTTP ${res.status}`, data);

@@ -9,7 +9,6 @@
   "Choose a folder to sync": "اختر مجلدًا للمزامنة",
   "Choose the folder to keep in sync": "اختر المجلد الذي ستتم مزامنته",
   "Choose what to sync": "اختر ما تريد مزامنته",
-  "Cloudy is up to date.": "Cloudy محدَّث.",
   "Cloudy signed you out": "سجّل Cloudy خروجك",
   "Cloudy {version} is available.": "الإصدار {version} من Cloudy متاح.",
   "Cloudy {version} is ready": "Cloudy {version} جاهز",
@@ -93,5 +92,8 @@
   "{count} items could not be synced": "تعذّرت مزامنة {count} عنصر",
   "The name is not allowed": "الاسم غير مسموح به",
   "Use an https:// address. Plain http:// only works for a server on your local network.": "استخدم عنوانًا يبدأ بـ https://‎. يعمل http://‎ فقط مع خادم على شبكتك المحلية.",
-  "Choose \"Restart to update\" in the menu to install it.": "اختر «إعادة التشغيل للتحديث» من القائمة لتثبيته."
+  "Choose \"Restart to update\" in the menu to install it.": "اختر «إعادة التشغيل للتحديث» من القائمة لتثبيته.",
+  "Cloudy is up to date. Checked at {time}.": "Cloudy محدَّث. تم التحقق في {time}.",
+  "Could not load the folders: {message}": "تعذّر تحميل المجلدات: {message}",
+  "Try again": "أعد المحاولة"
 }

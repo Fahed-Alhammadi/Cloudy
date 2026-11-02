@@ -6,6 +6,7 @@ const app = document.getElementById('app');
 let state = null;
 let view = '';
 let folders = null; // top-level server folders (setup and main view)
+let foldersError = null; // why they could not be loaded (offline, signed out)
 let twoFactor = false;
 let setupFolder = null;
 let setupExcluded = [];
@@ -80,6 +81,10 @@ function loginView() {
 
 function folderList(excluded, onToggle) {
   if (!folders) return h('p', { class: 'muted' }, t('Loading folders…'));
+  if (foldersError) {
+    return h('p', { class: 'muted' }, t('Could not load the folders: {message}', { message: foldersError }), ' ',
+      h('button', { class: 'link', onclick: () => { folders = null; loadFolders().then(render); render(); } }, t('Try again')));
+  }
   if (!folders.length) return h('p', { class: 'muted' }, t('There are no folders on the server yet. Everything will be synced.'));
   return h('ul', { class: 'folders' }, folders.map((name) => h('li', {},
     h('label', { class: 'check' },
@@ -90,7 +95,7 @@ function folderList(excluded, onToggle) {
 
 let loading = null;
 function loadFolders() {
-  loading ??= cloudy.call('folders').then((f) => { folders = f; }, () => { folders = []; }).finally(() => { loading = null; });
+  loading ??= cloudy.call('folders').then((f) => { folders = f; foldersError = null; }, (e) => { folders = []; foldersError = e?.message ?? String(e); }).finally(() => { loading = null; });
   return loading;
 }
 
@@ -191,7 +196,7 @@ function mainView() {
   const u = state.update ?? { state: 'idle' };
   const updateText = {
     checking: t('Checking for updates…'),
-    none: t('Cloudy is up to date.'),
+    none: t('Cloudy is up to date. Checked at {time}.', { time: new Date(u.checkedAt).toLocaleTimeString(locale(), { timeStyle: 'short' }) }),
     downloading: t('Downloading Cloudy {version}… {percent}%', { version: u.version, percent: u.percent ?? 0 }),
     ready: t('Cloudy {version} is ready to install.', { version: u.version }),
     available: t('Cloudy {version} is available.', { version: u.version }),

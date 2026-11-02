@@ -1,5 +1,6 @@
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, HttpError } from '../http.ts';
+import { config } from '../config.ts';
+import { json, noContent, readJson, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import {
   login, createSession, destroySession, hashPassword, checkPasswordStrength,
@@ -58,7 +59,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   });
 
   r.get('/api/me', authed(async ({ res }, user) => {
-    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id });
+    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: config.trashDays });
   }));
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
@@ -139,7 +140,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   }));
 
   r.delete('/api/me/app-passwords/:id', authed(async ({ res, params }, user) => {
-    await q(`DELETE FROM app_passwords WHERE id = $1 AND user_id = $2`, [params.id, user.id]);
+    await q(`DELETE FROM app_passwords WHERE id = $1 AND user_id = $2`, [numId(params.id), user.id]);
     forgetBasicCache();
     noContent(res);
   }));

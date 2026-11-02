@@ -250,15 +250,39 @@ export async function breadcrumb(node: Node, acc: Access): Promise<{ id: number;
  * (at least the root); taking those row locks in any other order deadlocks (parallel uploads from the desktop client
  * or the browser). Call it before touching any of these rows in a transaction.
  */
-async function lockChain(db: Db, startId: number): Promise<void> {
+async function lockChain(db: Db, ...ids: number[]): Promise<void> {
+  // One statement for every chain involved (a move touches two): the rows come back in id order and are locked in
+  // that order, and the owner's root (the smallest id of its tree) is always the first one. So every mutation of a
+  // tree starts by waiting for its root, and nothing taken afterwards can be held by another writer.
   await q(
     `WITH RECURSIVE a AS (
-       SELECT id, parent_id FROM nodes WHERE id = $1
+       SELECT id, parent_id FROM nodes WHERE id = ANY($1::bigint[])
        UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN a ON n.id = a.parent_id)
      SELECT id FROM nodes WHERE id IN (SELECT id FROM a) ORDER BY id FOR UPDATE`,
-    [startId],
+    [ids],
     db,
   );
+}
+
+/**
+ * After the lock: the request's access check saw a live folder, but it (or an ancestor) may have been trashed since.
+ * Writing into it would leave a live file inside the trash.
+ */
+async function assertLive(db: Db, ...ids: number[]): Promise<void> {
+  const r = await one<{ n: number }>(
+    `WITH RECURSIVE a AS (
+       SELECT id, parent_id, deleted_at FROM nodes WHERE id = ANY($1::bigint[])
+       UNION ALL SELECT n.id, n.parent_id, n.deleted_at FROM nodes n JOIN a ON n.id = a.parent_id)
+     SELECT count(*)::int AS n FROM a WHERE deleted_at IS NOT NULL`,
+    [ids],
+    db,
+  );
+  if (r!.n) throw new HttpError(404, 'Not found');
+}
+
+/** The node's size as it is now, inside the transaction: the caller's copy may predate another writer's change. */
+async function sizeOf(db: Db, id: number): Promise<number> {
+  return (await one<{ size: number }>(`SELECT size FROM nodes WHERE id = $1`, [id], db))!.size;
 }
 
 /** Adds `delta` to the size of `startId` and all its ancestors and refreshes their etags. */
@@ -320,6 +344,8 @@ export async function uniqueName(parentId: number, name: string, db: Db = pool):
 export async function createDir(parent: Node, name: string): Promise<Node> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   return tx(async (db) => {
+    await lockChain(db, parent.id);
+    await assertLive(db, parent.id);
     const n = await one<Node>(
       `INSERT INTO nodes (owner, parent_id, name, is_dir) VALUES ($1, $2, $3, true) RETURNING ${COLS}`,
       [parent.owner, parent.id, name],
@@ -346,6 +372,7 @@ export async function writeFile(
   try {
     const out = await tx(async (db) => {
       await lockChain(db, parent.id); // serializes writes to this folder (same name) without deadlocks
+      await assertLive(db, parent.id);
       const existing = await childByName(parent.id, name, db);
       if (existing?.is_dir) throw new HttpError(409, 'A folder with that name exists');
       await checkQuota(db, parent.owner, size);
@@ -397,6 +424,9 @@ export async function moveNode(node: Node, dest: Node, newName: string): Promise
     throw new HttpError(400, 'Cannot move a folder into itself');
   }
   return tx(async (db) => {
+    await lockChain(db, node.id, dest.id);
+    await assertLive(db, node.id, dest.id);
+    const size = await sizeOf(db, node.id);
     const moved = (await one<Node>(
       `UPDATE nodes SET parent_id = $2, name = $3, etag = md5(random()::text) WHERE id = $1 RETURNING ${COLS}`,
       [node.id, dest.id, newName],
@@ -405,8 +435,8 @@ export async function moveNode(node: Node, dest: Node, newName: string): Promise
     if (dest.id === node.parent_id) {
       await propagate(db, dest.id, 0);
     } else {
-      await propagate(db, node.parent_id!, -node.size);
-      await propagate(db, dest.id, node.size);
+      await propagate(db, node.parent_id!, -size);
+      await propagate(db, dest.id, size);
     }
     return moved;
   });
@@ -420,7 +450,10 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
   const created: string[] = [];
   try {
     return await tx(async (db) => {
-      await checkQuota(db, dest.owner, node.size);
+      await lockChain(db, dest.id, node.id);
+      await assertLive(db, dest.id, node.id);
+      const size = await sizeOf(db, node.id);
+      await checkQuota(db, dest.owner, size);
       const copyRec = async (src: Node, parentId: number, name: string): Promise<Node> => {
         const blob = src.blob ? await duplicateBlob(src.blob) : null;
         if (blob) created.push(blob);
@@ -434,7 +467,7 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
         return n;
       };
       const copy = await copyRec(node, dest.id, newName);
-      await propagate(db, dest.id, node.size);
+      await propagate(db, dest.id, size);
       return copy;
     });
   } catch (e) {
@@ -447,6 +480,8 @@ export async function trashNode(node: Node): Promise<void> {
   if (node.parent_id === null) throw new HttpError(400, 'Cannot delete the root folder');
   const where = await nodePath(node.id);
   await tx(async (db) => {
+    await lockChain(db, node.id);
+    const size = await sizeOf(db, node.id);
     await q(
       `WITH RECURSIVE s AS (
          SELECT id FROM nodes WHERE id = $1
@@ -456,13 +491,15 @@ export async function trashNode(node: Node): Promise<void> {
       db,
     );
     await q(`UPDATE nodes SET trashed_root = true, trash_path = $2 WHERE id = $1`, [node.id, where], db);
-    await propagate(db, node.parent_id!, -node.size);
+    await propagate(db, node.parent_id!, -size);
   });
 }
 
 export async function restoreNode(node: Node): Promise<Node> {
   if (!node.trashed_root) throw new HttpError(400, 'Not in trash');
   return tx(async (db) => {
+    await lockChain(db, node.id);
+    const size = await sizeOf(db, node.id);
     let target = node.parent_id ? await getNode(node.parent_id, db) : undefined;
     if (!target || target.deleted_at) target = await rootOf(node.owner, db);
     const name = await uniqueName(target.id, node.name, db);
@@ -481,7 +518,7 @@ export async function restoreNode(node: Node): Promise<Node> {
       [node.id, target.id, name],
       db,
     ))!;
-    await propagate(db, target.id, node.size);
+    await propagate(db, target.id, size);
     return restored;
   });
 }
@@ -529,6 +566,9 @@ export async function listVersions(nodeId: number): Promise<Version[]> {
 
 export async function restoreVersion(node: Node, versionId: number | string): Promise<Node> {
   return tx(async (db) => {
+    await lockChain(db, node.id);
+    await assertLive(db, node.id);
+    node = (await one<Node>(`SELECT ${COLS} FROM nodes WHERE id = $1`, [node.id], db))!; // current content, not the caller's copy
     const v = await one<Version>(`SELECT id, size, mtime, blob FROM versions WHERE id = $1 AND node_id = $2`,
       [versionId, node.id], db);
     if (!v) throw new HttpError(404, 'Version not found');

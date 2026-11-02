@@ -110,7 +110,7 @@ export function registerShares(r: Router, authed: Wrap) {
 
   // Owners delete a share; direct recipients may also leave a user share.
   r.delete('/api/shares/:id', authed(async ({ res, params }, user) => {
-    const s = await one<Share>(`SELECT * FROM shares WHERE id = $1`, [params.id]);
+    const s = await one<Share>(`SELECT * FROM shares WHERE id = $1`, [numId(params.id)]);
     if (!s || (s.owner !== user.id && !(s.type === 'user' && s.share_with === user.id))) throw new HttpError(404, 'Share not found');
     await q(`DELETE FROM shares WHERE id = $1`, [s.id]);
     noContent(res);

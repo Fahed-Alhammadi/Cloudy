@@ -534,6 +534,6 @@ export async function renderTrash(main, ctx) {
     items.length
       ? h('table', { class: 'file-table' }, h('thead', {}, h('tr', {}, h('th', { class: 'col-name' }, t('Name')), h('th', { class: 'col-extra' }, t('Original location')), h('th', { class: 'col-size' }, t('Size')), h('th', { class: 'col-date' }, t('Deleted')), h('th', {}))), h('tbody', {}, rows))
       : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
-    h('p', { class: 'muted small' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.trashDays ?? 30 })),
+    h('p', { class: 'muted small' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
   ));
 }

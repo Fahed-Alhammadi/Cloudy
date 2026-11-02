@@ -84,9 +84,13 @@ const depth = (p: string) => p.split('/').length;
 const sameFile = (l: Local | Entry, b: Local | Entry) => l.size === b.size && l.mtime === b.mtime;
 
 function isNetworkError(e: any): boolean {
-  return (e instanceof TypeError && e.message === 'fetch failed') || ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'UND_ERR_SOCKET']
-    .includes(e?.cause?.code ?? e?.code);
+  const code = String(e?.cause?.code ?? e?.code ?? '');
+  return (e instanceof TypeError && e.message === 'fetch failed') || code.startsWith('UND_ERR')
+    || ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'].includes(code);
 }
+
+/** Signed out, or the server is failing: stops every worker of the cycle instead of failing file by file. */
+const isFatal = (e: any) => (e instanceof ApiError && (e.status === 401 || e.status >= 500)) || isNetworkError(e);
 
 export class SyncEngine extends EventEmitter {
   api: Api;
@@ -98,11 +102,19 @@ export class SyncEngine extends EventEmitter {
   activity: Activity[] = [];
   problems: Problem[] = [];
   private o: EngineOptions;
+  private platform: string;
   private caseInsensitive: boolean;
   private running = false;
   private again = false;
   private paused = false;
   private stopped = false;
+  private signedOut = false;
+  private inflight: Promise<void> | null = null;
+  /**
+   * Paths of this cycle that could not be read or are not allowed (unreadable folders, symlinks, bad names, case
+   * duplicates). They are left alone on both sides: "missing from the scan" must never turn into "deleted".
+   */
+  private unknown = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private interval: NodeJS.Timeout | null = null;
   private watcher: FSWatcher | null = null;
@@ -116,8 +128,8 @@ export class SyncEngine extends EventEmitter {
     this.root = o.root;
     this.rootId = o.rootId;
     this.excluded = o.excluded ?? [];
-    const platform = o.platform ?? process.platform;
-    this.caseInsensitive = platform === 'darwin' || platform === 'win32';
+    this.platform = o.platform ?? process.platform;
+    this.caseInsensitive = this.platform === 'darwin' || this.platform === 'win32';
     this.state = o.state?.rootId === o.rootId ? o.state : { rootId: o.rootId, base: {}, folders: {} };
   }
 
@@ -126,6 +138,7 @@ export class SyncEngine extends EventEmitter {
   /** Starts watching the folder and the server's live events, and syncs now. */
   start(): void {
     this.stopped = false;
+    this.signedOut = false;
     try {
       this.watcher = watch(this.root, { recursive: true }, (_ev, file) => {
         const name = file ? path.basename(String(file)) : '';
@@ -140,13 +153,15 @@ export class SyncEngine extends EventEmitter {
     this.schedule(0);
   }
 
-  stop(): void {
+  /** Stops watching and syncing; resolves once a running cycle has wound down (it saves nothing after this). */
+  async stop(): Promise<void> {
     this.stopped = true;
     this.watcher?.close();
     this.watcher = null;
     if (this.interval) clearInterval(this.interval);
     if (this.timer) clearTimeout(this.timer);
     this.live?.abort();
+    await this.inflight?.catch(() => {});
   }
 
   pause(): void {
@@ -156,6 +171,7 @@ export class SyncEngine extends EventEmitter {
 
   resume(): void {
     this.paused = false;
+    this.signedOut = false;
     this.setStatus({ phase: 'idle' });
     this.schedule(0);
   }
@@ -163,7 +179,7 @@ export class SyncEngine extends EventEmitter {
   get isPaused() { return this.paused; }
 
   schedule(ms = 1000): void {
-    if (this.stopped) return;
+    if (this.stopped || this.signedOut) return; // signed out: nothing works until a new sign-in restarts the engine
     if (this.running) { this.again = true; return; }
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.timer = null; void this.sync(); }, ms);
@@ -189,21 +205,25 @@ export class SyncEngine extends EventEmitter {
   async sync(): Promise<void> {
     if (this.paused || this.running) { if (this.running) this.again = true; return; }
     this.running = true;
+    let finish!: () => void;
+    this.inflight = new Promise<void>((r) => { finish = r; });
     try {
       do {
         this.again = false;
         this.problems = [];
-        for (let i = 0; i < 5 && (await this.cycle()); i++);
+        for (let i = 0; i < 5 && !this.paused && !this.stopped && (await this.cycle()); i++);
         this.emit('problems', this.problems);
       } while (this.again && !this.paused && !this.stopped);
-      if (!this.paused) this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined });
+      if (!this.paused && !this.stopped) this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined });
     } catch (e: any) {
       await this.save(true).catch(() => {});
-      if (e instanceof ApiError && e.status === 401) this.setStatus({ phase: 'auth', current: undefined, error: e.message });
+      if (e instanceof ApiError && e.status === 401) { this.signedOut = true; this.setStatus({ phase: 'auth', current: undefined, error: e.message }); }
       else if (isNetworkError(e)) { this.setStatus({ phase: 'offline', current: undefined, error: e.message }); this.retryLater(); }
       else { this.setStatus({ phase: 'error', current: undefined, error: e?.message ?? String(e) }); this.retryLater(); }
     } finally {
       this.running = false;
+      this.inflight = null;
+      finish();
     }
   }
 
@@ -229,6 +249,7 @@ export class SyncEngine extends EventEmitter {
   private msg(k: MessageKey) { return this.o.messages?.[k] ?? MESSAGES[k]; }
 
   private async save(force = false): Promise<void> {
+    if (this.stopped) return; // a replacement engine (new folder, new account) owns the state file now
     if (!force && Date.now() - this.lastSave < 5000) return;
     this.lastSave = Date.now();
     await this.o.saveState(this.state);
@@ -261,15 +282,22 @@ export class SyncEngine extends EventEmitter {
 
   /** One pass; true when it moved things around and the trees should be read again. */
   async cycle(): Promise<boolean> {
+    if (this.paused || this.stopped) return false;
     const rootStat = await lstat(this.root).catch(() => null);
     if (!rootStat?.isDirectory()) throw new SyncError('missing-folder', `Folder not found: ${this.root}`);
     this.setStatus({ phase: 'syncing', done: 0, total: 0, current: undefined });
+    this.unknown = new Set();
     const remote = await this.scanRemote();
     const local = await this.scanLocal();
     if (await this.applyMoves(local, remote)) { await this.save(true); return true; }
     const again = await this.reconcile(local, remote);
     await this.save(true);
     return again;
+  }
+
+  private isUnknown(p: string): boolean {
+    for (const u of this.unknown) if (p === u || under(p, u)) return true;
+    return false;
   }
 
   private checkName(name: string): string | null {
@@ -312,10 +340,11 @@ export class SyncEngine extends EventEmitter {
         const p = rel ? `${rel}/${c.name}` : c.name;
         if (isIgnored(c.name) || this.isExcluded(p)) continue;
         const bad = this.checkName(c.name);
-        if (bad) { this.problem(p, bad); continue; }
+        if (bad) { this.problem(p, bad); this.unknown.add(p); continue; }
         if (this.caseInsensitive) {
-          const k = c.name.toLowerCase();
-          if (seen.has(k)) { this.problem(p, this.msg('case')); continue; }
+          // APFS/HFS+ also fold Unicode normalization: "é" composed and decomposed are the same file.
+          const k = (this.platform === 'darwin' ? c.name.normalize('NFC') : c.name).toLowerCase();
+          if (seen.has(k)) { this.problem(p, this.msg('case')); this.unknown.add(p); continue; }
           seen.add(k);
         }
         remote.set(p, { dir: c.isDir, id: c.id, etag: c.etag, size: c.size, mtime: c.mtime });
@@ -336,15 +365,17 @@ export class SyncEngine extends EventEmitter {
       } catch (e: any) {
         if (!rel) throw e;
         this.problem(rel, e.message);
+        this.unknown.add(rel); // unreadable, not empty: nothing below it may be deleted on the server
         return;
       }
       for (const name of names) {
         const p = rel ? `${rel}/${name}` : name;
+        if (/^\.cloudy-tmp-/i.test(name)) { await rm(path.join(dir, name), { force: true }).catch(() => {}); continue; } // left by a crash
         if (isIgnored(name) || this.isExcluded(p)) continue;
         const st = await lstat(path.join(dir, name)).catch(() => null);
-        if (!st || !(st.isFile() || st.isDirectory())) continue; // symlinks and special files are skipped
+        if (!st || !(st.isFile() || st.isDirectory())) { this.unknown.add(p); continue; } // symlinks and special files are left alone
         const bad = this.checkName(name);
-        if (bad) { this.problem(p, bad); continue; }
+        if (bad) { this.problem(p, bad); this.unknown.add(p); continue; }
         local.set(p, { dir: st.isDirectory(), size: st.isFile() ? st.size : 0, mtime: Math.floor(st.mtimeMs), ino: st.ino });
         if (st.isDirectory()) await walk(path.join(dir, name), p);
       }
@@ -442,6 +473,7 @@ export class SyncEngine extends EventEmitter {
     const done: string[] = [];
     for (const m of moves) {
       if (done.some((d) => under(m.from, d))) continue; // moved along with its folder
+      if (this.isUnknown(m.from) || this.isUnknown(m.to)) continue;
       try {
         if (m.side === 'remote') {
           const parentId = await this.ensureRemoteDir(parentOf(m.to), remote, local);
@@ -450,6 +482,9 @@ export class SyncEngine extends EventEmitter {
           this.rebase(m.from, m.to);
           if (!moved.isDir) Object.assign(base[m.to], { etag: moved.etag, rmtime: moved.mtime });
         } else {
+          // Something already at the destination (a new local file, or the same name in another case on macOS/
+          // Windows) must not be overwritten: reconcile downloads the moved file and keeps both.
+          if (await lstat(this.full(m.to)).catch(() => null)) continue;
           await mkdir(this.full(parentOf(m.to)), { recursive: true });
           await rename(this.full(m.from), this.full(m.to));
           const r = remote.get(m.to)!;
@@ -480,6 +515,7 @@ export class SyncEngine extends EventEmitter {
 
     for (const p of keys) {
       if (wholeDir.some((d) => under(p, d))) continue;
+      if (this.isUnknown(p)) continue;
       const l = local.get(p);
       const r = remote.get(p);
       const b = base[p];
@@ -516,7 +552,9 @@ export class SyncEngine extends EventEmitter {
       const del = ops.filter((o) => o.op === op);
       const files = del.reduce((n, o) => n + Object.keys(base).filter((k) => (k === o.p || under(k, o.p)) && !base[k].dir).length, 0);
       const total = Object.values(base).filter((e) => !e.dir).length;
-      if (files >= MASS_DELETE && files >= total / 2 && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
+      // Ask for ≥ 100 files, and for a small account losing every one of its files.
+      const suspicious = files >= MASS_DELETE || (files === total && total >= 10);
+      if (suspicious && files >= total / 2 && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
         // Keep them: forgetting the base makes the files "new" on the side that still has them, so they are copied back.
         for (const o of del) { this.forget(o.p); o.op = 'forget'; }
       }
@@ -534,7 +572,7 @@ export class SyncEngine extends EventEmitter {
       try {
         if (await this.execute(o.op, o.p, local.get(o.p), remote.get(o.p), remote, local)) again = true;
       } catch (e: any) {
-        if ((e instanceof ApiError && e.status === 401) || isNetworkError(e)) { fatal ??= e; return; }
+        if (isFatal(e)) { fatal ??= e; return; }
         this.problem(o.p, e?.code === 'EBUSY' || e?.code === 'EPERM' ? this.msg('locked') : e?.message ?? String(e));
       }
       this.setStatus({ done: ++done });
