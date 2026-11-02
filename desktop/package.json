@@ -1,11 +1,11 @@
 {
   "name": "cloudy-desktop",
   "productName": "Cloudy",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Cloudy desktop sync client: keeps a folder on your computer in sync with your Cloudy server.",
   "license": "MIT",
   "author": "Fahed Alhammadi",
-  "homepage": "https://github.com/Fahed-Alhammadi/cloudy",
+  "homepage": "https://github.com/Fahed-Alhammadi/Cloudy",
   "private": true,
   "type": "module",
   "main": "out/main.cjs",

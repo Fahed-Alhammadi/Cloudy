@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { app, net } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
-export const REPO = 'Fahed-Alhammadi/cloudy';
+export const REPO = 'Fahed-Alhammadi/Cloudy';
 const TAG = 'desktop-v';
 const DAY = 24 * 3600 * 1000;
 

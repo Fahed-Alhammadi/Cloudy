@@ -13,7 +13,7 @@
   "publish": [
     {
       "provider": "generic",
-      "url": "https://github.com/Fahed-Alhammadi/cloudy/releases/latest/download"
+      "url": "https://github.com/Fahed-Alhammadi/Cloudy/releases/latest/download"
     }
   ],
   "mac": {

@@ -124,4 +124,4 @@ func retryingConnection<T>(attempts: Int = 4, _ work: () async throws -> T) asyn
     }
 }
 
-let privacyPolicyURL = URL(string: "https://fahed-alhammadi.github.io/cloudy/privacy-policy.html")!
+let privacyPolicyURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/privacy-policy.html")!

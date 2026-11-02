@@ -6,7 +6,7 @@
 
 <p align="center">
   Your own cloud for files, sharing, calendars and contacts, on a server you run yourself.<br>
-  <a href="https://fahed-alhammadi.github.io/cloudy/"><b>Website, screenshots and downloads</b></a>
+  <a href="https://fahed-alhammadi.github.io/Cloudy/"><b>Website, screenshots and downloads</b></a>
 </p>
 
 Cloudy is **one container** (server and database inside) plus apps for every device. The server is free and open
@@ -19,7 +19,7 @@ source, and the apps talk only to your server: no ads, no analytics, no tracking
 | **Web** | built into the server | Files, sharing, calendar, contacts, administration |
 | **Android** | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) | Files, offline files, photo backup, document scanner, calendar, contacts |
 | **iPhone** | [TestFlight beta](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock |
-| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/cloudy/releases/tag/desktop-v1.1.0) (GitHub releases) | Keeps a folder on your computer in sync with your files |
+| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/Cloudy/releases/tag/desktop-v1.1.1) (GitHub releases) | Keeps a folder on your computer in sync with your files |
 | **Other apps** | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar/Contacts |
 
 Desktop downloads: `.dmg` (macOS, Apple silicon or Intel) or `.pkg` (all Macs), `.exe` (Windows), `.AppImage` or
@@ -59,7 +59,7 @@ You need Docker with the Compose plugin. Three steps:
 ```sh
 # 1. Get the compose file
 mkdir cloudy && cd cloudy
-curl -fsSLO https://raw.githubusercontent.com/Fahed-Alhammadi/cloudy/main/docker-compose.yml
+curl -fsSLO https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/docker-compose.yml
 
 # 2. Set the admin password (and anything else you want to change)
 nano docker-compose.yml        # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-your-password-here}

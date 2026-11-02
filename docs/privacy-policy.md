@@ -10,7 +10,7 @@ This privacy policy explains how the **Cloudy** apps for Android (package `io.cl
 desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`) handle your information.
 The table below describes the Android app; the [iPhone app](#iphone-app) and [desktop app](#desktop-app) sections list where they differ.
 Cloudy is developed by Fahed Alhammadi ("we", "us"). The source code is public at
-<https://github.com/Fahed-Alhammadi/cloudy>.
+<https://github.com/Fahed-Alhammadi/Cloudy>.
 
 ## In short
 
@@ -125,6 +125,6 @@ If this policy changes, we will update this page and the "Last updated" date abo
 Questions about this policy or the app:
 
 - Email: [alhammadi.team@gmail.com](mailto:alhammadi.team@gmail.com)
-- GitHub: <https://github.com/Fahed-Alhammadi/cloudy/issues>
+- GitHub: <https://github.com/Fahed-Alhammadi/Cloudy/issues>
 
 For questions about the data stored on a particular Cloudy server, contact that server's operator.

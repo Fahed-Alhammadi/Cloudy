@@ -8,8 +8,8 @@ options:
   developmentLanguage: en
 settings:
   base:
-    MARKETING_VERSION: "1.12.1"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "1.12.2"
+    CURRENT_PROJECT_VERSION: "8"
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: "JEXQBK3SQ5"          # your Apple Team ID (or pick the team in Xcode → Signing & Capabilities)
     CODE_SIGN_STYLE: Automatic
