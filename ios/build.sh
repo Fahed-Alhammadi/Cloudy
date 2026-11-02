@@ -19,8 +19,11 @@ if [ "$1" = "archive" ] || [ "$1" = "upload" ]; then
   mode=$1
   shift
   rm -rf dist/Cloudy.xcarchive
+  # Sign the archive with the (cloud-managed) Apple Distribution certificate right away. The default would sign
+  # with a development certificate first, which a fresh CI runner has to create every time until the account hits
+  # Apple's certificate limit ("Choose a certificate to revoke"); App Store profiles also need no registered device.
   xcodebuild -project Cloudy.xcodeproj -scheme Cloudy -configuration Release -destination 'generic/platform=iOS' \
-    -archivePath dist/Cloudy.xcarchive DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" "$@" archive
+    -archivePath dist/Cloudy.xcarchive DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" CODE_SIGN_IDENTITY="Apple Distribution" "$@" archive
   if [ "$mode" = "upload" ]; then
     cat > dist/ExportOptions.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
