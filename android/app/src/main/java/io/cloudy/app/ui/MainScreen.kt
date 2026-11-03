@@ -53,6 +53,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.People
+import androidx.compose.material.icons.outlined.PersonRemove
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Share
@@ -101,6 +102,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.text.DateFormat
 import java.util.Date
 
@@ -179,6 +184,7 @@ fun MoreScreen(nav: NavController) {
     val context = LocalContext.current
     val user by remember { mutableStateOf(Services.session.user.value) }
     var confirmLogout by remember { mutableStateOf(false) }
+    var deleteAccount by rememberSaveable { mutableStateOf(false) }
     var chooseLanguage by remember { mutableStateOf(false) }
     var lockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
     LaunchedEffect(Unit) { runCatching { Services.api.me() }.onSuccess { Services.session.updateUser(it.copy(rootId = it.rootId.takeIf { r -> r > 0 } ?: user?.rootId ?: 0)) } }
@@ -266,6 +272,11 @@ fun MoreScreen(nav: NavController) {
                     leadingContent = { Badge(Icons.AutoMirrored.Outlined.Logout, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer) },
                     headlineContent = { Text(stringResource(R.string.log_out), color = MaterialTheme.colorScheme.error) },
                 )
+                ListItem(
+                    modifier = Modifier.clickable { deleteAccount = true }, colors = itemColors,
+                    leadingContent = { Badge(Icons.Outlined.PersonRemove, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer) },
+                    headlineContent = { Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error) },
+                )
             }
             // Adding up the offline folder reads the disk: done in the background, shown when ready.
             val offlineBytes by produceState<Long?>(null) { value = withContext(Dispatchers.IO) { Services.offline.usedBytes() } }
@@ -276,10 +287,63 @@ fun MoreScreen(nav: NavController) {
         }
     }
     if (chooseLanguage) LanguageDialog { chooseLanguage = false }
+    if (deleteAccount) DeleteAccountDialog { deleteAccount = false }
     if (confirmLogout) ConfirmDialog(stringResource(R.string.log_out), stringResource(R.string.log_out_text), stringResource(R.string.log_out), { confirmLogout = false }) {
         confirmLogout = false
         scope.launch { Services.api.logout(); Services.session.signOut() }
     }
+}
+
+/**
+ * Deletes the account and everything in it (App Store / Google Play rule: users can delete their account in the app).
+ * Same wording and flow as the web and iPhone apps: explain what goes, confirm with the password, then sign out and
+ * remove what this phone kept (offline copies, photo backup).
+ */
+@Composable
+fun DeleteAccountDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var password by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val done = stringResource(R.string.delete_account_done)
+    val unsupported = stringResource(R.string.delete_account_unsupported)
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text(stringResource(R.string.delete_account_title)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(stringResource(R.string.delete_account_text))
+                OutlinedTextField(
+                    password, { password = it; error = null }, Modifier.fillMaxWidth().padding(top = 16.dp),
+                    label = { Text(stringResource(R.string.delete_account_password)) }, singleLine = true, enabled = !busy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    isError = error != null, supportingText = error?.let { { Text(it) } },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = password.isNotEmpty() && !busy, onClick = {
+                busy = true
+                scope.launch {
+                    try {
+                        Services.api.deleteAccount(password)
+                        BackupSettings(context).enabled = false
+                        Services.offline.clearAll()
+                        Services.session.signOut()
+                        toast(context, done)
+                    } catch (e: Exception) {
+                        // Servers before 1.12 have no self-service deletion.
+                        error = if ((e as? io.cloudy.app.data.ApiException)?.status == 404) unsupported else e.message ?: e.toString()
+                    } finally {
+                        busy = false
+                    }
+                }
+            }) { Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

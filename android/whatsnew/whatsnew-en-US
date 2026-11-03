@@ -1,4 +1,1 @@
-• Welcome screen on first launch: see what the app uses and grant permissions before you sign in
-• Signing in no longer fails when your phone asks about network access on the first connection
-• New app icon
-• App lock hides the app's preview in the recent apps list
+• Delete your account: More → Delete account permanently deletes your account and all your data on the server (needs Cloudy server 1.12 or later)

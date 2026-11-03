@@ -39,6 +39,9 @@ SIMCTL_CHILD_CLOUDY_SERVER=http://localhost:8080 SIMCTL_CHILD_CLOUDY_TOKEN=<devi
   xcrun simctl launch booted io.cloudy.app
 ```
 
+Account deletion without tapping: add `SIMCTL_CHILD_CLOUDY_DELETE_TEST=<password>` (with `CLOUDY_TAB=3`) to open the
+*Delete account* prompt filled in, or `go:<password>` to submit it (Debug builds only; it really deletes the account).
+
 **App Store screenshots and preview video:** [appstore/README.md](appstore/README.md) (`appstore/seed.py` fills a
 throwaway server with the demo account, `appstore/render.py` frames the captures).
 

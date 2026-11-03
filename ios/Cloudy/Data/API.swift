@@ -113,6 +113,8 @@ final class API: @unchecked Sendable {
 
     func logout() async { _ = try? await send("POST", "/api/auth/revoke") }
     func me() async throws -> User { try await get("/api/me") }
+    /// Deletes the account and all its data on the server for good (needs the account password).
+    func deleteAccount(password: String) async throws { try await sendJSON("POST", "/api/me/delete", ["password": password]) }
     func appPasswords() async throws -> [AppPassword] { try await get("/api/me/app-passwords") }
     func revokeAppPassword(_ id: Int64) async throws { try await send("DELETE", "/api/me/app-passwords/\(id)") }
 

@@ -272,4 +272,10 @@
     <string name="welcome_allowed">مسموح</string>
     <string name="welcome_settings">الإعدادات</string>
     <string name="welcome_continue">متابعة</string>
+    <string name="delete_account">حذف الحساب</string>
+    <string name="delete_account_title">حذف الحساب؟</string>
+    <string name="delete_account_text">سيُحذف حسابك وكل ما فيه نهائيًا: الملفات (بما فيها المحذوفات والإصدارات) والمشاركات والروابط والتقويمات وجهات الاتصال والأجهزة. وتُزال أيضًا الملفات المحفوظة دون اتصال على هذا الهاتف. لا يمكن التراجع عن ذلك.</string>
+    <string name="delete_account_password">أكّد بكلمة المرور</string>
+    <string name="delete_account_unsupported">لا يمكن لهذا الخادم حذف الحسابات بعد. اطلب من مشغّله تحديث Cloudy أو حذف حسابك.</string>
+    <string name="delete_account_done">تم حذف حسابك</string>
 </resources>

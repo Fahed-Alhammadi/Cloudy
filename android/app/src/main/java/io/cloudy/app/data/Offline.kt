@@ -136,6 +136,12 @@ class Offline(context: Context, private val api: Api) {
         save()
     }
 
+    /** Removes every offline copy and listing (the account was deleted). */
+    suspend fun clearAll() = io {
+        root.deleteRecursively()
+        state = State()
+    }
+
     /** Walks the whole offline folder: call from a background thread. */
     fun usedBytes(): Long = File(root, "files").walkBottomUp().filter { it.isFile }.sumOf { it.length() }
 }

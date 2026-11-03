@@ -4,7 +4,7 @@ title: Privacy Policy
 
 # Privacy Policy
 
-Last updated: November 2, 2026
+Last updated: November 3, 2026
 
 This privacy policy explains how the **Cloudy** apps for Android (package `io.cloudy.app`), iPhone (bundle ID `io.cloudy.app`) and
 desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`) handle your information.
@@ -110,7 +110,23 @@ Your server operator may set up email so the server can send messages such as pa
 
 - **On your phone:** signing out removes the device token and revokes it on the server. Uninstalling the app (or, on Android, *Settings → Apps → Cloudy → Clear storage*) deletes everything the app stored on the phone, including offline copies.
 - **On your server:** you can delete your own files, calendars and contacts in the app or the web interface. Deleted files go to the trash first, and the server deletes them permanently after a retention period that the operator sets (30 days by default).
-- **Your account:** Cloudy accounts are created by the server operator, not in the app. To delete your account and all its data, ask your server operator, who can do it under *Administration → Users*. If you run the server, you can do it yourself.
+
+### Deleting your account
+
+You can delete your Cloudy account and all its data yourself, at any time:
+
+- **Android app:** *More → Delete account*, then confirm with your password.
+- **iPhone app:** *More → Delete account*, then confirm with your password.
+- **Web:** sign in to your server in a browser, open *Settings → Delete account* and confirm with your password.
+
+This permanently deletes, on your server, your account and everything in it: your files (including the trash and
+older versions), shares and public links, calendars, contacts, app passwords and signed-in devices. Nothing is kept,
+and it can't be undone. Files and links that others shared with you stay with their owners. The app also removes what it
+kept on your phone (offline copies, cached previews) and signs you out.
+
+If you can no longer sign in, ask your server operator: they can delete your account under *Administration → Users*.
+Server backups the operator makes are outside the app's control; ask them how long they keep backups.
+The only administrator of a server can't delete their own account until another user is made an administrator.
 
 ## Children
 

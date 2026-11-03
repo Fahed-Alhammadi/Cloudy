@@ -272,4 +272,10 @@
     <string name="welcome_allowed">Erlaubt</string>
     <string name="welcome_settings">Einstellungen</string>
     <string name="welcome_continue">Weiter</string>
+    <string name="delete_account">Konto löschen</string>
+    <string name="delete_account_title">Konto löschen?</string>
+    <string name="delete_account_text">Dein Konto und alles darin wird endgültig gelöscht: Dateien (auch Papierkorb und Versionen), Freigaben und Links, Kalender, Kontakte und Geräte. Offline gespeicherte Dateien auf diesem Telefon werden ebenfalls entfernt. Das lässt sich nicht rückgängig machen.</string>
+    <string name="delete_account_password">Mit deinem Passwort bestätigen</string>
+    <string name="delete_account_unsupported">Dieser Server kann noch keine Konten löschen. Bitte den Betreiber, Cloudy zu aktualisieren oder dein Konto zu löschen.</string>
+    <string name="delete_account_done">Dein Konto wurde gelöscht</string>
 </resources>

@@ -25,5 +25,5 @@ prev=$(git tag --list "$product-v*" --sort=-v:refname | head -1)
   git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}HEAD -- "$@"
   [ -n "$prev" ] && echo && echo "Since $prev."
 } > release-notes.md
-gh release create "$tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "$title $version" --notes-file release-notes.md --latest="$latest"
+gh release create "$tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "$title v$version" --notes-file release-notes.md --latest="$latest"
 echo "Released $tag"

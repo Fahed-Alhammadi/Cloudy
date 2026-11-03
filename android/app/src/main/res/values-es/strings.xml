@@ -272,4 +272,10 @@
     <string name="welcome_allowed">Permitido</string>
     <string name="welcome_settings">Ajustes</string>
     <string name="welcome_continue">Continuar</string>
+    <string name="delete_account">Eliminar cuenta</string>
+    <string name="delete_account_title">¿Eliminar la cuenta?</string>
+    <string name="delete_account_text">Se eliminarán para siempre tu cuenta y todo su contenido: archivos (incluidos la papelera y las versiones), elementos compartidos y enlaces, calendarios, contactos y dispositivos. También se borran los archivos sin conexión de este teléfono. No se puede deshacer.</string>
+    <string name="delete_account_password">Confirma con tu contraseña</string>
+    <string name="delete_account_unsupported">Este servidor aún no puede eliminar cuentas. Pide a su operador que actualice Cloudy o que elimine tu cuenta.</string>
+    <string name="delete_account_done">Tu cuenta se ha eliminado</string>
 </resources>

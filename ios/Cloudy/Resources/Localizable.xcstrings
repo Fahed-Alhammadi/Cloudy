@@ -1351,6 +1351,34 @@
         }
       }
     },
+    "Couldn’t delete your account" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تعذّر حذف حسابك"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein Konto konnte nicht gelöscht werden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo eliminar tu cuenta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impossible de supprimer votre compte"
+          }
+        }
+      }
+    },
     "Create" : {
       "localizations" : {
         "ar" : {
@@ -1459,6 +1487,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Supprimer"
+          }
+        }
+      }
+    },
+    "Delete account" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "حذف الحساب"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konto löschen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eliminar cuenta"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer le compte"
+          }
+        }
+      }
+    },
+    "Delete account?" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "حذف الحساب؟"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konto löschen?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Eliminar la cuenta?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprimer le compte ?"
           }
         }
       }
@@ -1655,6 +1739,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Supprimer cet événement ?"
+          }
+        }
+      }
+    },
+    "Deletes your account and all your data on this server for good." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يحذف حسابك وجميع بياناتك على هذا الخادم نهائيًا."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löscht dein Konto und alle deine Daten auf diesem Server endgültig."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elimina para siempre tu cuenta y todos tus datos de este servidor."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Supprime définitivement votre compte et toutes vos données sur ce serveur."
           }
         }
       }
@@ -5155,6 +5267,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ce dossier est vide"
+          }
+        }
+      }
+    },
+    "This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. Files downloaded to this iPhone are removed too. It can’t be undone." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "سيُحذف حسابك وكل ما فيه نهائيًا: الملفات (بما فيها المحذوفات والإصدارات) والمشاركات والروابط والتقويمات وجهات الاتصال والأجهزة. وتُزال أيضًا الملفات التي نُزّلت على هذا الـ iPhone. لا يمكن التراجع عن ذلك."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dein Konto und alles darin wird endgültig gelöscht: Dateien (auch Papierkorb und Versionen), Freigaben und Links, Kalender, Kontakte und Geräte. Auf dieses iPhone geladene Dateien werden ebenfalls entfernt. Das lässt sich nicht rückgängig machen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Se eliminarán para siempre tu cuenta y todo su contenido: archivos (incluidos la papelera y las versiones), elementos compartidos y enlaces, calendarios, contactos y dispositivos. También se borran los archivos descargados en este iPhone. No se puede deshacer."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre compte et tout son contenu seront définitivement supprimés : fichiers (y compris la corbeille et les versions), partages et liens, calendriers, contacts et appareils. Les fichiers téléchargés sur cet iPhone sont aussi supprimés. Cette action est irréversible."
+          }
+        }
+      }
+    },
+    "This server can’t delete accounts yet. Ask its operator to update Cloudy or to delete your account." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لا يمكن لهذا الخادم حذف الحسابات بعد. اطلب من مشغّله تحديث Cloudy أو حذف حسابك."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Server kann noch keine Konten löschen. Bitte den Betreiber, Cloudy zu aktualisieren oder dein Konto zu löschen."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este servidor aún no puede eliminar cuentas. Pide a su operador que actualice Cloudy o que elimine tu cuenta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce serveur ne peut pas encore supprimer de comptes. Demandez à son administrateur de mettre Cloudy à jour ou de supprimer votre compte."
           }
         }
       }

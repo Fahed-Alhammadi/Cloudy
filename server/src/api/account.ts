@@ -77,6 +77,22 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     noContent(res);
   }));
 
+  // Users delete their own account from the apps and the web (App Store 5.1.1(v), Google Play account deletion):
+  // everything goes (files incl. trash and versions, shares, calendars, contacts, devices, sessions), confirmed with
+  // the password. POST, not DELETE with a body, which some proxies drop. The last administrator can't leave the server
+  // without one.
+  r.post('/api/me/delete', authed(async ({ req, res }, user) => {
+    await requirePassword(req, user.id, (await readJson(req)).password);
+    if (user.is_admin) {
+      const others = await one<{ n: number }>(`SELECT count(*)::int AS n FROM users WHERE is_admin AND NOT disabled AND id <> $1`, [user.id]);
+      if (!others?.n) throw new HttpError(409, 'You are the only administrator. Make another user an administrator first.');
+    }
+    await deleteUser(user.id);
+    forgetBasicCache();
+    await destroySession(req, res);
+    noContent(res);
+  }));
+
   // ---------------------------------------------------------------- two-factor authentication
   // 1. setup: create a secret (kept pending) and return it with a QR code for the authenticator app.
   r.post('/api/me/2fa/setup', authed(async ({ res }, user) => {

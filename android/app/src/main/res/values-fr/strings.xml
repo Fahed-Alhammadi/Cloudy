@@ -272,4 +272,10 @@
     <string name="welcome_allowed">Autorisé</string>
     <string name="welcome_settings">Paramètres</string>
     <string name="welcome_continue">Continuer</string>
+    <string name="delete_account">Supprimer le compte</string>
+    <string name="delete_account_title">Supprimer le compte ?</string>
+    <string name="delete_account_text">Votre compte et tout son contenu seront définitivement supprimés : fichiers (y compris la corbeille et les versions), partages et liens, calendriers, contacts et appareils. Les fichiers hors ligne sur ce téléphone sont aussi supprimés. Cette action est irréversible.</string>
+    <string name="delete_account_password">Confirmez avec votre mot de passe</string>
+    <string name="delete_account_unsupported">Ce serveur ne peut pas encore supprimer de comptes. Demandez à son administrateur de mettre Cloudy à jour ou de supprimer votre compte.</string>
+    <string name="delete_account_done">Votre compte a été supprimé</string>
 </resources>

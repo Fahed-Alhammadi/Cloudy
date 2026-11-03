@@ -88,6 +88,8 @@ class Api(private val session: Session) {
     suspend fun setLanguage(code: String?) { sendJson("PATCH", "/api/me", buildJsonObject { put("language", code) }) }
     suspend fun appPasswords(): List<AppPassword> = decode(send("GET", "/api/me/app-passwords"))
     suspend fun revokeAppPassword(id: Long) { send("DELETE", "/api/me/app-passwords/$id") }
+    /** Deletes the account and all its data on the server for good (needs the account password). */
+    suspend fun deleteAccount(password: String) { sendJson("POST", "/api/me/delete", buildJsonObject { put("password", password) }) }
 
     // ---------------------------------------------------------------- files
     suspend fun node(id: Long): NodeListing = decode(send("GET", "/api/nodes/$id"))

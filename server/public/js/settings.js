@@ -83,7 +83,33 @@ export async function renderSettings(main, ctx) {
           rerender();
         } catch (e) { showError(e); }
       } }, icon('plus'), t('Create app password'))),
+
+    deleteAccountCard(),
   ));
+}
+
+// ---------------------------------------------------------------- delete account
+
+// Same wording and flow as the Android and iPhone apps: explain what goes, confirm with the password, then sign out.
+function deleteAccountCard() {
+  const open = async () => {
+    const pw = h('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
+    let deleted = false;
+    await modal({
+      title: t('Delete account?'),
+      body: h('div', {},
+        h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. It can’t be undone.')),
+        h('label', { class: 'field' }, h('span', {}, t('Confirm with your password')), pw)),
+      buttons: [{ label: t('Cancel'), value: null }, { label: t('Delete account'), value: 'ok', primary: true, danger: true }],
+      onSubmit: async () => {
+        try { await post('/api/me/delete', { password: pw.value }); deleted = true; return true; } catch (e) { showError(e); return false; }
+      },
+    });
+    if (deleted) location.reload(); // the session is gone: back to the sign-in page
+  };
+  return h('div', { class: 'card' }, h('h2', {}, t('Delete account')),
+    h('p', {}, t('Deletes your account and all your data on this server for good.')),
+    h('button', { class: 'btn danger', onclick: open }, icon('trash'), t('Delete account')));
 }
 
 // ---------------------------------------------------------------- passkeys

@@ -5,6 +5,10 @@ struct MoreView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("appLock") private var appLock = false
     @State private var confirmSignOut = false
+    @State private var confirmDelete = false
+    @State private var deletePassword = ""
+    @State private var deleting = false
+    @State private var deleteError: String?
 
     private var version: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
@@ -64,6 +68,15 @@ struct MoreView: View {
                 Section {
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                 }
+                // App Store 5.1.1(v): the account can be deleted in the app. Same wording and flow as the web and Android.
+                Section {
+                    Button(role: .destructive) { deletePassword = ""; confirmDelete = true } label: {
+                        if deleting { HStack { Text("Delete account"); Spacer(); ProgressView() } } else { Text("Delete account") }
+                    }
+                    .disabled(deleting)
+                } footer: {
+                    Text("Deletes your account and all your data on this server for good.")
+                }
             }
             .navigationTitle("More")
             .withRoutes()
@@ -73,6 +86,45 @@ struct MoreView: View {
             } message: {
                 Text("Files downloaded to this iPhone are removed. Your data stays on the server.")
             }
+            #if DEBUG
+            // Simulator testing: CLOUDY_DELETE_TEST=<password> opens the prompt filled in; go:<password> also submits it.
+            .task {
+                guard let v = ProcessInfo.processInfo.environment["CLOUDY_DELETE_TEST"] else { return }
+                try? await Task.sleep(for: .seconds(1.5))
+                if v.hasPrefix("go:") { deletePassword = String(v.dropFirst(3)); await deleteAccount() }
+                else { deletePassword = v; confirmDelete = true }
+            }
+            #endif
+            .alert("Delete account?", isPresented: $confirmDelete) {
+                SecureField("Password", text: $deletePassword)
+                Button("Delete account", role: .destructive) { Task { await deleteAccount() } }
+                    .disabled(deletePassword.isEmpty)
+                Button("Cancel", role: .cancel) { deletePassword = "" }
+            } message: {
+                Text("This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. Files downloaded to this iPhone are removed too. It can’t be undone.")
+            }
+            .alert("Couldn’t delete your account", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(deleteError ?? "")
+            }
+        }
+    }
+}
+
+extension MoreView {
+    private func deleteAccount() async {
+        let password = deletePassword
+        deletePassword = ""
+        deleting = true
+        defer { deleting = false }
+        do {
+            try await API.shared.deleteAccount(password: password)
+            session.signOut(revoke: false) // the token died with the account
+        } catch let e as APIError where e.status == 404 { // servers before 1.12 have no self-service deletion
+            deleteError = String(localized: "This server can’t delete accounts yet. Ask its operator to update Cloudy or to delete your account.")
+        } catch {
+            deleteError = error.localizedDescription
         }
     }
 }

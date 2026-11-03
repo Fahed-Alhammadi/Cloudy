@@ -1,4 +1,1 @@
-• Fixed the privacy policy link
-• Share to Cloudy: Cloudy is in every app's share sheet, so photos, videos and files go straight into a folder on your server
-• Welcome screen on first launch: allow local network, camera, photos and Face ID before you sign in
-• Signing in to a server on your local network no longer fails on the first try while iOS asks for permission
+• Delete your account: More → Delete account permanently deletes your account and all your data on the server (needs Cloudy server 1.12 or later)
