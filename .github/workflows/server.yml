@@ -1,7 +1,7 @@
 # Server (container image). Runs when server files change.
 #   - every push / pull request: type-check + end-to-end tests against the built container
 #   - push to main with an unreleased version in server/package.json (scripts/version.py bump server X.Y.Z):
-#     image ghcr.io/<owner>/cloudy:X.Y.Z and :latest, then tag server-vX.Y.Z (no GitHub release)
+#     image ghcr.io/<owner>/cloudy:X.Y.Z and :latest, then tag server-vX.Y.Z + GitHub release with the changes (notes only, not Latest)
 name: Server
 
 on:
@@ -88,8 +88,8 @@ jobs:
             ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
             ${{ steps.v.outputs.image }}:latest
           labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-      - name: Tag (no GitHub release)
+      - name: Tag and GitHub release (notes only)
         if: steps.v.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/github-release.sh server --tag-only
+        run: scripts/github-release.sh server "Server" false server deploy docker-compose.yml .env.example

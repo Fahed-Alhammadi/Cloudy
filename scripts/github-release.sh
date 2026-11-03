@@ -1,10 +1,11 @@
 #!/bin/sh
 # Marks the current commit as released: tag <product>-v<version>. Used by the workflows after a successful publish;
 # the tag is what scripts/version.py checks to know a version is already out.
-#   scripts/github-release.sh <product> --tag-only                           server / android / ios (needs GH_TOKEN)
-#   scripts/github-release.sh <product> <title> <latest:true|false> <path>... desktop: tag + GitHub release
-# Only the desktop app gets a GitHub release (its packages + latest*.yml, which installed apps update from); the server
-# ships as a GHCR image and the phone apps through the stores, so they get only the tag.
+#   scripts/github-release.sh <product> --tag-only                           android / ios (needs GH_TOKEN)
+#   scripts/github-release.sh <product> <title> <latest:true|false> <path>... desktop, server: tag + GitHub release
+# Desktop: release with its packages + latest*.yml (installed apps update from it), marked Latest. Server: release with
+# notes only (admins read what changed before `docker compose pull`), never Latest. The phone apps ship through the
+# stores, so they get only the tag.
 # With a release, the notes list the commits that touched <path>... since the product's previous tag, and
 # ASSETS=<dir> attaches every file in that folder in the same step, so the release never exists without them.
 set -e
