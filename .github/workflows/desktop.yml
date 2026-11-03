@@ -5,7 +5,7 @@
 #     package and the latest*.yml files the installed apps update from (desktop/src/main/updater.ts).
 # Secrets (macOS signing): MACOS_CERTIFICATE_P12 (Developer ID Application, base64 .p12), MACOS_INSTALLER_CERTIFICATE_P12
 #   (Developer ID Installer, for the .pkg), MACOS_CERTIFICATE_PASSWORD (both .p12 files), and the App Store Connect API key
-#   ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY (role Developer or higher) for notarization.
+#   APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _KEY_P8 (role Developer or higher) for notarization.
 # Windows and Linux packages are unsigned.
 name: Desktop
 
@@ -133,9 +133,9 @@ jobs:
         working-directory: desktop
         env:
           RELEASE: ${{ steps.v.outputs.release }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
           if [ "${{ matrix.target }}" = mac ] && [ "$RELEASE" = true ]; then
             printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" # for the notarize step below
@@ -151,8 +151,8 @@ jobs:
         if: matrix.target == 'mac' && steps.v.outputs.release == 'true'
         working-directory: desktop/dist
         env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
         run: |
           for f in *.dmg *.pkg; do
             xcrun notarytool submit "$f" --key "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait \

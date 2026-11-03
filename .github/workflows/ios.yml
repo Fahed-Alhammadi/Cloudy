@@ -2,7 +2,8 @@
 #   - every push / pull request: unsigned simulator build
 #   - push to main with an unreleased MARKETING_VERSION (scripts/version.py bump ios X.Y.Z): signed build uploaded to
 #     App Store Connect → TestFlight (submit it for App Review by hand), then tag ios-vX.Y.Z + GitHub release.
-# Secrets: APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY (contents of AuthKey_<id>.p8; App Store Connect →
+# Secrets: APPLE_TEAM_ID, APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8
+#   (contents of AuthKey_<id>.p8; exposed to the steps as ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY; App Store Connect →
 #   Users and Access → Integrations → App Store Connect API, role Admin for cloud signing).
 #   Optional IOS_CERTIFICATE_P12 (base64 of an "Apple Development" certificate + key exported from Keychain Access) and
 #   IOS_CERTIFICATE_PASSWORD: with them Xcode signs the archive with that certificate instead of creating a new one on
@@ -51,7 +52,7 @@ jobs:
           fetch-depth: 0
       - id: v
         env:
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
           if scripts/version.py released ios; then
             echo "::notice::iOS $(scripts/version.py get ios) is already released. Run scripts/version.py bump ios X.Y.Z to publish a new one."
@@ -82,9 +83,9 @@ jobs:
         if: steps.v.outputs.skip != 'true'
         env:
           DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
           export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
@@ -94,8 +95,8 @@ jobs:
         if: steps.v.outputs.skip != 'true'
         continue-on-error: true # optional: the build is already uploaded
         env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
         run: |
           export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           node scripts/appstore-whatsnew.mjs io.cloudy.app "$(scripts/version.py get ios)" "$(scripts/version.py build ios)" ios/whatsnew/en-US.txt
