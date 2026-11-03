@@ -218,4 +218,4 @@ jobs:
           ASSETS: assets
         run: |
           ls -l assets
-          scripts/github-release.sh desktop "Desktop" false desktop
+          scripts/github-release.sh desktop "Desktop" true desktop

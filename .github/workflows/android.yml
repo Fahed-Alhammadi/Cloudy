@@ -1,7 +1,7 @@
 # Android app (Google Play). Runs when android/ changes.
 #   - every push / pull request: debug build
 #   - push to main with an unreleased versionName (scripts/version.py bump android X.Y.Z): signed bundle → Play
-#     closed-testing track (promote to production by hand in Play Console), then tag android-vX.Y.Z + GitHub release.
+#     closed-testing track (promote to production by hand in Play Console), then tag android-vX.Y.Z. No GitHub release (only the desktop app has those).
 # Secrets: ANDROID_KEYSTORE_BASE64 (base64 of android/cloudy-release.keystore), ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON (Play Developer API service account key).
 # Release notes: android/whatsnew/whatsnew-en-US (one file per Play listing language; update it with each version bump).
@@ -104,11 +104,11 @@ jobs:
           whatsNewDirectory: android/whatsnew # "What's new" per language: whatsnew-<locale>, max 500 characters
           tracks: ${{ vars.PLAY_TRACK || 'alpha' }}
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
-      - name: Tag and GitHub release
+      - name: Tag (no GitHub release)
         if: steps.v.outputs.skip != 'true' && env.PLAY_JSON != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/github-release.sh android "Android" false android
+        run: scripts/github-release.sh android --tag-only
       - name: Not uploaded
         if: steps.v.outputs.skip != 'true' && env.PLAY_JSON == ''
         run: echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set. The bundle is in the workflow artifacts; upload it in Play Console. Not tagged."

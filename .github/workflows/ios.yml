@@ -1,7 +1,7 @@
 # iOS app (App Store). Runs when ios/ changes.
 #   - every push / pull request: unsigned simulator build
 #   - push to main with an unreleased MARKETING_VERSION (scripts/version.py bump ios X.Y.Z): signed build uploaded to
-#     App Store Connect → TestFlight (submit it for App Review by hand), then tag ios-vX.Y.Z + GitHub release.
+#     App Store Connect → TestFlight (submit it for App Review by hand), then tag ios-vX.Y.Z. No GitHub release (only the desktop app has those).
 # Secrets: APPLE_TEAM_ID, APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8
 #   (contents of AuthKey_<id>.p8; exposed to the steps as ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY; App Store Connect →
 #   Users and Access → Integrations → App Store Connect API, role Admin for cloud signing).
@@ -100,8 +100,8 @@ jobs:
         run: |
           export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           node scripts/appstore-whatsnew.mjs io.cloudy.app "$(scripts/version.py get ios)" "$(scripts/version.py build ios)" ios/whatsnew/en-US.txt
-      - name: Tag and GitHub release
+      - name: Tag (no GitHub release)
         if: steps.v.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: scripts/github-release.sh ios "iOS" false ios
+        run: scripts/github-release.sh ios --tag-only

@@ -135,7 +135,7 @@ Each product (server, Android, iPhone, desktop) has its own version and is relea
 - **Android and iPhone:** updated by Google Play and the App Store (TestFlight during the beta). The apps have no
   updater of their own.
 - **Desktop:** each version is a GitHub release with every package and electron-updater's `latest*.yml` files. The
-  app asks the GitHub API for the newest `desktop-v*` release (the repository has other products' releases too),
+  app asks the GitHub API for the newest `desktop-v*` release (older server/Android/iOS releases from before 2026-11-03 are still there),
   points electron-updater at that release, downloads in the background (SHA-512 checked) and installs on restart or
   quit. macOS builds are signed with a Developer ID and notarized.
 
