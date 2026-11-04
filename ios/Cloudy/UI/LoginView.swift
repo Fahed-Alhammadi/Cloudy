@@ -39,9 +39,10 @@ struct LoginView: View {
                         .textContentType(.username).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .focused($focus, equals: .user).submitLabel(.next)
                         .onSubmit { focus = .password }
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                        .focused($focus, equals: .password).submitLabel(.go)
+                    PasswordField("Password", text: $password, isFocused: Binding(
+                        get: { focus == .password },
+                        set: { if $0 { focus = .password } else if focus == .password { focus = nil } }))
+                        .submitLabel(.go)
                         .onSubmit(signIn)
                     if needsCode {
                         TextField("Two-factor code", text: $code)
@@ -63,6 +64,11 @@ struct LoginView: View {
                         }
                     }
                     .disabled(busy || server.isEmpty || user.isEmpty || password.isEmpty)
+                } footer: {
+                    Link("Don't have a server yet?", destination: installURL)
+                        .font(.footnote)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
                 }
                 Section {
                     Button("Forgot password?") {
@@ -75,6 +81,14 @@ struct LoginView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            #if DEBUG
+            // Screenshots: CLOUDY_LOGIN_TEST=<user>:<password> fills in the form.
+            .task {
+                guard let v = ProcessInfo.processInfo.environment["CLOUDY_LOGIN_TEST"], let i = v.firstIndex(of: ":") else { return }
+                user = String(v[..<i])
+                password = String(v[v.index(after: i)...])
+            }
+            #endif
         }
     }
 
@@ -125,3 +139,5 @@ func retryingConnection<T>(attempts: Int = 4, _ work: () async throws -> T) asyn
 }
 
 let privacyPolicyURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/privacy-policy.html")!
+/// How to run a Cloudy server, for people who don't have one yet.
+let installURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#install")!

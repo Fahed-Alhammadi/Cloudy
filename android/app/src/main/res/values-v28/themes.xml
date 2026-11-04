@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Cloudy" parent="Base.Theme.Cloudy">
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+        <!-- Draw into the display cutout area; the insets keep content clear of it. -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

@@ -280,4 +280,11 @@
     <string name="delete_account_password">Confirm with your password</string>
     <string name="delete_account_unsupported">This server can\'t delete accounts yet. Ask its operator to update Cloudy or to delete your account.</string>
     <string name="delete_account_done">Your account was deleted</string>
+    <string name="show_password">Show password</string>
+    <string name="hide_password">Hide password</string>
+    <string name="login_no_server">Don\'t have a server yet?</string>
+    <string name="section_support">Support</string>
+    <string name="help">Help</string>
+    <string name="send_feedback">Send feedback</string>
+    <string name="rate_app">Rate Cloudy</string>
 </resources>

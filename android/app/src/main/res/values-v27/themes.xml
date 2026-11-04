@@ -1,0 +1,5 @@
+<resources>
+    <style name="Theme.Cloudy" parent="Base.Theme.Cloudy">
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+    </style>
+</resources>

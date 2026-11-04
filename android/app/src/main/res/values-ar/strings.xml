@@ -278,4 +278,11 @@
     <string name="delete_account_password">أكّد بكلمة المرور</string>
     <string name="delete_account_unsupported">لا يمكن لهذا الخادم حذف الحسابات بعد. اطلب من مشغّله تحديث Cloudy أو حذف حسابك.</string>
     <string name="delete_account_done">تم حذف حسابك</string>
+    <string name="show_password">إظهار كلمة المرور</string>
+    <string name="hide_password">إخفاء كلمة المرور</string>
+    <string name="login_no_server">ليس لديك خادم بعد؟</string>
+    <string name="section_support">الدعم</string>
+    <string name="help">المساعدة</string>
+    <string name="send_feedback">إرسال ملاحظات</string>
+    <string name="rate_app">تقييم Cloudy</string>
 </resources>

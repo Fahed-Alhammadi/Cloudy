@@ -1,1 +1,3 @@
-• Delete your account: More → Delete account permanently deletes your account and all your data on the server (needs Cloudy server 1.12 or later)
+• Show password: tap the eye in the password field to check what you typed
+• Help, Send feedback and Rate Cloudy in More
+• New to Cloudy? "Don't have a server yet?" on the sign-in screen links to the setup guide

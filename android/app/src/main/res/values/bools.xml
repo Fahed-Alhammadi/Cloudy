@@ -1,0 +1,4 @@
+<resources>
+    <!-- Dark bar icons on the light theme (values-night: light icons). -->
+    <bool name="light_system_bars">true</bool>
+</resources>

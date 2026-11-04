@@ -31,7 +31,7 @@ struct ShareSheetView: View {
                     }
                 }
                 Section {
-                    SecureField("Password (optional)", text: $password)
+                    PasswordField("Password (optional)", text: $password, contentType: nil)
                     Toggle("Expires", isOn: $expires.animation())
                     if expires {
                         DatePicker("Last day", selection: $expiry, in: Date()..., displayedComponents: .date)

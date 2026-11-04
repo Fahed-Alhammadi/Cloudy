@@ -1,4 +1,6 @@
 <resources>
     <color name="ic_launcher_background">#0B6BCB</color>
     <color name="window_bg">#FFFFFF</color>
+    <!-- Behind 3-button navigation on Android 8–9 (enableEdgeToEdge defaults). -->
+    <color name="nav_scrim">#E6FFFFFF</color>
 </resources>

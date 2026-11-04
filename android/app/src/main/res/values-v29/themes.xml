@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.Cloudy" parent="Base.Theme.Cloudy">
+        <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <!-- Transparent bars: gesture navigation stays clear, 3-button navigation gets the system's own scrim. -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:enforceNavigationBarContrast">true</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+    </style>
+</resources>

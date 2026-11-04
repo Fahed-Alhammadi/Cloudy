@@ -66,6 +66,11 @@ struct MoreView: View {
                     LabeledContent("Version", value: version)
                 }
                 Section {
+                    Link(destination: helpURL) { SettingsLabel("Help", icon: "questionmark", color: .settingsBlue).foregroundStyle(.primary) }
+                    Link(destination: feedbackURL) { SettingsLabel("Send feedback", icon: "bubble.left.fill", color: .settingsGreen).foregroundStyle(.primary) }
+                    Link(destination: rateURL) { SettingsLabel("Rate Cloudy", icon: "star.fill", color: .settingsPink).foregroundStyle(.primary) }
+                }
+                Section {
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                 }
                 // App Store 5.1.1(v): the account can be deleted in the app. Same wording and flow as the web and Android.
@@ -129,6 +134,11 @@ extension MoreView {
     }
 }
 
+private let helpURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#readme")!
+private let feedbackURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy/issues")!
+/// Opens the App Store's review sheet (6826676331 = the app's App Store Connect id for io.cloudy.app).
+private let rateURL = URL(string: "https://apps.apple.com/app/id6826676331?action=write-review")!
+
 /// Settings app tones: fixed, deep and solid in light and dark mode (the dynamic system colors are paler since iOS 26).
 /// Orange, green and teal are a shade deeper than Apple's so the white symbol keeps ~3:1 contrast.
 private extension Color {
@@ -139,6 +149,7 @@ private extension Color {
     static let settingsGray = Color(red: 0x8E / 255, green: 0x8E / 255, blue: 0x93 / 255)
     static let settingsIndigo = Color(red: 0x58 / 255, green: 0x56 / 255, blue: 0xD6 / 255)
     static let settingsPurple = Color(red: 0xAF / 255, green: 0x52 / 255, blue: 0xDE / 255)
+    static let settingsPink = Color(red: 0xFF / 255, green: 0x2D / 255, blue: 0x55 / 255)
 }
 
 /// A row label with a white symbol on a colored rounded square, like the Settings app.

@@ -44,6 +44,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Feedback
+import androidx.compose.material.icons.outlined.StarRate
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudDone
@@ -105,7 +108,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import java.text.DateFormat
 import java.util.Date
 
@@ -266,6 +268,18 @@ fun MoreScreen(nav: NavController) {
                 )
                 Entry(R.string.devices, Icons.Outlined.Devices, SettingColor.Indigo, "devices")
             }
+            Text(stringResource(R.string.section_support), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Group {
+                // Web pages open in the browser (no arrow: they leave the app).
+                @Composable
+                fun Link(label: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, open: () -> Unit) =
+                    ListItem(modifier = Modifier.clickable(onClick = open), colors = itemColors, leadingContent = { Badge(icon, color) },
+                        headlineContent = { Text(stringResource(label)) })
+                Link(R.string.help, Icons.AutoMirrored.Outlined.HelpOutline, SettingColor.Blue) { openUrl(context, HELP_URL) }
+                Link(R.string.send_feedback, Icons.Outlined.Feedback, SettingColor.Green) { openUrl(context, FEEDBACK_URL) }
+                Link(R.string.rate_app, Icons.Outlined.StarRate, SettingColor.Pink) { openStoreListing(context) }
+            }
             Group {
                 ListItem(
                     modifier = Modifier.clickable { confirmLogout = true }, colors = itemColors,
@@ -314,11 +328,9 @@ fun DeleteAccountDialog(onDismiss: () -> Unit) {
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(stringResource(R.string.delete_account_text))
-                OutlinedTextField(
-                    password, { password = it; error = null }, Modifier.fillMaxWidth().padding(top = 16.dp),
-                    label = { Text(stringResource(R.string.delete_account_password)) }, singleLine = true, enabled = !busy,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                PasswordField(
+                    password, { password = it; error = null }, stringResource(R.string.delete_account_password),
+                    Modifier.fillMaxWidth().padding(top = 16.dp), enabled = !busy,
                     isError = error != null, supportingText = error?.let { { Text(it) } },
                 )
             }

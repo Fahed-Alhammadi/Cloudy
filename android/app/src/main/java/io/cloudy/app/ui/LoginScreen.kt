@@ -35,7 +35,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.cloudy.app.R
 import io.cloudy.app.Services
@@ -130,9 +129,8 @@ fun LoginScreen() {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
                 OutlinedTextField(user, { user = it }, label = { Text(stringResource(R.string.username)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
-                OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.login_password)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
+                PasswordField(password, { password = it }, stringResource(R.string.login_password), Modifier.fillMaxWidth(),
+                    imeAction = ImeAction.Go,
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (!busy) submit() }))
                 if (needCode) {
                     OutlinedTextField(code, { code = it }, label = { Text(stringResource(R.string.login_code)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -152,6 +150,10 @@ fun LoginScreen() {
                 }, modifier = Modifier.align(Alignment.End)) { Text(stringResource(R.string.login_forgot)) }
                 Text(stringResource(R.string.login_token_note),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                // Cloudy is a client for your own server: new users land here without one, so point them at the install guide.
+                TextButton(onClick = { openUrl(context, INSTALL_URL) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text(stringResource(R.string.login_no_server))
+                }
             }
         }
     }

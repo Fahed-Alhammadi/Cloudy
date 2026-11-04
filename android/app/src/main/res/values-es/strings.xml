@@ -278,4 +278,11 @@
     <string name="delete_account_password">Confirma con tu contraseña</string>
     <string name="delete_account_unsupported">Este servidor aún no puede eliminar cuentas. Pide a su operador que actualice Cloudy o que elimine tu cuenta.</string>
     <string name="delete_account_done">Tu cuenta se ha eliminado</string>
+    <string name="show_password">Mostrar contraseña</string>
+    <string name="hide_password">Ocultar contraseña</string>
+    <string name="login_no_server">¿Aún no tienes un servidor?</string>
+    <string name="section_support">Soporte</string>
+    <string name="help">Ayuda</string>
+    <string name="send_feedback">Enviar comentarios</string>
+    <string name="rate_app">Valorar Cloudy</string>
 </resources>

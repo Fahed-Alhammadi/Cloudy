@@ -278,4 +278,11 @@
     <string name="delete_account_password">Confirmez avec votre mot de passe</string>
     <string name="delete_account_unsupported">Ce serveur ne peut pas encore supprimer de comptes. Demandez à son administrateur de mettre Cloudy à jour ou de supprimer votre compte.</string>
     <string name="delete_account_done">Votre compte a été supprimé</string>
+    <string name="show_password">Afficher le mot de passe</string>
+    <string name="hide_password">Masquer le mot de passe</string>
+    <string name="login_no_server">Pas encore de serveur ?</string>
+    <string name="section_support">Assistance</string>
+    <string name="help">Aide</string>
+    <string name="send_feedback">Envoyer un commentaire</string>
+    <string name="rate_app">Noter Cloudy</string>
 </resources>

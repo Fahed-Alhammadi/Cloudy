@@ -43,6 +43,8 @@ import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.PictureAsPdf
 import androidx.compose.material.icons.outlined.VideoFile
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -291,3 +293,50 @@ inline fun <reified T : Any> jsonSaver(): Saver<T?, String> = Saver(
  */
 @Composable
 fun Modifier.sideInsets(): Modifier = windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))
+
+/** Password field with an eye button that shows or hides what was typed (login, delete account). */
+@Composable
+fun PasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    enabled: Boolean = true,
+    isError: Boolean = false,
+    supportingText: (@Composable () -> Unit)? = null,
+    imeAction: ImeAction = ImeAction.Default,
+    keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+) {
+    var visible by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    OutlinedTextField(
+        value, onValueChange, modifier, enabled = enabled, singleLine = true, isError = isError,
+        label = { Text(label) }, supportingText = supportingText,
+        visualTransformation = if (visible) androidx.compose.ui.text.input.VisualTransformation.None
+            else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false, imeAction = imeAction),
+        keyboardActions = keyboardActions,
+        trailingIcon = {
+            // 48 dp touch target (IconButton), spoken as "Show password" / "Hide password".
+            IconButton(onClick = { visible = !visible }) {
+                Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                    androidx.compose.ui.res.stringResource(if (visible) io.cloudy.app.R.string.hide_password else io.cloudy.app.R.string.show_password))
+            }
+        },
+    )
+}
+
+// Links shown in the app (same targets as the iPhone app).
+const val HELP_URL = "https://github.com/Fahed-Alhammadi/Cloudy#readme"
+const val INSTALL_URL = "https://github.com/Fahed-Alhammadi/Cloudy#install"
+const val FEEDBACK_URL = "https://github.com/Fahed-Alhammadi/Cloudy/issues"
+
+/** Opens a web page in the browser; quietly does nothing when no app can open it. */
+fun openUrl(context: Context, url: String) {
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+}
+
+/** Play Store page of the app (fixed id: debug builds are io.cloudy.app.debug, which is not on Play). */
+fun openStoreListing(context: Context) {
+    val market = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=io.cloudy.app")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (runCatching { context.startActivity(market) }.isFailure) openUrl(context, "https://play.google.com/store/apps/details?id=io.cloudy.app")
+}

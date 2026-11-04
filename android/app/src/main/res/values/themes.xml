@@ -1,6 +1,16 @@
 <resources>
-    <style name="Theme.Cloudy" parent="android:Theme.Material.Light.NoActionBar">
-        <!-- System bars: MainActivity calls enableEdgeToEdge() (transparent bars, content drawn behind them). -->
+    <!--
+    Edge-to-edge from the theme instead of androidx enableEdgeToEdge(): that function sets the bar colors with
+    Window.setStatusBarColor/setNavigationBarColor, which Android 15 deprecated and Play Console flags. The same
+    look comes from these attributes; MainActivity only calls WindowCompat.setDecorFitsSystemWindows(window, false).
+    Values match enableEdgeToEdge()'s defaults: transparent status bar, light/dark scrim behind 3-button navigation
+    (API 26–28; from 29 on the system draws it, see values-v29), bar icons follow the system's dark mode.
+    -->
+    <style name="Base.Theme.Cloudy" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/nav_scrim</item>
+        <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
     </style>
+    <style name="Theme.Cloudy" parent="Base.Theme.Cloudy" />
 </resources>

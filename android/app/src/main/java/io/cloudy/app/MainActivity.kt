@@ -8,12 +8,12 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.IntentCompat
+import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.cloudy.app.data.AppLock
@@ -33,7 +33,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Edge-to-edge: bar colors/icons come from the theme (themes.xml says why not enableEdgeToEdge()).
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         Services.api.onUnauthorized = { runOnUiThread { Services.session.signOut() } }
         handleShare(intent)
         setContent {

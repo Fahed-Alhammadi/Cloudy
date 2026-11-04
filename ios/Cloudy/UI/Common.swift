@@ -155,6 +155,62 @@ extension View {
     }
 }
 
+// MARK: - Password fields
+
+/// A password field with an eye button that shows or hides what was typed (same as the Android app).
+/// `isFocused` mirrors the field's focus, so a screen's own `@FocusState` can move focus into it; focus stays in the
+/// field when the eye is tapped. `.submitLabel` / `.onSubmit` on the view reach the field as usual.
+struct PasswordField: View {
+    private let title: LocalizedStringKey
+    @Binding private var text: String
+    private let isFocused: Binding<Bool>?
+    private let contentType: UITextContentType?
+    @State private var visible = PasswordField.startVisible
+    @FocusState private var focused: Bool
+
+    /// `contentType: nil` for passwords that aren't the account's (share links), so AutoFill doesn't offer it.
+    init(_ title: LocalizedStringKey, text: Binding<String>, isFocused: Binding<Bool>? = nil, contentType: UITextContentType? = .password) {
+        self.title = title
+        self.contentType = contentType
+        self._text = text
+        self.isFocused = isFocused
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Group {
+                if visible { TextField(title, text: $text) } else { SecureField(title, text: $text) }
+            }
+            .textContentType(contentType)
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .focused($focused)
+            Button {
+                let refocus = focused
+                visible.toggle()
+                // The field is a new view now; give it the keyboard back.
+                if refocus { Task { @MainActor in focused = true } }
+            } label: {
+                Image(systemName: visible ? "eye.slash" : "eye")
+                    .foregroundStyle(Color.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .padding(.vertical, -8) // 44 pt tap target without making the row taller
+            .padding(.trailing, -10)
+            .accessibilityLabel(visible ? Text("Hide password") : Text("Show password"))
+        }
+        .onChange(of: isFocused?.wrappedValue ?? false, initial: true) { _, v in if v != focused { focused = v } }
+        .onChange(of: focused) { _, v in if let b = isFocused, b.wrappedValue != v { b.wrappedValue = v } }
+    }
+
+    #if DEBUG
+    private static let startVisible = ProcessInfo.processInfo.environment["CLOUDY_PASSWORD_VISIBLE"] != nil // screenshots
+    #else
+    private static let startVisible = false
+    #endif
+}
+
 /// Runs an API call, putting any error into `error`.
 @MainActor
 func attempt(_ message: Binding<String?>, _ work: @escaping () async throws -> Void) {

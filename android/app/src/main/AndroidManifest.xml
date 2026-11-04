@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -35,6 +36,15 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!--
+        ML Kit's document scanner declares its invisible hand-off activity portrait-only. Android 16 ignores
+        orientation locks on tablets/foldables and Play Console warns about it; the activity shows nothing, so the
+        lock is removed (the scanner UI itself runs in Google Play services).
+        -->
+        <activity
+            android:name="com.google.mlkit.vision.documentscanner.internal.GmsDocumentScanningDelegateActivity"
+            tools:remove="android:screenOrientation" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

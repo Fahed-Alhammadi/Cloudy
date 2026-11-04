@@ -1,3 +1,4 @@
 <resources>
     <color name="window_bg">#14181F</color>
+    <color name="nav_scrim">#801B1B1B</color>
 </resources>
