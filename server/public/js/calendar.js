@@ -11,6 +11,20 @@ const parseDay = (s) => { const [y, m, d] = s.slice(0, 10).split('-').map(Number
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const toDate = (v, allDay) => (allDay ? parseDay(v) : new Date(v));
 
+// Calendar colors come from CalDAV clients too: only plain hex colors are used, and text on a filled
+// (all-day) event is black or white, whichever reads better on that color.
+const DEFAULT_COLOR = '#0b6bcb';
+const safeColor = (c) => (/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(c || '') ? c.slice(0, c.length === 9 ? 7 : c.length) : DEFAULT_COLOR);
+function textOn(hex) {
+  let x = hex.slice(1);
+  if (x.length === 3) x = [...x].map((ch) => ch + ch).join('');
+  const lin = (i) => { const v = parseInt(x.slice(i, i + 2), 16) / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+  const l = 0.2126 * lin(0) + 0.7152 * lin(2) + 0.0722 * lin(4);
+  // White as before on mid-tone colors (the default blue is 4.2:1); black only where white would be hard to read.
+  const onWhite = 1.05 / (l + 0.05);
+  return onWhite >= 4 || onWhite >= (l + 0.05) / 0.05 ? '#fff' : '#111';
+}
+
 function loadHidden() {
   try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]')); } catch { return new Set(); }
 }
@@ -32,7 +46,7 @@ export async function renderCalendar(main, ctx) {
   const events = (await Promise.all(visible.map((c) =>
     get(`/api/calendars/${c.id}/events?start=${gridStart.toISOString()}&end=${gridEnd.toISOString()}`).catch(() => []),
   ))).flat();
-  const colorOf = Object.fromEntries(calendars.map((c) => [c.id, c.color || '#0082c9']));
+  const colorOf = Object.fromEntries(calendars.map((c) => [c.id, safeColor(c.color)]));
 
   const side = h('aside', { class: 'cal-side' },
     h('button', { class: 'btn primary block', onclick: () => eventDialog(null, calendars, rerender, new Date()) }, icon('plus'), t('New event')),
@@ -40,8 +54,8 @@ export async function renderCalendar(main, ctx) {
     h('ul', { class: 'cal-list' }, calendars.map((c) => h('li', {},
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: !hidden.has(c.id), onchange: (e) => { e.target.checked ? hidden.delete(c.id) : hidden.add(c.id); saveHidden(hidden); rerender(); } }),
-        h('span', { class: 'dot', style: { background: c.color || '#0082c9' } }), c.name),
-      h('button', { class: 'icon-btn', 'aria-label': t('Options for {name}', { name: c.name }), onclick: (e) => showMenu(e.currentTarget, [
+        h('span', { class: 'dot', style: { background: colorOf[c.id] } }), c.name),
+      h('button', { class: 'icon-btn', 'aria-haspopup': 'menu', 'aria-label': t('Options for {name}', { name: c.name }), onclick: (e) => showMenu(e.currentTarget, [
         { label: t('Rename'), icon: 'edit', onclick: async () => {
           const name = await promptDialog(t('Rename calendar'), t('Name'), c.name, t('Save'));
           if (name) await patch(`/api/calendars/${c.id}`, { name }).then(rerender, showError);
@@ -68,34 +82,62 @@ export async function renderCalendar(main, ctx) {
     h('button', { class: 'icon-btn', 'aria-label': t('Next month'), onclick: () => { month = new Date(month.getFullYear(), month.getMonth() + 1, 1); rerender(); } }, icon('right')),
   );
 
-  const weekdays = [...Array(7)].map((_, i) => addDays(gridStart, i).toLocaleDateString(locale(), { weekday: 'short' }));
-  const grid = h('div', { class: 'month-grid', role: 'grid' }, weekdays.map((w) => h('div', { class: 'weekday', role: 'columnheader' }, w)));
+  const weekdays = [...Array(7)].map((_, i) => addDays(gridStart, i));
+  // Weeks are ARIA rows (display: contents keeps the 7-column CSS grid); each day is named by its full date.
+  const grid = h('div', { class: 'month-grid', role: 'grid', 'aria-label': title },
+    h('div', { class: 'week', role: 'row' }, weekdays.map((d) => h('div', { class: 'weekday', role: 'columnheader', 'aria-label': d.toLocaleDateString(locale(), { weekday: 'long' }) },
+      d.toLocaleDateString(locale(), { weekday: 'short' })))));
   const today = ymd(new Date());
+  const eventButton = (ev, onOpen) => h('button', {
+    type: 'button',
+    class: `event ${ev.allDay ? 'all-day' : ''}`,
+    style: ev.allDay ? { background: colorOf[ev.calendarId], color: textOn(colorOf[ev.calendarId]) } : { '--cal': colorOf[ev.calendarId] },
+    title: ev.summary,
+    onclick: (e) => { e.stopPropagation(); onOpen(ev); },
+  }, !ev.allDay && h('span', { class: 'time' }, hm(new Date(ev.start))), ev.summary || t('(no title)'));
+  const openEvent = (ev) => eventDialog(ev, calendars, rerender);
+  let week;
   for (let i = 0; i < 42; i++) {
+    if (i % 7 === 0) grid.append(week = h('div', { class: 'week', role: 'row' }));
     const day = addDays(gridStart, i);
     const next = addDays(day, 1);
     const dayEvents = events
       .filter((e) => toDate(e.start, e.allDay) < next && toDate(e.end, e.allDay) > day)
       .sort((a, b) => (b.allDay - a.allDay) || (toDate(a.start, a.allDay) - toDate(b.start, b.allDay)));
+    const label = day.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' })
+      + (dayEvents.length ? ` – ${t('{n} event(s)', { n: dayEvents.length })}` : '');
     const cell = h('div', {
       class: `day ${day.getMonth() !== month.getMonth() ? 'other' : ''} ${ymd(day) === today ? 'today' : ''}`,
-      role: 'gridcell', tabindex: 0,
+      role: 'gridcell', tabindex: 0, 'aria-label': label, 'aria-current': ymd(day) === today ? 'date' : null,
       onclick: () => eventDialog(null, calendars, rerender, day),
-      onkeydown: (e) => { if (e.key === 'Enter') eventDialog(null, calendars, rerender, day); },
+      onkeydown: (e) => { if (e.target === e.currentTarget && e.key === 'Enter') eventDialog(null, calendars, rerender, day); },
     },
-      h('span', { class: 'day-num' }, day.getDate()),
-      dayEvents.slice(0, 4).map((ev) => h('button', {
-        class: `event ${ev.allDay ? 'all-day' : ''}`,
-        style: ev.allDay ? { background: colorOf[ev.calendarId] } : { '--cal': colorOf[ev.calendarId] },
-        title: ev.summary,
-        onclick: (e) => { e.stopPropagation(); eventDialog(ev, calendars, rerender); },
-      }, !ev.allDay && h('span', { class: 'time' }, hm(new Date(ev.start))), ev.summary || t('(no title)'))),
-      dayEvents.length > 4 && h('span', { class: 'more-events' }, t('+{n} more', { n: dayEvents.length - 4 })),
+      h('span', { class: 'day-num', 'aria-hidden': 'true' }, day.getDate()),
+      dayEvents.slice(0, dayEvents.length > 4 ? 3 : 4).map((ev) => eventButton(ev, openEvent)),
+      // Events that don't fit used to be unreachable; "+n more" lists the whole day.
+      dayEvents.length > 4 && h('button', { type: 'button', class: 'more-events', onclick: (e) => {
+        e.stopPropagation();
+        dayDialog(day, dayEvents, eventButton, openEvent, () => eventDialog(null, calendars, rerender, day));
+      } }, t('+{n} more', { n: dayEvents.length - 3 })),
     );
-    grid.append(cell);
+    week.append(cell);
   }
 
   main.replaceChildren(h('section', { class: 'calendar-view' }, side, h('div', { class: 'cal-main' }, header, grid)));
+}
+
+/** All events of one day (opened from "+n more"). */
+async function dayDialog(day, dayEvents, eventButton, openEvent, newEvent) {
+  let picked = null;
+  const body = h('div', { class: 'day-events' });
+  body.append(...dayEvents.map((ev) => eventButton(ev, (e) => { picked = e; body.closest('dialog')?.close(); })));
+  const v = await modal({
+    title: day.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+    body,
+    buttons: [{ label: t('Close'), value: null }, { label: t('New event'), value: 'new', primary: true }],
+  });
+  if (picked) openEvent(picked);
+  else if (v === 'new') newEvent();
 }
 
 async function colorDialog(c, rerender) {
@@ -129,6 +171,25 @@ async function eventDialog(ev, calendars, rerender, day) {
   const syncTimes = () => { f.startTime.hidden = f.endTime.hidden = f.allDay.checked; };
   f.allDay.addEventListener('change', syncTimes);
   syncTimes();
+  f.startTime.setAttribute('aria-label', t('Start time'));
+  f.endTime.setAttribute('aria-label', t('End time'));
+  // Moving the start keeps the event's length (like other calendar apps), so the end can't land before it.
+  const startsAt = () => new Date(`${f.startDate.value}T${f.allDay.checked ? '00:00' : f.startTime.value || '00:00'}`);
+  const endsAt = () => new Date(`${f.endDate.value}T${f.allDay.checked ? '00:00' : f.endTime.value || '00:00'}`);
+  let length = endsAt() - startsAt();
+  const keepLength = () => {
+    const s = startsAt();
+    if (Number.isNaN(s.getTime()) || !(length >= 0)) return;
+    const e = new Date(s.getTime() + length);
+    f.endDate.value = ymd(e);
+    if (!f.allDay.checked) f.endTime.value = hm(e);
+  };
+  const remember = () => { const l = endsAt() - startsAt(); if (l >= 0) length = l; };
+  f.startDate.addEventListener('change', keepLength);
+  f.startTime.addEventListener('change', keepLength);
+  f.endDate.addEventListener('change', remember);
+  f.endTime.addEventListener('change', remember);
+  const error = h('p', { class: 'error wide', role: 'alert' });
 
   const body = h('div', { class: 'form-grid' },
     h('label', { class: 'field wide' }, h('span', {}, t('Title')), f.summary),
@@ -140,6 +201,7 @@ async function eventDialog(ev, calendars, rerender, day) {
     h('label', { class: 'field wide' }, h('span', {}, t('Location')), f.location),
     h('label', { class: 'field wide' }, h('span', {}, t('Description')), f.description),
     ev?.recurring && h('p', { class: 'muted wide' }, t('Changes apply to every occurrence of this repeating event.')),
+    error,
   );
 
   const payload = () => {
@@ -164,6 +226,12 @@ async function eventDialog(ev, calendars, rerender, day) {
           if (!(await confirmDialog(t('Delete event'), ev.recurring ? t('Delete all occurrences of this event?') : t('Delete this event?'), t('Delete'), true))) return false;
           await del(`/api/calendars/${ev.calendarId}/events/${encodeURIComponent(ev.uri)}`);
         } else {
+          if (endsAt() < startsAt()) {
+            error.textContent = t('The event ends before it starts.');
+            (f.allDay.checked ? f.endDate : f.endTime).focus();
+            return false;
+          }
+          error.textContent = '';
           const data = { summary: f.summary.value, location: f.location.value, description: f.description.value, rrule: f.rrule.value, ...payload() };
           if (ev) await put(`/api/calendars/${ev.calendarId}/events/${encodeURIComponent(ev.uri)}`, data);
           else await post(`/api/calendars/${f.calendar.value}/events`, data);

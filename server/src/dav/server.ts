@@ -188,8 +188,11 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
       const parent = await parentOf();
       if (!parent || !parent.is_dir) throw new HttpError(409, 'Parent folder does not exist');
       if (node?.is_dir) throw new HttpError(405, 'Is a folder');
+      // A partial PUT would be stored as the whole file (the rest of it lost). RFC 9110 §9.3.4: answer 400.
+      if (req.headers['content-range']) throw new HttpError(400, 'Partial PUT (Content-Range) is not supported');
+      const name = checkName(segs.at(-1)!); // before the body: a rejected name must not leave the upload in tmp/
       const { file, size } = await F.streamToTemp(req, await F.remainingQuota(parent.owner));
-      const { node: saved, created } = await F.writeFile(parent, checkName(segs.at(-1)!), file, size);
+      const { node: saved, created } = await F.writeFile(parent, name, file, size);
       res.writeHead(created ? 201 : 204, { ETag: `"${saved.etag}"`, 'Content-Length': 0 });
       return void res.end();
     }
@@ -218,6 +221,15 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
       const name = checkName(destSegs.at(-1)!);
       const existing = await F.childByName(destParent.id, name);
       if (existing?.id === node.id) throw new HttpError(403, 'Source and destination are the same');
+      // Checks that would fail the move/copy itself, made before an existing destination goes to the trash: MOVE
+      // /a/b onto /a (Overwrite: T) would otherwise trash a with b inside and then fail, and a folder copied into
+      // itself would lose whatever it replaced.
+      const destChain = await F.ancestors(destParent.id);
+      if (node.is_dir && destChain.some((n) => n.id === node.id)) throw new HttpError(409, 'Cannot move or copy a folder into itself');
+      if (existing && existing.is_dir && (await F.ancestors(node.id)).some((n) => n.id === existing.id)) {
+        throw new HttpError(409, 'Cannot replace a folder that contains the source');
+      }
+      if (node.parent_id === null) throw new HttpError(403, 'Cannot move or copy the root folder');
       if (existing) {
         if (String(req.headers.overwrite ?? 'T').toUpperCase() === 'F') throw new HttpError(412, 'Destination exists');
         await F.trashNode(existing);
@@ -239,6 +251,7 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
 
 function destination(req: IncomingMessage, base: string[]): string[] {
   const raw = String(req.headers.destination ?? '');
+  if (!raw) throw new HttpError(400, 'Destination header required');
   let segs: string[];
   try {
     segs = new URL(raw, 'http://x').pathname.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
@@ -456,8 +469,9 @@ async function report(
 
   if (body.name === 'calendar-multiget' || body.name === 'addressbook-multiget') {
     for (const h of body.children.filter((c) => c.ns === NS.d && c.name === 'href')) {
-      const uri = decodeURIComponent(h.text.split('/').filter(Boolean).pop() ?? '');
-      const o = await G.getObject(k, coll.id, uri);
+      let uri = '';
+      try { uri = decodeURIComponent(h.text.split('/').filter(Boolean).pop() ?? ''); } catch { /* bad %-encoding: 404 below */ }
+      const o = uri ? await G.getObject(k, coll.id, uri) : undefined;
       if (o) await ms.add(objHref(coll, o), objProps(o), pr);
       else ms.addStatus(h.text, 404);
     }

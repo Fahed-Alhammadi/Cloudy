@@ -3,14 +3,14 @@
 // Results are cached per file version (DATA_DIR/cache/previews/<id>-<etag>.pdf), so a document is
 // converted once after each change. One conversion runs at a time; LibreOffice is started per file.
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Router, Ctx } from './http.ts';
 import { json, HttpError } from './http.ts';
 import { config } from './config.ts';
 import type { User } from './auth.ts';
-import { contentDisposition } from './download.ts';
+import { contentDisposition, sendFile } from './download.ts';
 import * as F from './files.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
@@ -166,6 +166,6 @@ export function registerOffice(r: Router, authed: (h: Authed) => (ctx: Ctx) => P
     const st = await stat(pdf);
     await utimes(pdf, new Date(), new Date()).catch(() => {}); // keeps used previews in the cache
     res.writeHead(200, { ...headers, 'Content-Length': st.size });
-    createReadStream(pdf).pipe(res);
+    sendFile(res, pdf); // closes the PDF on disconnect; a cache file pruned meanwhile no longer crashes the process
   }));
 }

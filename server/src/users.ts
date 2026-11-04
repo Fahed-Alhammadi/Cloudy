@@ -18,6 +18,14 @@ export interface NewUser {
   groups?: string[];
 }
 
+/** A quota from the admin API: bytes, or null/'' for unlimited. Anything else is a 400, not a database error. */
+export function quotaValue(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 0) throw new HttpError(400, 'Invalid quota');
+  return n;
+}
+
 export async function createUser(u: NewUser): Promise<void> {
   if (!USER_ID_RE.test(u.id ?? '')) throw new HttpError(400, 'Username may contain letters, digits and . _ @ - (max 64)');
   checkPasswordStrength(u.password);
@@ -28,7 +36,7 @@ export async function createUser(u: NewUser): Promise<void> {
     }
     await q(
       `INSERT INTO users (id, display_name, email, password_hash, is_admin, quota_bytes) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [u.id, u.displayName || u.id, u.email ?? '', hash, !!u.isAdmin, u.quotaBytes ?? null],
+      [u.id, u.displayName || u.id, u.email ?? '', hash, !!u.isAdmin, quotaValue(u.quotaBytes)],
       db,
     );
     await rootOf(u.id, db);
@@ -51,8 +59,12 @@ export async function setGroups(userId: string, groups: string[]): Promise<void>
 export async function deleteUser(id: string): Promise<void> {
   const root = await one<{ id: number }>(`SELECT id FROM nodes WHERE owner = $1 AND parent_id IS NULL`, [id]);
   if (root) await purgeNode(root.id);
-  const uploads = await q<{ id: string }>(`SELECT id FROM uploads WHERE owner = $1`, [id]);
+  // Also the uploads this user started into other people's shared folders (the row goes with the user).
+  const uploads = await q<{ id: string }>(`SELECT id FROM uploads WHERE owner = $1 OR user_id = $1`, [id]);
   await Promise.all(uploads.map((u) => rm(uploadPath(u.id), { force: true })));
+  // share_with is plain text, not a foreign key: without this, a new account created later with the same name
+  // would inherit everything that was shared with the deleted one.
+  await q(`DELETE FROM shares WHERE type = 'user' AND share_with = $1`, [id]);
   await q(`DELETE FROM users WHERE id = $1`, [id]);
 }
 

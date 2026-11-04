@@ -186,6 +186,20 @@ export function clientIp(req: IncomingMessage): string {
   return chain[0] || 'unknown';
 }
 
+/**
+ * Rate-limit key for the client: its IP, but for IPv6 its /64 (one home or one server gets a whole /64, so counting
+ * single addresses would let it try 2^64 times).
+ */
+export function clientNet(req: IncomingMessage): string {
+  const ip = clientIp(req);
+  if (isIP(ip) !== 6) return ip;
+  const [head, tail] = ip.replace(/%.*$/, '').split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail === undefined ? [] : tail ? tail.split(':') : [];
+  const full = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+  return full.slice(0, 4).map((x) => (parseInt(x, 16) || 0).toString(16)).join(':') + '::/64';
+}
+
 /** `decodeURIComponent` that answers 400 instead of crashing the request on `%ZZ`. */
 export function decodePath(s: string): string {
   try {
@@ -205,7 +219,9 @@ export function numId(s: string): string {
 export function checkName(name: unknown): string {
   if (typeof name !== 'string') throw new HttpError(400, 'Name required');
   const n = name.trim();
-  if (!n || n === '.' || n === '..' || n.length > 255 || /[\/\\\0]/.test(n)) {
+  // Control characters XML 1.0 cannot carry (not even escaped) would break every PROPFIND of the folder for its DAV
+  // clients. Tab, LF and CR are valid XML and stay allowed inside a name (at the ends the trim check below says no).
+  if (!n || n === '.' || n === '..' || n.length > 255 || /[\/\\\0-\x08\x0b\x0c\x0e-\x1f]/.test(n)) {
     throw new HttpError(400, 'Invalid name');
   }
   // Stored under a different name than asked for, a DAV client (Finder, Explorer, rclone) sees its PUT "fail" and

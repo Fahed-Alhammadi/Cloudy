@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile, readdir } from 'node:fs/promises';
+import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Transform } from 'node:stream';
@@ -280,6 +280,16 @@ async function assertLive(db: Db, ...ids: number[]): Promise<void> {
   if (r!.n) throw new HttpError(404, 'Not found');
 }
 
+/**
+ * The node as it is now, inside the transaction (after `lockChain`): the caller's copy may predate another writer's
+ * change (moved, trashed, restored or overwritten by a parallel request). 404 when it is gone.
+ */
+async function current(db: Db, id: number): Promise<Node> {
+  const n = await getNode(id, db);
+  if (!n) throw new HttpError(404, 'Not found');
+  return n;
+}
+
 /** The node's size as it is now, inside the transaction: the caller's copy may predate another writer's change. */
 async function sizeOf(db: Db, id: number): Promise<number> {
   return (await one<{ size: number }>(`SELECT size FROM nodes WHERE id = $1`, [id], db))!.size;
@@ -365,6 +375,7 @@ export async function writeFile(
   name: string,
   file: string,
   size: number,
+  opts: { noOverwrite?: boolean } = {},
 ): Promise<{ node: Node; created: boolean }> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   const blob = await adoptBlob(file);
@@ -373,7 +384,13 @@ export async function writeFile(
     const out = await tx(async (db) => {
       await lockChain(db, parent.id); // serializes writes to this folder (same name) without deadlocks
       await assertLive(db, parent.id);
-      const existing = await childByName(parent.id, name, db);
+      let existing = await childByName(parent.id, name, db);
+      // Under the lock, so nothing can take the name in between: a public-link visitor's file never replaces one
+      // the owner created while the upload was running.
+      if (existing && opts.noOverwrite) {
+        name = await uniqueName(parent.id, name, db);
+        existing = undefined;
+      }
       if (existing?.is_dir) throw new HttpError(409, 'A folder with that name exists');
       await checkQuota(db, parent.owner, size);
       if (existing) {
@@ -426,16 +443,22 @@ export async function moveNode(node: Node, dest: Node, newName: string): Promise
   return tx(async (db) => {
     await lockChain(db, node.id, dest.id);
     await assertLive(db, node.id, dest.id);
+    // Again under the lock: two parallel moves (a into b, b into a) both pass the check above, and the second one
+    // would make a cycle that no longer hangs off the root (every recursive query over it then runs for ever).
+    if ((await ancestors(dest.id, db)).some((n) => n.id === node.id)) {
+      throw new HttpError(400, 'Cannot move a folder into itself');
+    }
+    const cur = await current(db, node.id); // parent as it is now (a parallel move may have changed it)
     const size = await sizeOf(db, node.id);
     const moved = (await one<Node>(
       `UPDATE nodes SET parent_id = $2, name = $3, etag = md5(random()::text) WHERE id = $1 RETURNING ${COLS}`,
       [node.id, dest.id, newName],
       db,
     ).catch(conflict))!;
-    if (dest.id === node.parent_id) {
+    if (dest.id === cur.parent_id) {
       await propagate(db, dest.id, 0);
     } else {
-      await propagate(db, node.parent_id!, -size);
+      await propagate(db, cur.parent_id!, -size);
       await propagate(db, dest.id, size);
     }
     return moved;
@@ -452,6 +475,7 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
     return await tx(async (db) => {
       await lockChain(db, dest.id, node.id);
       await assertLive(db, dest.id, node.id);
+      const src = await current(db, node.id); // its content now (blob, size), not the caller's copy
       const size = await sizeOf(db, node.id);
       await checkQuota(db, dest.owner, size);
       const copyRec = async (src: Node, parentId: number, name: string): Promise<Node> => {
@@ -466,7 +490,7 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
         if (src.is_dir) for (const c of await children(src.id, db)) await copyRec(c, n.id, c.name);
         return n;
       };
-      const copy = await copyRec(node, dest.id, newName);
+      const copy = await copyRec(src, dest.id, newName);
       await propagate(db, dest.id, size);
       return copy;
     });
@@ -478,10 +502,14 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
 
 export async function trashNode(node: Node): Promise<void> {
   if (node.parent_id === null) throw new HttpError(400, 'Cannot delete the root folder');
-  const where = await nodePath(node.id);
   await tx(async (db) => {
     await lockChain(db, node.id);
+    // Two parallel deletes of the same item (double click, web + desktop) both pass the access check; the second
+    // one would subtract the size from the folder again. A parallel move changes the parent that loses the size.
+    await assertLive(db, node.id);
+    const cur = await current(db, node.id);
     const size = await sizeOf(db, node.id);
+    const where = pathFromChain(await ancestors(node.id, db));
     await q(
       `WITH RECURSIVE s AS (
          SELECT id FROM nodes WHERE id = $1
@@ -491,7 +519,7 @@ export async function trashNode(node: Node): Promise<void> {
       db,
     );
     await q(`UPDATE nodes SET trashed_root = true, trash_path = $2 WHERE id = $1`, [node.id, where], db);
-    await propagate(db, node.parent_id!, -size);
+    await propagate(db, cur.parent_id!, -size);
   });
 }
 
@@ -499,6 +527,9 @@ export async function restoreNode(node: Node): Promise<Node> {
   if (!node.trashed_root) throw new HttpError(400, 'Not in trash');
   return tx(async (db) => {
     await lockChain(db, node.id);
+    // A parallel restore of the same item already did it: doing it again would add its size to the folder twice.
+    node = await current(db, node.id);
+    if (!node.trashed_root) throw new HttpError(404, 'Not in trash');
     const size = await sizeOf(db, node.id);
     let target = node.parent_id ? await getNode(node.parent_id, db) : undefined;
     if (!target || target.deleted_at) target = await rootOf(node.owner, db);
@@ -523,17 +554,28 @@ export async function restoreNode(node: Node): Promise<Node> {
   });
 }
 
-/** Permanently deletes a node, its subtree, versions and blobs. */
+/**
+ * Permanently deletes a node, its subtree, versions and blobs: a user's root, or something in the trash. An item that
+ * a parallel request restored meanwhile is left alone (deleting it now would also leave its size in the folders).
+ */
 export async function purgeNode(id: number): Promise<void> {
-  const rows = await q<{ id: string; blob: string | null }>(
-    `WITH RECURSIVE s AS (
-       SELECT id, blob FROM nodes WHERE id = $1
-       UNION ALL SELECT n.id, n.blob FROM nodes n JOIN s ON n.parent_id = s.id)
-     SELECT id::text, blob FROM s
-     UNION ALL SELECT NULL, v.blob FROM versions v WHERE v.node_id IN (SELECT id FROM s)`,
-    [id],
-  );
-  await q(`DELETE FROM nodes WHERE id = $1`, [id]);
+  const rows = await tx(async (db) => {
+    await lockChain(db, id);
+    const n = await getNode(id, db);
+    if (!n || (n.parent_id !== null && !n.deleted_at)) return [];
+    const rows = await q<{ id: string; blob: string | null }>(
+      `WITH RECURSIVE s AS (
+         SELECT id, blob FROM nodes WHERE id = $1
+         UNION ALL SELECT n.id, n.blob FROM nodes n JOIN s ON n.parent_id = s.id)
+       SELECT id::text, blob FROM s
+       UNION ALL SELECT NULL, v.blob FROM versions v WHERE v.node_id IN (SELECT id FROM s)`,
+      [id],
+      db,
+    );
+    await q(`DELETE FROM nodes WHERE id = $1`, [id], db);
+    return rows;
+  });
+  if (!rows.length) return;
   await dropBlobs(rows.map((r) => r.blob));
   // Office previews of the purged files (cache/previews/<id>-<etag>.pdf) go too.
   const ids = new Set(rows.map((r) => r.id).filter(Boolean));
@@ -541,6 +583,30 @@ export async function purgeNode(id: number): Promise<void> {
   for (const f of await readdir(previews).catch(() => [] as string[])) {
     if (ids.has(f.split('-')[0])) await rm(path.join(previews, f), { force: true });
   }
+}
+
+/**
+ * Hourly job: leftovers of interrupted work. tmp/ holds request bodies being spooled and preview conversions (both
+ * removed when they end, but not when the process dies); uploads/ files whose session row is gone (a crash between
+ * creating the file and its row, or a row deleted with its user). Only entries untouched for a day: anything in use
+ * is written to all the time.
+ */
+export async function cleanStorage(): Promise<void> {
+  const cutoff = Date.now() - 86400_000;
+  const old = async (dir: string) => {
+    const out: string[] = [];
+    for (const f of await readdir(dir).catch(() => [] as string[])) {
+      const st = await stat(path.join(dir, f)).catch(() => null);
+      if (st && st.mtimeMs < cutoff) out.push(f);
+    }
+    return out;
+  };
+  const tmp = path.join(config.dataDir, 'tmp');
+  for (const f of await old(tmp)) await rm(path.join(tmp, f), { recursive: true, force: true });
+  const files = await old(path.join(config.dataDir, 'uploads'));
+  if (!files.length) return;
+  const live = new Set((await q<{ id: string }>(`SELECT id FROM uploads WHERE id = ANY($1)`, [files])).map((u) => u.id));
+  for (const f of files) if (!live.has(f)) await rm(uploadPath(f), { force: true });
 }
 
 export async function listTrash(owner: string): Promise<Node[]> {

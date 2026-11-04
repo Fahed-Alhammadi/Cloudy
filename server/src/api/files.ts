@@ -243,18 +243,27 @@ export function registerUploadChunks(r: Router) {
           cb(received > u.size ? new HttpError(400, 'More data than declared') : null, chunk);
         },
       });
-      await pipeline(req, limit, createWriteStream(file, { flags: 'a' }));
+      // Bytes past `received` (a chunk cut off by a crash or restart) go first. 'r+', not 'a': the file must already
+      // exist, so a cancelled upload is not recreated holding only this chunk.
+      await truncate(file, u.received).catch((e) => {
+        throw e?.code === 'ENOENT' ? new HttpError(404, 'Upload not found') : e;
+      });
+      await pipeline(req, limit, createWriteStream(file, { flags: 'r+', start: u.received }));
+      // Still ours? DELETE /api/uploads/:id (cancel) may have run while the chunk streamed in.
+      const row = await one(`UPDATE uploads SET received = $2, updated_at = now() WHERE id = $1 RETURNING id`, [u.id, received]);
+      if (!row) throw new HttpError(404, 'Upload not found');
     } catch (e) {
       await truncate(file, u.received).catch(() => {});
       throw e instanceof HttpError ? e : new HttpError(400, 'Upload interrupted');
     } finally {
+      // Only after `received` is saved: a retried chunk arriving in between would read the old offset and be appended twice.
       busy.delete(u.id);
     }
-    await q(`UPDATE uploads SET received = $2, updated_at = now() WHERE id = $1`, [u.id, received]);
 
     if (received < u.size) return json(res, { received, done: false });
     const parent = await F.getNode(u.parent_id);
-    await q(`DELETE FROM uploads WHERE id = $1`, [u.id]);
+    // Claim it: of two requests finishing the same upload (a retry of the last chunk), only one stores the file.
+    if (!(await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [u.id]))) throw new HttpError(404, 'Upload not found');
     if (!parent || parent.deleted_at) {
       await rm(file, { force: true });
       throw new HttpError(409, 'Target folder no longer exists');
@@ -263,7 +272,7 @@ export function registerUploadChunks(r: Router) {
       await rm(file, { force: true });
       throw new HttpError(403, 'No longer allowed to upload here');
     }
-    const { node } = await F.writeFile(parent, u.name, file, received);
+    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id });
     json(res, { received, done: true, node: { id: node.id, name: node.name, size: node.size } });
   });
 

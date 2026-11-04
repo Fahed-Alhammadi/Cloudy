@@ -1,6 +1,6 @@
 // App shell: login, navigation and hash routing.
 import { get, post } from './api.js';
-import { h, icon, showError, showMenu, formatSize } from './ui.js';
+import { h, icon, showError, showMenu, closeMenu, formatSize } from './ui.js';
 import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash } from './files.js';
 import { renderCalendar } from './calendar.js';
 import { renderContacts } from './contacts.js';
@@ -10,7 +10,7 @@ import { loadOfficeInfo } from './office.js';
 import { t, LANGUAGES, currentLanguage, setLanguage, storedLanguage } from './i18n.js';
 
 const app = document.getElementById('app');
-const ctx = { me: null, rerender: () => route(), refreshMe };
+const ctx = { me: null, rerender: () => route({ refresh: true }), refreshMe };
 
 async function refreshMe() {
   ctx.me = await get('/api/me');
@@ -64,9 +64,12 @@ function scheduleRefresh(delay) {
   refreshTimer = setTimeout(async () => {
     if (!ctx.me || !main) return;
     if (userIsBusy()) return scheduleRefresh(1500);
-    const scroll = main.scrollTop;
-    await route();
-    main.scrollTop = scroll;
+    // The page (not <main>) scrolls; keep its position and the focused row, so keyboard users don't lose their place.
+    const scroll = window.scrollY;
+    const focusKey = main.contains(document.activeElement) ? document.activeElement.closest('[data-key]')?.dataset.key : null;
+    await route({ refresh: true });
+    window.scrollTo(0, scroll);
+    if (focusKey) main.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
   }, delay);
 }
 
@@ -106,7 +109,8 @@ function renderLogin(message, notice = false) {
       await refreshMe();
     } catch (err) {
       if (abort.signal.aborted) return;
-      if (!isPasskeyCancel(err)) error.textContent = t(err.message);
+      // A failing background (autofill) request stays quiet; errors after the user picked a passkey are shown.
+      if (!isPasskeyCancel(err) && (picked || !conditional)) error.textContent = t(err.message);
       // Offer passkeys in autofill again after a dialog or a failed sign-in (not after the
       // autofill request itself failed, which would just fail again).
       if ((picked || !conditional) && passkeyAbort === abort && app.contains(user)) {
@@ -235,10 +239,10 @@ let main;
 let nav;
 
 function renderShell() {
-  const search = h('input', { type: 'search', placeholder: t('Search files'), 'aria-label': t('Search files'), onkeydown: (e) => {
+  search = h('input', { type: 'search', placeholder: t('Search files'), 'aria-label': t('Search files'), enterkeyhint: 'search', onkeydown: (e) => {
     if (e.key === 'Enter' && search.value.trim()) location.hash = `#/search/${encodeURIComponent(search.value.trim())}`;
   } });
-  nav = h('nav', { class: 'sidebar', 'aria-label': t('Main') },
+  nav = h('nav', { class: 'sidebar', id: 'sidebar', 'aria-label': t('Main'), onclick: (e) => { if (e.target.closest('a')) setNavOpen(false); } },
     h('ul', {}, NAV.map((item) => item === '-' ? h('li', { class: 'sep' }) : h('li', {},
       h('a', { href: `#/${item[0]}`, 'data-view': item[0] }, icon(item[2]), h('span', {}, t(item[1])))))),
     h('div', { class: 'grow' }),
@@ -251,53 +255,107 @@ function renderShell() {
   );
   main = h('main', { class: 'content', id: 'content', tabindex: -1 });
   const header = h('header', { class: 'topbar' },
-    h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), onclick: () => document.body.classList.toggle('nav-open') }, icon('menu')),
+    menuToggle = h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), 'aria-controls': 'sidebar', 'aria-expanded': 'false',
+      onclick: () => setNavOpen(!document.body.classList.contains('nav-open')) }, icon('menu')),
     h('a', { class: 'brand', href: '#/files' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
     h('div', { class: 'search' }, icon('search'), search),
-    h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), onclick: (e) => showMenu(e.currentTarget, [
+    h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
       { label: ctx.me.displayName, icon: 'contacts', onclick: () => (location.hash = '#/settings') },
-      { label: t('Log out'), icon: 'logout', onclick: async () => { stopLiveUpdates(); await post('/api/logout').catch(() => {}); ctx.me = null; renderLogin(); } },
+      { label: t('Log out'), icon: 'logout', onclick: async () => { stopLiveUpdates(); await post('/api/logout').catch(() => {}); ctx.me = null; document.body.classList.remove('nav-open'); renderLogin(); } },
     ]) }, (ctx.me.displayName || ctx.me.id).slice(0, 1).toUpperCase()),
   );
-  app.replaceChildren(header, h('div', { class: 'layout' }, nav, main));
+  // Phones: the sidebar is a drawer over the page; a tap beside it closes it.
+  const scrim = h('div', { class: 'nav-scrim', 'aria-hidden': 'true', onclick: () => setNavOpen(false) });
+  app.replaceChildren(header, h('div', { class: 'layout' }, nav, scrim, main));
 }
 
-async function route() {
+let menuToggle;
+let search;
+function setNavOpen(open) {
+  document.body.classList.toggle('nav-open', open);
+  menuToggle?.setAttribute('aria-expanded', String(open));
+  if (open) nav.querySelector('a.active, a')?.focus();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('nav-open') && !document.querySelector('dialog[open], .menu')) {
+    setNavOpen(false);
+    menuToggle?.focus();
+  }
+});
+
+// Each route renders into its own element, shown once its data has loaded. A view that finishes late (the user
+// clicked on, or an upload's reload fired after leaving the folder) then writes into a detached element instead of
+// replacing what is on screen.
+let routeSeq = 0;
+async function route({ refresh = false } = {}) {
   if (!ctx.me || !main) return;
+  const seq = ++routeSeq;
   const [, view = 'files', arg] = location.hash.replace(/^#/, '').split('/');
-  document.body.classList.remove('nav-open');
-  nav.querySelectorAll('a').forEach((a) => a.classList.toggle('active', a.dataset.view === view));
+  if (!refresh) { setNavOpen(false); closeMenu(); }
+  nav.querySelectorAll('a').forEach((a) => {
+    const on = a.dataset.view === view;
+    a.classList.toggle('active', on);
+    on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
+  });
+  if (search && view !== 'search' && !refresh) search.value = '';
+  const slot = h('div', { class: 'view' });
+  const shown = () => {
+    if (seq !== routeSeq) return;
+    if (main.firstChild !== slot) {
+      main.replaceChildren(slot);
+      if (!refresh) window.scrollTo(0, 0); // a new view starts at its top
+    }
+  };
+  // Views call slot.replaceChildren(...) when ready; that's the moment to put the slot on screen.
+  const put = slot.replaceChildren.bind(slot);
+  slot.replaceChildren = (...kids) => { put(...kids); shown(); };
   main.setAttribute('aria-busy', 'true');
   try {
     switch (view) {
-      case 'files': await renderFolder(main, arg || ctx.me.rootId, ctx); break;
-      case 'recent': await renderRecent(main, ctx); break;
-      case 'favorites': await renderFavorites(main, ctx); break;
-      case 'shared-in': await renderSharedIn(main, ctx); break;
-      case 'shared-out': await renderSharedOut(main, ctx); break;
-      case 'search': await renderSearch(main, ctx, decodeURIComponent(arg || '')); break;
-      case 'trash': await renderTrash(main, ctx); break;
-      case 'calendar': await renderCalendar(main, ctx); break;
-      case 'contacts': await renderContacts(main, ctx); break;
-      case 'settings': await renderSettings(main, ctx); break;
-      case 'admin': await renderAdmin(main, ctx); break;
-      default: location.hash = '#/files';
+      case 'files': await renderFolder(slot, arg || ctx.me.rootId, ctx); break;
+      case 'recent': await renderRecent(slot, ctx); break;
+      case 'favorites': await renderFavorites(slot, ctx); break;
+      case 'shared-in': await renderSharedIn(slot, ctx); break;
+      case 'shared-out': await renderSharedOut(slot, ctx); break;
+      case 'search': {
+        const query = decodeURIComponent(arg || '');
+        if (search && document.activeElement !== search) search.value = query;
+        await renderSearch(slot, ctx, query);
+        break;
+      }
+      case 'trash': await renderTrash(slot, ctx); break;
+      case 'calendar': await renderCalendar(slot, ctx); break;
+      case 'contacts': await renderContacts(slot, ctx); break;
+      case 'settings': await renderSettings(slot, ctx); break;
+      case 'admin': await renderAdmin(slot, ctx); break;
+      default: location.hash = '#/files'; return;
     }
-    document.title = `${nav.querySelector('a.active span')?.textContent || t('Files')} – Cloudy`;
+    if (seq === routeSeq) document.title = `${nav.querySelector('a.active span')?.textContent || t('Files')} – Cloudy`;
   } catch (e) {
+    if (seq !== routeSeq) return;
     if (e.status === 404 && view === 'files') location.hash = '#/files';
-    else if (e.status !== 401) showError(e);
+    else if (e.status !== 401) {
+      showError(e);
+      // A view that could not load says so (with a way to retry) instead of leaving the previous view under the new title.
+      if (!refresh) {
+        slot.replaceChildren(h('div', { class: 'empty', role: 'alert' }, icon('cloud'), h('p', {}, t('This page could not be loaded.')),
+          h('p', { class: 'muted small' }, t(e.message || String(e))),
+          h('button', { class: 'btn primary', type: 'button', onclick: () => route() }, icon('restore'), t('Try again'))));
+      }
+    }
   } finally {
-    main.removeAttribute('aria-busy');
+    if (seq === routeSeq) main.removeAttribute('aria-busy');
   }
 }
 
-window.addEventListener('hashchange', route);
+window.addEventListener('hashchange', () => route());
 // Only an existing session can expire; at startup "not logged in" is handled below.
 window.addEventListener('cloudy:unauthorized', () => {
   if (!ctx.me) return;
   stopLiveUpdates();
   ctx.me = null;
+  document.body.classList.remove('nav-open');
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   renderLogin(t('Your session has expired. Please log in again.'));
 });
 

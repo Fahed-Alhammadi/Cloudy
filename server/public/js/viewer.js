@@ -23,14 +23,22 @@ export function openViewer(files, start, src) {
   let index = start;
   let dirty = false;
   const stage = h('div', { class: 'viewer-stage' });
-  const title = h('div', { class: 'viewer-title' });
+  const title = h('div', { class: 'viewer-title', id: 'viewer-title' });
   const actions = h('div', { class: 'viewer-actions' });
   const prev = h('button', { class: 'icon-btn viewer-nav prev', 'aria-label': t('Previous'), onclick: () => go(-1) }, icon('left'));
   const next = h('button', { class: 'icon-btn viewer-nav next', 'aria-label': t('Next'), onclick: () => go(1) }, icon('right'));
-  const dlg = h('dialog', { class: 'viewer' },
+  const dlg = h('dialog', { class: 'viewer', 'aria-labelledby': 'viewer-title' },
     h('header', {}, title, actions, h('button', { class: 'icon-btn', 'aria-label': t('Close'), onclick: () => close() }, icon('x'))),
     stage, prev, next,
   );
+
+  // A file that can't be loaded says so in the viewer, with the download as a way out.
+  function failed(e) {
+    showError(e);
+    const node = files[index];
+    stage.replaceChildren(h('div', { class: 'no-preview' }, icon('file'), h('p', {}, t(e?.message || String(e))),
+      h('a', { class: 'btn primary', href: src.url(node, false), download: node.name }, icon('download'), t('Download'))));
+  }
 
   const confirmDiscard = () => confirmDialog(t('Discard changes?'), t('You have unsaved changes.'), t('Discard'), true);
 
@@ -43,7 +51,7 @@ export function openViewer(files, start, src) {
     if (dirty && !(await confirmDiscard())) return;
     const n = files.length;
     index = (index + delta + n) % n;
-    show();
+    show().catch(failed);
   }
 
   async function show() {
@@ -88,7 +96,11 @@ export function openViewer(files, start, src) {
 
   async function showText(node, inline) {
     const res = await fetch(inline, { credentials: 'same-origin' });
+    // An error page must never land in the editor (saving it would overwrite the file).
+    if (!res.ok) throw new Error(await res.json().then((j) => j.error, () => res.statusText));
     const text = await res.text();
+    // The user may have gone on to another file while this one loaded.
+    if (files[index] !== node) return;
     if (!src.canEdit) {
       stage.append(h('pre', { class: 'text-view' }, text));
       return;
@@ -118,12 +130,15 @@ export function openViewer(files, start, src) {
 
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
   dlg.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'TEXTAREA') return;
-    if (e.key === 'ArrowLeft') go(-1);
-    if (e.key === 'ArrowRight') go(1);
+    // Arrow keys inside the editor or a video/audio player (seeking, volume) stay there.
+    if (/^(TEXTAREA|INPUT|VIDEO|AUDIO|SELECT)$/.test(e.target.tagName) || files.length < 2) return;
+    // In right-to-left languages "previous" sits on the right, so the arrows swap too.
+    const rtl = document.documentElement.dir === 'rtl';
+    if (e.key === 'ArrowLeft') go(rtl ? 1 : -1);
+    if (e.key === 'ArrowRight') go(rtl ? -1 : 1);
   });
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
-  show().catch(showError);
+  show().catch(failed);
 }

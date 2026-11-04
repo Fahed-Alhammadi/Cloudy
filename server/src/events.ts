@@ -13,9 +13,21 @@ const clients = new Map<string, Set<ServerResponse>>();
 const MAX_STREAMS_PER_USER = 20;
 const BATCH_MS = 250;
 
+/**
+ * A write after `end()` is an 'error' event on the response, and nobody listens for it: an uncaught exception that
+ * takes the whole server down. An ended stream stays in `clients` until its 'close' event, so a ping or a change in
+ * between (an evicted 21st stream, shutdown) must not write to it.
+ */
+function write(res: ServerResponse, data: string): void {
+  if (!res.writableEnded && !res.destroyed) res.write(data);
+}
+
 export function openStream(userId: string, res: ServerResponse): void {
   const set = clients.get(userId) ?? new Set();
-  if (set.size >= MAX_STREAMS_PER_USER) set.values().next().value?.end();
+  if (set.size >= MAX_STREAMS_PER_USER) {
+    const oldest = set.values().next().value;
+    if (oldest) { set.delete(oldest); oldest.end(); }
+  }
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -25,11 +37,11 @@ export function openStream(userId: string, res: ServerResponse): void {
   res.write('retry: 5000\n\n');
   set.add(res);
   clients.set(userId, set);
-  const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+  const ping = setInterval(() => write(res, ': ping\n\n'), 25_000);
   res.on('close', () => {
     clearInterval(ping);
     set.delete(res);
-    if (!set.size) clients.delete(userId);
+    if (!set.size && clients.get(userId) === set) clients.delete(userId);
   });
 }
 
@@ -40,7 +52,7 @@ export function closeStreams(): void {
 
 function send(userId: string, ev: ChangeEvent): void {
   const data = `event: change\ndata: ${JSON.stringify(ev)}\n\n`;
-  for (const res of clients.get(userId) ?? []) res.write(data);
+  for (const res of clients.get(userId) ?? []) write(res, data);
 }
 
 // ---------------------------------------------------------------- batching and recipients

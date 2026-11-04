@@ -20,7 +20,7 @@ export function pickLanguage(saved: string | null | undefined, req?: IncomingMes
 
 type MailKey =
   | 'open' | 'shareSubject' | 'shareFile' | 'shareFolder' | 'shareGroup'
-  | 'pwSubject' | 'pwText' | 'resetSubject' | 'resetText' | 'resetAction' | 'testSubject' | 'testText';
+  | 'pwSubject' | 'pwText' | 'emailSubject' | 'emailText' | 'resetSubject' | 'resetText' | 'resetAction' | 'testSubject' | 'testText';
 
 const MAIL: Record<Lang, Record<MailKey, string>> = {
   en: {
@@ -31,6 +31,8 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     shareGroup: ' (group {group})',
     pwSubject: 'Your Cloudy password was changed',
     pwText: 'Hi {user},\n\nThe password of your Cloudy account "{id}" was just changed (from {ip}).\n\nIf this wasn\'t you, reset your password right away and tell your administrator.',
+    emailSubject: 'Your Cloudy email address was changed',
+    emailText: 'Hi {user},\n\nThe email address of your Cloudy account "{id}" was just changed to {email} (from {ip}). This address will no longer get password reset links.\n\nIf this wasn\'t you, sign in, change your password and tell your administrator.',
     resetSubject: 'Reset your Cloudy password',
     resetText: 'Hi {user},\n\nSomeone (hopefully you) asked to reset the password of your Cloudy account "{id}". The link works once and expires in {minutes} minutes.\n\nIf you didn\'t ask for this, ignore this email — your password stays the same.',
     resetAction: 'Choose a new password',
@@ -45,6 +47,8 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     shareGroup: ' (المجموعة {group})',
     pwSubject: 'تم تغيير كلمة مرور Cloudy الخاصة بك',
     pwText: 'مرحبًا {user}،\n\nتم للتو تغيير كلمة مرور حسابك «{id}» في Cloudy (من {ip}).\n\nإذا لم تكن أنت من فعل ذلك، فأعد تعيين كلمة المرور فورًا وأبلغ المسؤول.',
+    emailSubject: 'تم تغيير عنوان بريدك الإلكتروني في Cloudy',
+    emailText: 'مرحبًا {user}،\n\nتم للتو تغيير عنوان البريد الإلكتروني لحسابك «{id}» في Cloudy إلى {email} (من {ip}). لن تصل روابط إعادة تعيين كلمة المرور إلى هذا العنوان بعد الآن.\n\nإذا لم تكن أنت من فعل ذلك، فسجّل الدخول وغيّر كلمة المرور وأبلغ المسؤول.',
     resetSubject: 'إعادة تعيين كلمة مرور Cloudy',
     resetText: 'مرحبًا {user}،\n\nطلب شخص ما (نأمل أن تكون أنت) إعادة تعيين كلمة مرور حسابك «{id}» في Cloudy. يعمل الرابط مرة واحدة وتنتهي صلاحيته خلال {minutes} دقيقة.\n\nإذا لم تطلب ذلك، فتجاهل هذه الرسالة — ستبقى كلمة المرور كما هي.',
     resetAction: 'اختيار كلمة مرور جديدة',
@@ -59,6 +63,8 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     shareGroup: ' (Gruppe {group})',
     pwSubject: 'Dein Cloudy-Passwort wurde geändert',
     pwText: 'Hallo {user},\n\ndas Passwort deines Cloudy-Kontos „{id}“ wurde soeben geändert (von {ip}).\n\nWarst du das nicht, setze dein Passwort sofort zurück und informiere deine Administration.',
+    emailSubject: 'Deine Cloudy-E-Mail-Adresse wurde geändert',
+    emailText: 'Hallo {user},\n\ndie E-Mail-Adresse deines Cloudy-Kontos „{id}“ wurde soeben auf {email} geändert (von {ip}). An diese Adresse gehen keine Links zum Zurücksetzen des Passworts mehr.\n\nWarst du das nicht, melde dich an, ändere dein Passwort und informiere deine Administration.',
     resetSubject: 'Cloudy-Passwort zurücksetzen',
     resetText: 'Hallo {user},\n\njemand (hoffentlich du) möchte das Passwort deines Cloudy-Kontos „{id}“ zurücksetzen. Der Link funktioniert einmal und läuft in {minutes} Minuten ab.\n\nWenn du das nicht angefordert hast, ignoriere diese E-Mail – dein Passwort bleibt unverändert.',
     resetAction: 'Neues Passwort wählen',
@@ -73,6 +79,8 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     shareGroup: ' (groupe {group})',
     pwSubject: 'Votre mot de passe Cloudy a été modifié',
     pwText: 'Bonjour {user},\n\nLe mot de passe de votre compte Cloudy « {id} » vient d’être modifié (depuis {ip}).\n\nSi ce n’était pas vous, réinitialisez votre mot de passe immédiatement et prévenez votre administrateur.',
+    emailSubject: 'Votre adresse e-mail Cloudy a été modifiée',
+    emailText: 'Bonjour {user},\n\nL’adresse e-mail de votre compte Cloudy « {id} » vient d’être remplacée par {email} (depuis {ip}). Cette adresse ne recevra plus les liens de réinitialisation du mot de passe.\n\nSi ce n’était pas vous, connectez-vous, changez votre mot de passe et prévenez votre administrateur.',
     resetSubject: 'Réinitialiser votre mot de passe Cloudy',
     resetText: 'Bonjour {user},\n\nQuelqu’un (vous, espérons-le) a demandé à réinitialiser le mot de passe de votre compte Cloudy « {id} ». Le lien fonctionne une seule fois et expire dans {minutes} minutes.\n\nSi vous n’êtes pas à l’origine de cette demande, ignorez cet e-mail — votre mot de passe reste inchangé.',
     resetAction: 'Choisir un nouveau mot de passe',
@@ -87,6 +95,8 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     shareGroup: ' (grupo {group})',
     pwSubject: 'Se ha cambiado tu contraseña de Cloudy',
     pwText: 'Hola, {user}:\n\nSe acaba de cambiar la contraseña de tu cuenta de Cloudy «{id}» (desde {ip}).\n\nSi no has sido tú, restablece tu contraseña de inmediato y avisa a tu administrador.',
+    emailSubject: 'Se ha cambiado tu dirección de correo de Cloudy',
+    emailText: 'Hola, {user}:\n\nSe acaba de cambiar la dirección de correo de tu cuenta de Cloudy «{id}» a {email} (desde {ip}). Esta dirección ya no recibirá enlaces para restablecer la contraseña.\n\nSi no has sido tú, inicia sesión, cambia tu contraseña y avisa a tu administrador.',
     resetSubject: 'Restablece tu contraseña de Cloudy',
     resetText: 'Hola, {user}:\n\nAlguien (esperamos que tú) ha pedido restablecer la contraseña de tu cuenta de Cloudy «{id}». El enlace funciona una sola vez y caduca en {minutes} minutos.\n\nSi no lo has pedido tú, ignora este correo: tu contraseña seguirá siendo la misma.',
     resetAction: 'Elegir una contraseña nueva',

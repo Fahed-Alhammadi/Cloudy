@@ -7,11 +7,11 @@ import {
   newToken, sha256, forgetBasicCache, createAppToken, bearerToken, requirePassword, dropOtherSessions,
 } from '../auth.ts';
 import type { User } from '../auth.ts';
-import { createUser, deleteUser, setGroups, userJson, USER_ID_RE } from '../users.ts';
+import { createUser, deleteUser, setGroups, userJson, quotaValue, USER_ID_RE } from '../users.ts';
 import { rootOf } from '../files.ts';
 import { newSecret, otpauthUri, verifyTotp, newRecoveryCodes, normalizeRecoveryCode } from '../totp.ts';
 import QRCode from 'qrcode';
-import { notifyPasswordChanged, EMAIL_RE } from '../mail.ts';
+import { notifyPasswordChanged, notifyEmailChanged, EMAIL_RE } from '../mail.ts';
 import { isLanguage } from '../i18n.ts';
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
@@ -65,6 +65,10 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
     if (typeof b.email === 'string' && b.email.trim() && !EMAIL_RE.test(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    // The email receives password reset links: changing it needs the password (a stolen session must not be able to
+    // take the account over). Saving the profile with the same address, or only the language (Android), does not.
+    const emailChanged = typeof b.email === 'string' && b.email.trim() !== user.email;
+    if (emailChanged) await requirePassword(req, user.id, b.password);
     await q(`UPDATE users SET display_name = COALESCE($2, display_name), email = COALESCE($3, email),
                               notify_shares = COALESCE($4, notify_shares) WHERE id = $1`,
       [user.id, typeof b.displayName === 'string' ? b.displayName.trim() || user.id : null,
@@ -74,6 +78,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
       if (b.language && !isLanguage(b.language)) throw new HttpError(400, 'Unsupported language');
       await q(`UPDATE users SET language = $2 WHERE id = $1`, [user.id, b.language || null]);
     }
+    if (emailChanged) notifyEmailChanged(req, user, user.email, b.email.trim());
     noContent(res);
   }));
 
@@ -95,7 +100,9 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   // ---------------------------------------------------------------- two-factor authentication
   // 1. setup: create a secret (kept pending) and return it with a QR code for the authenticator app.
-  r.post('/api/me/2fa/setup', authed(async ({ res }, user) => {
+  // Needs the password: otherwise a stolen session could put its own authenticator on the account.
+  r.post('/api/me/2fa/setup', authed(async ({ req, res }, user) => {
+    await requirePassword(req, user.id, (await readJson(req)).password);
     if (user.totp_enabled) throw new HttpError(409, 'Two-factor authentication is already on');
     const secret = newSecret();
     await q(`UPDATE users SET totp_pending = $2 WHERE id = $1`, [user.id, secret]);
@@ -147,8 +154,10 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
                          FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC`, [user.id, bearer ? sha256(bearer) : '']));
   }));
 
+  // Needs the password: an app password outlives the session it was made from (and a password change).
   r.post('/api/me/app-passwords', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
+    await requirePassword(req, user.id, b.password);
     const name = String(b.name ?? '').trim() || 'Device';
     const token = [newToken(6), newToken(6), newToken(6)].join('-');
     await q(`INSERT INTO app_passwords (user_id, name, token_hash) VALUES ($1, $2, $3)`, [user.id, name, sha256(token)]);
@@ -200,10 +209,11 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
       await q(`UPDATE users SET disabled = $2 WHERE id = $1`, [params.id, b.disabled]);
       if (b.disabled) await q(`DELETE FROM sessions WHERE user_id = $1`, [params.id]);
     }
-    if ('quotaBytes' in b) await q(`UPDATE users SET quota_bytes = $2 WHERE id = $1`, [params.id, b.quotaBytes ?? null]);
+    if ('quotaBytes' in b) await q(`UPDATE users SET quota_bytes = $2 WHERE id = $1`, [params.id, quotaValue(b.quotaBytes)]);
     if (typeof b.password === 'string' && b.password) {
       await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [params.id, await hashPassword(checkPasswordStrength(b.password))]);
       await q(`DELETE FROM sessions WHERE user_id = $1`, [params.id]);
+      await q(`DELETE FROM app_passwords WHERE user_id = $1`, [params.id]); // device tokens too: a reset signs out everywhere
     }
     if (Array.isArray(b.groups)) await setGroups(params.id, b.groups);
     // Lost phone: an administrator can turn two-factor off so the user can sign in and set it up again.

@@ -1,6 +1,5 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.ts';
@@ -10,8 +9,9 @@ import type { Ctx } from './http.ts';
 import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
 import { ensureAdmin } from './users.ts';
-import { ensureDirs, expireTrash } from './files.ts';
+import { ensureDirs, expireTrash, cleanStorage } from './files.ts';
 import { handleDav } from './dav/server.ts';
+import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
 import { registerPasskeys } from './api/passkeys.ts';
 import { registerFiles, registerUploadChunks, expireUploads } from './api/files.ts';
@@ -110,7 +110,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL):
   }
   res.writeHead(200, { ...headers, 'Content-Length': st.size });
   if (req.method === 'HEAD') res.end();
-  else createReadStream(file).pipe(res);
+  else sendFile(res, file);
   return true;
 }
 
@@ -148,6 +148,7 @@ async function jobs(): Promise<void> {
   try {
     await q(`DELETE FROM sessions WHERE expires_at < now()`);
     await expireUploads();
+    await cleanStorage();
     await pruneOfficeCache();
     await expirePasswordResets();
     const n = await expireTrash();

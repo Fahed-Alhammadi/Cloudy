@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import { crc32 } from 'node:zlib';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { blobPath, children } from './files.ts';
@@ -68,9 +69,14 @@ export function sendBlob(
     res.end();
     return;
   }
-  createReadStream(blobPath(blob), { start, end })
-    .on('error', () => res.destroy())
-    .pipe(res);
+  // pipeline, not pipe: a client that goes away (video seeking aborts range requests all the time) must close the
+  // blob's read stream too, or its file descriptor stays open for the life of the process.
+  sendFile(res, blobPath(blob), { start, end });
+}
+
+/** Streams a file into the response; a read error or a disconnected client destroys both sides (no fd left open). */
+export function sendFile(res: ServerResponse, file: string, range?: { start: number; end: number }): void {
+  pipeline(createReadStream(file, range), res).catch(() => res.destroy());
 }
 
 export function sendNodeFile(req: IncomingMessage, res: ServerResponse, node: Node, inline = false): void {
@@ -96,6 +102,8 @@ export async function sendZip(res: ServerResponse, root: Node): Promise<void> {
     'Content-Disposition': contentDisposition('attachment', (root.name || 'files') + '.zip'),
     'Cache-Control': 'no-store',
   });
+  // HEAD gets the headers only: building the ZIP would read every file of the folder for nothing.
+  if (res.req?.method === 'HEAD') return void res.end();
   const central: Buffer[] = [];
   let offset = 0;
   let count = 0;

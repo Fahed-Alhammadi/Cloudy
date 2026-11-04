@@ -48,6 +48,12 @@ function fileTable(opts) {
     ...nodeActions(item, opts),
   ];
 
+  // Bar buttons are disabled while their requests run (one call per file, as in the apps).
+  const busy = (fn) => async (e) => {
+    const buttons = [...bar.querySelectorAll('button')];
+    buttons.forEach((b) => { b.disabled = true; });
+    try { await fn(e); } finally { buttons.forEach((b) => { b.disabled = false; }); }
+  };
   const updateBar = () => {
     bar.hidden = selected.size === 0;
     table?.classList.toggle('selecting', selected.size > 0);
@@ -58,21 +64,23 @@ function fileTable(opts) {
         for (const it of chosen) setSelected(it, false);
         updateBar();
       } }, icon('x')),
-      h('span', {}, t('{n} selected', { n: selected.size })),
+      h('span', { 'aria-live': 'polite' }, t('{n} selected', { n: selected.size })),
       h('button', { class: 'btn ghost', onclick: () => {
         for (const it of opts.items.filter((i) => selected.has(i.id))) triggerDownload(nodeUrl(it, false), it.name + (it.isDir ? '.zip' : ''));
       } }, icon('download'), t('Download')),
-      chosen.some((i) => !i.favorite) && h('button', { class: 'btn ghost', onclick: async () => {
+      chosen.some((i) => !i.favorite) && h('button', { class: 'btn ghost', onclick: busy(async () => {
         for (const it of chosen.filter((i) => !i.favorite)) await post(`/api/nodes/${it.id}/favorite`).catch(showError);
         opts.reload();
-      } }, icon('star'), t('Add to favorites')),
-      opts.items.some((i) => selected.has(i.id) && opts.canModify(i)) && h('button', { class: 'btn ghost', onclick: () => moveCopy(opts.items.filter((i) => selected.has(i.id)), opts) }, icon('move'), t('Move or copy')),
-      opts.items.some((i) => selected.has(i.id) && opts.canModify(i)) && h('button', { class: 'btn ghost danger', onclick: async () => {
+      }) }, icon('star'), t('Add to favorites')),
+      opts.items.some((i) => selected.has(i.id) && opts.canModify(i)) && h('button', { class: 'btn ghost', onclick: busy(() => moveCopy(opts.items.filter((i) => selected.has(i.id)), opts)) }, icon('move'), t('Move or copy')),
+      opts.items.some((i) => selected.has(i.id) && opts.canModify(i)) && h('button', { class: 'btn ghost danger', onclick: busy(async () => {
         const list = opts.items.filter((i) => selected.has(i.id) && opts.canModify(i));
         if (!(await confirmDialog(t('Delete items'), t('Move {n} item(s) to the trash?', { n: list.length }), t('Delete'), true))) return;
-        for (const it of list) await del(`/api/nodes/${it.id}`).catch(showError);
+        let failed = 0;
+        for (const it of list) await del(`/api/nodes/${it.id}`).catch((e) => { failed++; showError(e); });
+        if (list.length > failed) toast(t('{n} item(s) moved to trash', { n: list.length - failed }));
         opts.reload();
-      } }, icon('trash'), t('Delete')),
+      }) }, icon('trash'), t('Delete')),
     );
   };
   allBox.addEventListener('change', () => {
@@ -85,7 +93,7 @@ function fileTable(opts) {
       setSelected(item, e.target.checked);
       updateBar();
     } });
-    const more = h('button', { class: 'icon-btn', 'aria-label': t('Actions for {name}', { name: item.name }), onclick: (e) => {
+    const more = h('button', { class: 'icon-btn', 'aria-haspopup': 'menu', 'aria-label': t('Actions for {name}', { name: item.name }), onclick: (e) => {
       e.stopPropagation();
       showMenu(e.currentTarget, menuFor(item));
     } }, icon('more'));
@@ -102,12 +110,24 @@ function fileTable(opts) {
       showMenu({ x, y }, menuFor(item));
     };
     const tr = h('tr', {
-      class: 'file-row', tabindex: 0, draggable: opts.canModify(item) ? 'true' : null,
+      class: 'file-row', tabindex: 0, 'data-key': `node-${item.id}`, draggable: opts.canModify(item) ? 'true' : null,
       onclick: () => {
         if (selected.size > 0) { setSelected(item, !selected.has(item.id)); updateBar(); return; }
         opts.onOpen(item);
       },
-      onkeydown: (e) => { if (e.key === 'Enter') opts.onOpen(item); },
+      // Keys on the row's checkbox or ⋯ button belong to them (Enter on ⋯ used to open the file as well).
+      // Enter opens (toggles while selecting), Space ticks, arrows move between rows.
+      onkeydown: (e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (selected.size > 0 || e.key === ' ') { setSelected(item, !selected.has(item.id)); updateBar(); }
+          else opts.onOpen(item);
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const to = e.key === 'ArrowDown' ? tr.nextElementSibling : tr.previousElementSibling;
+          if (to) { e.preventDefault(); to.focus(); }
+        }
+      },
       oncontextmenu: (e) => {
         e.preventDefault();
         clearTimeout(pressTimer);
@@ -137,7 +157,7 @@ function fileTable(opts) {
       h('td', { class: 'col-check' }, box),
       h('td', { class: 'col-name' },
         h('div', { class: 'name-cell' }, fileIcon(item),
-          h('span', { class: 'name', title: item.name }, item.name),
+          h('span', { class: 'name', title: item.name, dir: 'auto' }, item.name),
           item.favorite && icon('star', 'badge fav'),
           item.shared && icon('share', 'badge'),
         )),
@@ -153,20 +173,24 @@ function fileTable(opts) {
       e.dataTransfer.effectAllowed = 'move';
     });
     if (item.isDir) {
+      const filesOver = (e) => opts.uploadInto && e.dataTransfer.types.includes('Files');
       tr.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('application/x-cloudy')) { e.preventDefault(); tr.classList.add('drop-target'); }
+        if (e.dataTransfer.types.includes('application/x-cloudy') || filesOver(e)) { e.preventDefault(); tr.classList.add('drop-target'); }
       });
       tr.addEventListener('dragleave', () => tr.classList.remove('drop-target'));
       tr.addEventListener('drop', async (e) => {
-        const raw = e.dataTransfer.getData('application/x-cloudy');
         tr.classList.remove('drop-target');
+        // Files from the computer dropped on a folder go into that folder (the view's drop zone sees defaultPrevented).
+        if (filesOver(e)) {
+          e.preventDefault();
+          opts.uploadInto(item, await filesFromDrop(e.dataTransfer));
+          return;
+        }
+        const raw = e.dataTransfer.getData('application/x-cloudy');
         if (!raw) return;
         e.preventDefault();
         e.stopPropagation();
-        for (const id of JSON.parse(raw)) {
-          if (id === item.id) continue;
-          await patch(`/api/nodes/${id}`, { parentId: item.id }).catch(showError);
-        }
+        await moveByDrop(JSON.parse(raw), item.id);
         opts.reload();
       });
     }
@@ -191,6 +215,16 @@ function fileTable(opts) {
   return h('div', {}, bar, table);
 }
 
+/** Moves the dragged ids into `parentId` (skipping the folder itself). */
+async function moveByDrop(ids, parentId) {
+  let moved = 0;
+  for (const id of ids) {
+    if (id === parentId) continue;
+    try { await patch(`/api/nodes/${id}`, { parentId }); moved++; } catch (e) { showError(e); }
+  }
+  if (moved) toast(t('Moved'));
+}
+
 function triggerDownload(url, name) {
   const a = h('a', { href: url, download: name || '' });
   document.body.append(a);
@@ -203,7 +237,7 @@ function nodeActions(item, opts) {
   const isOwner = item.owner === me.id;
   return [
     { label: item.isDir ? t('Open') : t('View'), icon: item.isDir ? 'folder' : 'eye', onclick: () => opts.onOpen(item) },
-    { label: item.isDir ? t('Download as ZIP') : t('Download'), icon: 'download', onclick: () => triggerDownload(nodeUrl(item, false), item.name) },
+    { label: item.isDir ? t('Download as ZIP') : t('Download'), icon: 'download', onclick: () => triggerDownload(nodeUrl(item, false), item.name + (item.isDir ? '.zip' : '')) },
     opts.canModify(item) && { label: t('Rename'), icon: 'edit', onclick: () => rename(item, opts.reload) },
     opts.canModify(item) && { label: t('Move or copy'), icon: 'move', onclick: () => moveCopy([item], opts) },
     !opts.canModify(item) && { label: t('Copy to my files'), icon: 'copy', onclick: () => moveCopy([item], { ...opts, copyOnly: true }) },
@@ -231,7 +265,7 @@ function nodeActions(item, opts) {
 }
 
 async function rename(item, reload) {
-  const name = await promptDialog(t('Rename'), t('New name'), item.name, t('Rename'));
+  const name = await promptDialog(t('Rename'), t('New name'), item.name, t('Rename'), { selectBase: !item.isDir });
   if (!name || name === item.name) return;
   try {
     await patch(`/api/nodes/${item.id}`, { name });
@@ -245,30 +279,35 @@ async function moveCopy(items, opts) {
   let current = opts.me.rootId;
   const list = h('ul', { class: 'picker-list' });
   const crumbs = h('nav', { class: 'breadcrumb small' });
-  const load = async () => {
-    const data = await get(`/api/nodes/${current}`);
+  const go = (id) => load(id).catch(showError);
+  const load = async (id) => {
+    const data = await get(`/api/nodes/${id}`);
+    current = id;
     crumbs.replaceChildren(...data.breadcrumb.map((c, i) => [
       i ? h('span', { class: 'sep' }, '/') : null,
-      h('button', { type: 'button', class: 'crumb', onclick: () => { current = c.id; load(); } }, c.name || t('Files')),
+      h('button', { type: 'button', class: 'crumb', 'aria-current': i === data.breadcrumb.length - 1 ? 'location' : null, onclick: () => go(c.id) }, c.name || t('Files')),
     ]));
     const dirs = data.children.filter((c) => c.isDir && !items.some((i) => i.id === c.id));
     list.replaceChildren(...(dirs.length ? dirs.map((d) => h('li', {},
-      h('button', { type: 'button', onclick: () => { current = d.id; load(); } }, icon('folder', 'ic-folder'), d.name))) : [h('li', { class: 'muted' }, t('No subfolders'))]));
+      h('button', { type: 'button', onclick: () => go(d.id) }, icon('folder', 'ic-folder'), h('span', { class: 'grow' }, d.name), icon('right', 'muted')))) : [h('li', { class: 'muted' }, t('No subfolders'))]));
   };
-  await load();
+  await load(current);
   const buttons = [{ label: t('Cancel'), value: null }, { label: t('Copy here'), value: 'copy', primary: !!opts.copyOnly }];
   if (!opts.copyOnly) buttons.push({ label: t('Move here'), value: 'move', primary: true });
   const what = items.length === 1 ? `"${items[0].name}"` : t('{n} items', { n: items.length });
   const title = opts.copyOnly ? t('Copy {what}', { what }) : t('Move or copy {what}', { what });
   const choice = await modal({ title, body: h('div', {}, crumbs, list), buttons });
   if (!choice) return;
+  let done = 0;
   for (const it of items) {
     try {
       if (choice === 'move') await patch(`/api/nodes/${it.id}`, { parentId: current });
       else await post(`/api/nodes/${it.id}/copy`, { parentId: current });
+      done++;
     } catch (e) { showError(e); }
   }
-  toast(choice === 'move' ? t('Moved') : t('Copied'));
+  // Only claim success for what worked (each failure has its own error message).
+  if (done) toast(choice === 'move' ? t('Moved') : t('Copied'));
   opts.reload();
 }
 
@@ -306,7 +345,9 @@ export async function shareDialog(item, reload) {
   input.addEventListener('input', () => {
     clearTimeout(timer);
     timer = setTimeout(async () => {
-      const { users, groups } = await get(`/api/sharees?q=${encodeURIComponent(input.value.replace(/^group:/, ''))}`);
+      const found = await get(`/api/sharees?q=${encodeURIComponent(input.value.replace(/^group:/, ''))}`).catch(() => null);
+      if (!found) return;
+      const { users, groups } = found;
       datalist.replaceChildren(
         ...users.map((u) => h('option', { value: u.id }, u.displayName)),
         ...groups.map((g) => h('option', { value: `group:${g.id}` }, t('Group {name}', { name: g.id }))),
@@ -314,46 +355,65 @@ export async function shareDialog(item, reload) {
     }, 200);
   });
 
+  let adding = false;
   const add = async () => {
     const v = input.value.trim();
-    if (!v) return;
+    if (!v || adding) return;
     const isGroup = v.startsWith('group:');
+    adding = true;
     try {
       await post(`/api/nodes/${item.id}/shares`, { type: isGroup ? 'group' : 'user', shareWith: isGroup ? v.slice(6) : v, canEdit: canEditNew.checked });
       input.value = '';
       await refresh();
-    } catch (e) { showError(e); }
+      input.focus();
+    } catch (e) { showError(e); } finally { adding = false; }
+  };
+  // A checkbox whose change the server refused goes back to what is really stored.
+  const toggleShare = (s) => async (e) => {
+    const box = e.target;
+    box.disabled = true;
+    try { await patch(`/api/shares/${s.id}`, { canEdit: box.checked }); s.canEdit = box.checked; } catch (err) { box.checked = !box.checked; showError(err); } finally { box.disabled = false; }
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
 
   const shareRow = (s) => h('li', {},
     icon(s.type === 'group' ? 'users' : 'contacts'),
     h('span', { class: 'grow' }, s.type === 'group' ? t('Group {name}', { name: s.shareWith }) : s.shareWith),
-    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.canEdit, onchange: async (e) => {
-      await patch(`/api/shares/${s.id}`, { canEdit: e.target.checked }).catch(showError);
-    } }), t('Can edit')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Remove share'), onclick: async () => { await del(`/api/shares/${s.id}`).catch(showError); refresh(); } }, icon('x')),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.canEdit, onchange: toggleShare(s) }), t('Can edit')),
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Remove share with {name}', { name: s.shareWith }), onclick: async () => { await del(`/api/shares/${s.id}`).catch(showError); refresh().catch(showError); } }, icon('x')),
   );
 
   const linkCard = (s) => {
     const url = location.origin + s.url;
     const pw = h('input', { type: 'password', placeholder: s.hasPassword ? t('•••••• (set)') : t('No password'), autocomplete: 'new-password', 'aria-label': t('Link password') });
-    const expiry = h('input', { type: 'date', value: s.expiresAt ? s.expiresAt.slice(0, 10) : '', 'aria-label': t('Expiry date'), onchange: async (e) => {
-      await patch(`/api/shares/${s.id}`, { expiresAt: e.target.value ? `${e.target.value}T23:59:59` : null }).then(() => toast(t('Expiry updated'))).catch(showError);
+    // The link stops working at the end of the chosen day in the user's own time zone (it used to be the server's).
+    const localDay = (iso) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    const expiry = h('input', { type: 'date', value: s.expiresAt ? localDay(s.expiresAt) : '', min: localDay(Date.now()), 'aria-label': t('Expiry date'), onchange: async (e) => {
+      const v = e.target.value;
+      await patch(`/api/shares/${s.id}`, { expiresAt: v ? new Date(`${v}T23:59:59`).toISOString() : null })
+        .then(() => toast(v ? t('Expiry updated') : t('The link no longer expires'))).catch(showError);
     } });
+    const setPassword = h('button', { type: 'button', class: 'btn ghost', disabled: true, onclick: async () => {
+      await patch(`/api/shares/${s.id}`, { password: pw.value }).then(() => { toast(t('Password set')); return refresh(); }).catch(showError);
+    } }, icon('lock'), t('Set'));
+    // An empty field + "Set" used to remove the password without saying so; removing is its own button now.
+    pw.addEventListener('input', () => { setPassword.disabled = !pw.value; });
+    pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (pw.value) setPassword.click(); } });
     return h('li', { class: 'link-card' },
       h('div', { class: 'link-row' }, icon('link'), h('input', { type: 'text', readonly: true, value: url, 'aria-label': t('Link URL'), onclick: (e) => e.target.select() }),
         h('button', { type: 'button', class: 'btn', onclick: () => copyText(url) }, icon('copy'), t('Copy')),
-        h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete link'), onclick: async () => { await del(`/api/shares/${s.id}`).catch(showError); refresh(); } }, icon('trash'))),
+        h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete link'), onclick: async () => {
+          if (!(await confirmDialog(t('Delete link'), t('People who have this link can no longer open it.'), t('Delete'), true))) return;
+          await del(`/api/shares/${s.id}`).catch(showError);
+          refresh().catch(showError);
+        } }, icon('trash'))),
       h('div', { class: 'link-opts' },
-        item.isDir && h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.canEdit, onchange: async (e) => {
-          await patch(`/api/shares/${s.id}`, { canEdit: e.target.checked }).catch(showError);
-        } }), t('Allow upload')),
+        item.isDir && h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.canEdit, onchange: toggleShare(s) }), t('Allow upload')),
         h('label', { class: 'inline' }, t('Expires'), expiry),
-        h('span', { class: 'inline' }, pw,
-          h('button', { type: 'button', class: 'btn ghost', onclick: async () => {
-            await patch(`/api/shares/${s.id}`, { password: pw.value || null }).then(() => { toast(pw.value ? t('Password set') : t('Password removed')); refresh(); }).catch(showError);
-          } }, icon('lock'), t('Set'))),
+        h('span', { class: 'inline' }, pw, setPassword,
+          s.hasPassword && h('button', { type: 'button', class: 'btn ghost danger', onclick: async () => {
+            await patch(`/api/shares/${s.id}`, { password: null }).then(() => { toast(t('Password removed')); return refresh(); }).catch(showError);
+          } }, t('Remove password'))),
       ),
     );
   };
@@ -368,8 +428,10 @@ export async function shareDialog(item, reload) {
       direct.length ? h('ul', { class: 'plain-list' }, direct.map(shareRow)) : h('p', { class: 'muted' }, t('Not shared with anyone yet.')),
       h('h3', {}, t('Public links')),
       links.length ? h('ul', { class: 'plain-list' }, links.map(linkCard)) : h('p', { class: 'muted' }, t('Anyone with a link can view the item.')),
-      h('button', { type: 'button', class: 'btn', onclick: async () => {
-        try { await post(`/api/nodes/${item.id}/shares`, { type: 'link' }); await refresh(); } catch (e) { showError(e); }
+      h('button', { type: 'button', class: 'btn', onclick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try { await post(`/api/nodes/${item.id}/shares`, { type: 'link' }); await refresh(); } catch (err) { showError(err); btn.disabled = false; }
       } }, icon('plus'), t('Create link')),
     );
   }
@@ -398,11 +460,18 @@ export async function renderFolder(main, id, ctx) {
     return;
   }
   const canEdit = data.perm !== 'read';
-  const reload = () => renderFolder(main, id, ctx).catch(showError);
+  // Redraws this folder if it is still on screen. Uploads finish late: by then the user may have opened another
+  // view (nothing to do) or come back to this folder (a fresh render of the current route).
+  const reload = () => {
+    if (main.isConnected) return renderFolder(main, id, ctx).catch(showError);
+    const [, view = 'files', arg] = location.hash.replace(/^#/, '').split('/');
+    if (view === 'files' && String(arg || ctx.me.rootId) === String(id)) ctx.rerender();
+  };
   const opts = {
     items: data.children, me: ctx.me, reload, editable: canEdit,
     canModify: () => canEdit,
     onOpen: (item) => openItem(item, data.children, opts),
+    uploadInto: canEdit ? (folder, items) => uploadAll(items, userUploadTarget(folder.id), reload) : null,
     emptyText: canEdit ? t('Drop files here or use the Upload button') : t('This folder is empty'),
   };
   if (canEdit) opts.emptyAction = h('button', { class: 'btn primary', type: 'button', onclick: () => fileInput.click() }, icon('upload'), t('Upload files'));
@@ -410,14 +479,28 @@ export async function renderFolder(main, id, ctx) {
   const fileInput = h('input', { type: 'file', multiple: true, hidden: true, onchange: (e) => { uploadAll(filesFromInput(e.target), userUploadTarget(id), reload); e.target.value = ''; } });
   const dirInput = h('input', { type: 'file', multiple: true, webkitdirectory: true, hidden: true, onchange: (e) => { uploadAll(filesFromInput(e.target), userUploadTarget(id), reload); e.target.value = ''; } });
 
+  const last = data.breadcrumb.length - 1;
   const crumbs = h('nav', { class: 'breadcrumb', 'aria-label': t('Folder path') },
-    data.breadcrumb.map((c, i) => [
-      i ? h('span', { class: 'sep' }, icon('right')) : null,
-      h('a', { class: 'crumb', href: `#/files/${c.id}` }, i === 0 && c.name === '' ? t('Files') : c.name),
-    ]));
+    data.breadcrumb.map((c, i) => {
+      const a = h('a', { class: 'crumb', href: `#/files/${c.id}`, 'aria-current': i === last ? 'page' : null }, i === 0 && c.name === '' ? t('Files') : c.name);
+      // Rows dragged onto a parent folder in the path move there (the only way "up" without the dialog).
+      if (canEdit && i !== last) {
+        a.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('application/x-cloudy')) { e.preventDefault(); a.classList.add('drop-target'); } });
+        a.addEventListener('dragleave', () => a.classList.remove('drop-target'));
+        a.addEventListener('drop', async (e) => {
+          a.classList.remove('drop-target');
+          const raw = e.dataTransfer.getData('application/x-cloudy');
+          if (!raw) return;
+          e.preventDefault();
+          await moveByDrop(JSON.parse(raw), c.id);
+          reload();
+        });
+      }
+      return [i ? h('span', { class: 'sep' }, icon('right')) : null, a];
+    }));
 
   const toolbar = h('div', { class: 'toolbar' }, crumbs, h('div', { class: 'grow' }),
-    canEdit && h('button', { class: 'btn', onclick: (e) => showMenu(e.currentTarget, [
+    canEdit && h('button', { class: 'btn', 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
       { label: t('New folder'), icon: 'folderPlus', onclick: async () => {
         const name = await promptDialog(t('New folder'), t('Folder name'), t('New folder'), t('Create'));
         if (name) await post(`/api/nodes/${id}/folders`, { name }).then(reload, showError);
@@ -432,14 +515,14 @@ export async function renderFolder(main, id, ctx) {
         } catch (e) { showError(e); }
       } },
     ]) }, icon('plus'), t('New')),
-    canEdit && h('button', { class: 'btn primary', onclick: (e) => showMenu(e.currentTarget, [
+    canEdit && h('button', { class: 'btn primary', 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
       { label: t('Upload files'), icon: 'upload', onclick: () => fileInput.click() },
       { label: t('Upload folder'), icon: 'folder', onclick: () => dirInput.click() },
     ]) }, icon('upload'), t('Upload')),
     fileInput, dirInput,
   );
 
-  const view = h('section', { class: 'files-view' }, toolbar, !canEdit && h('p', { class: 'notice' }, icon('lock'), t('Shared with you as read-only')), fileTable(opts));
+  const view = h('section', { class: 'files-view', 'data-drop-label': t('Drop to upload') }, toolbar, !canEdit && h('p', { class: 'notice' }, icon('lock'), t('Shared with you as read-only')), fileTable(opts));
   if (canEdit) attachDropZone(view, async (items) => uploadAll(items, userUploadTarget(id), reload));
   main.replaceChildren(view);
 }
@@ -456,7 +539,8 @@ export function attachDropZone(el, onFiles) {
   el.addEventListener('drop', async (e) => {
     depth = 0;
     el.classList.remove('dragging');
-    if (!e.dataTransfer.types.includes('Files')) return;
+    // A folder row inside already took the files (it calls preventDefault).
+    if (!e.dataTransfer.types.includes('Files') || e.defaultPrevented) return;
     e.preventDefault();
     onFiles(await filesFromDrop(e.dataTransfer));
   });
@@ -516,23 +600,23 @@ export async function renderTrash(main, ctx) {
   const items = await get('/api/trash');
   const reload = () => renderTrash(main, ctx).catch(showError);
   const rows = items.map((it) => h('tr', {},
-    h('td', { class: 'col-name' }, h('div', { class: 'name-cell' }, fileIcon(it), h('span', { class: 'name' }, it.name))),
+    h('td', { class: 'col-name' }, h('div', { class: 'name-cell' }, fileIcon(it), h('span', { class: 'name', dir: 'auto' }, it.name))),
     h('td', { class: 'col-extra muted' }, it.originalPath),
     h('td', { class: 'col-size' }, formatSize(it.size)),
     h('td', { class: 'col-date', title: fullDate(it.deletedAt) }, formatDate(it.deletedAt)),
     h('td', { class: 'col-actions nowrap' },
-      h('button', { class: 'btn ghost', onclick: async () => { await post(`/api/trash/${it.id}/restore`).then(() => toast(t('Restored')), showError); reload(); } }, icon('restore'), t('Restore')),
-      h('button', { class: 'icon-btn', 'aria-label': t('Delete permanently'), onclick: async () => {
+      h('button', { class: 'btn ghost', onclick: async (e) => { e.currentTarget.disabled = true; await post(`/api/trash/${it.id}/restore`).then(() => toast(t('"{name}" restored', { name: it.name })), showError); reload(); } }, icon('restore'), t('Restore')),
+      h('button', { class: 'icon-btn', 'aria-label': t('Delete {name} permanently', { name: it.name }), onclick: async () => {
         if (await confirmDialog(t('Delete permanently'), t('"{name}" will be deleted forever.', { name: it.name }), t('Delete'), true)) { await del(`/api/trash/${it.id}`).catch(showError); reload(); }
       } }, icon('trash'))),
   ));
   main.replaceChildren(h('section', { class: 'files-view' },
     h('div', { class: 'toolbar' }, h('h1', { class: 'view-title' }, icon('trash'), t('Deleted files')), h('div', { class: 'grow' }),
-      items.length && h('button', { class: 'btn danger', onclick: async () => {
+      items.length > 0 && h('button', { class: 'btn danger', onclick: async () => {
         if (await confirmDialog(t('Empty trash'), t('All deleted files will be removed permanently.'), t('Empty trash'), true)) { await del('/api/trash').catch(showError); reload(); }
       } }, t('Empty trash'))),
     items.length
-      ? h('table', { class: 'file-table' }, h('thead', {}, h('tr', {}, h('th', { class: 'col-name' }, t('Name')), h('th', { class: 'col-extra' }, t('Original location')), h('th', { class: 'col-size' }, t('Size')), h('th', { class: 'col-date' }, t('Deleted')), h('th', {}))), h('tbody', {}, rows))
+      ? h('table', { class: 'file-table' }, h('thead', {}, h('tr', {}, h('th', { class: 'col-name' }, t('Name')), h('th', { class: 'col-extra' }, t('Original location')), h('th', { class: 'col-size' }, t('Size')), h('th', { class: 'col-date' }, t('Deleted')), h('th', { class: 'col-trash-actions' }, h('span', { class: 'sr-only' }, t('Actions'))))), h('tbody', {}, rows))
       : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
     h('p', { class: 'muted small' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
   ));

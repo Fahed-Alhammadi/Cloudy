@@ -6,7 +6,7 @@ export function h(tag, attrs, ...kids) {
   let value;
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
-    if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+    if (k.startsWith('on')) { if (typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v); }
     else if (k === 'class') el.className = v;
     else if (k === 'style' && typeof v === 'object') {
       for (const [p, val] of Object.entries(v)) p.startsWith('--') ? el.style.setProperty(p, val) : (el.style[p] = val);
@@ -121,8 +121,10 @@ export function toast(message, kind = 'info') {
   if (!host) document.body.append((host = h('div', { id: 'toasts', role: 'status', 'aria-live': 'polite' })));
   const t = h('div', { class: `toast ${kind}` }, message);
   host.append(t);
-  setTimeout(() => t.classList.add('hide'), 3500);
-  setTimeout(() => t.remove(), 4000);
+  // Errors stay a little longer: they usually need reading.
+  const ms = kind === 'error' ? 6000 : 3500;
+  setTimeout(() => t.classList.add('hide'), ms);
+  setTimeout(() => t.remove(), ms + 500);
 }
 
 // Server messages are English; the ones in the dictionary are shown translated.
@@ -135,23 +137,45 @@ export function showError(e) {
 /**
  * Opens a modal <dialog>. `buttons` are [{label, value, primary, danger}].
  * Resolves with the clicked button's value (or null when dismissed).
- * `onSubmit(value)` may return false to keep the dialog open.
+ * `onSubmit(value)` may return false to keep the dialog open; while it runs the buttons are disabled,
+ * so a double click can't send the same request twice.
  */
+let dialogSeq = 0;
 export function modal({ title, body, buttons = [{ label: t('Close'), value: null }], wide = false, onSubmit }) {
   return new Promise((resolve) => {
+    const titleId = `dlg-title-${++dialogSeq}`;
     const form = h('form', { method: 'dialog', class: 'dialog-form' });
-    const dlg = h('dialog', { class: `modal ${wide ? 'wide' : ''}` },
-      h('header', {}, h('h2', {}, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Close'), onclick: () => dlg.close('') }, icon('x'))),
+    const dlg = h('dialog', { class: `modal ${wide ? 'wide' : ''}`, 'aria-labelledby': titleId },
+      h('header', {}, h('h2', { id: titleId }, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Close'), onclick: () => dlg.close('') }, icon('x'))),
     );
     form.append(h('div', { class: 'modal-body' }, body));
     const footer = h('footer', {});
+    let busy = false;
+    const run = async (value) => {
+      if (!onSubmit) return true;
+      busy = true;
+      const controls = [...footer.querySelectorAll('button')].filter((b) => !b.disabled);
+      controls.forEach((b) => { b.disabled = true; });
+      dlg.setAttribute('aria-busy', 'true');
+      try {
+        return (await onSubmit(value)) !== false;
+      } catch (e) {
+        showError(e);
+        return false;
+      } finally {
+        busy = false;
+        controls.forEach((b) => { b.disabled = false; });
+        dlg.removeAttribute('aria-busy');
+      }
+    };
     for (const b of buttons) {
       footer.append(h('button', {
         type: b.primary ? 'submit' : 'button',
         class: `btn ${b.primary ? 'primary' : ''} ${b.danger ? 'danger' : ''}`,
         value: String(b.value ?? ''),
         onclick: b.primary ? null : async () => {
-          if (onSubmit && b.value != null && (await onSubmit(b.value)) === false) return;
+          if (busy) return;
+          if (b.value != null && !(await run(b.value))) return;
           dlg.close(String(b.value ?? ''));
         },
       }, b.label));
@@ -159,11 +183,14 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     if (buttons.length) form.append(footer);
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (busy) return;
       const primary = buttons.find((b) => b.primary);
-      if (onSubmit && (await onSubmit(primary?.value)) === false) return;
+      if (!(await run(primary?.value))) return;
       dlg.close(String(primary?.value ?? ''));
     });
     dlg.append(form);
+    // Escape while a request runs would leave it finishing in the background: wait for it.
+    dlg.addEventListener('cancel', (e) => { if (busy) e.preventDefault(); });
     dlg.addEventListener('close', () => {
       const v = dlg.returnValue;
       const btn = buttons.find((b) => String(b.value ?? '') === v && v !== '');
@@ -172,7 +199,7 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     });
     document.body.append(dlg);
     dlg.showModal();
-    const first = dlg.querySelector('input:not([type=checkbox]), textarea, select');
+    const first = dlg.querySelector('input:not([type=checkbox]):not([disabled]), textarea, select');
     if (first) { first.focus(); if (first.select) first.select(); }
   });
 }
@@ -182,37 +209,81 @@ export async function confirmDialog(title, message, okLabel = t('OK'), danger = 
   return v === 'ok';
 }
 
-export async function promptDialog(title, label, initial = '', okLabel = t('OK')) {
+/** `selectBase`: select only the part before the extension (renaming "Report.pdf" keeps ".pdf"). */
+export async function promptDialog(title, label, initial = '', okLabel = t('OK'), { selectBase = false } = {}) {
   const input = h('input', { type: 'text', value: initial, required: true, 'aria-label': label });
-  // Pre-select the base name (without extension) when renaming files.
-  const v = await modal({
+  const result = modal({
     title,
     body: h('label', { class: 'field' }, h('span', {}, label), input),
     buttons: [{ label: t('Cancel'), value: null }, { label: okLabel, value: 'ok', primary: true }],
   });
-  return v === 'ok' ? input.value.trim() : null;
+  const dot = initial.lastIndexOf('.');
+  if (selectBase && dot > 0) input.setSelectionRange(0, dot);
+  return (await result) === 'ok' ? input.value.trim() : null;
 }
 
 // ---------------------------------------------------------------- popover menus
 
 let openMenu = null;
-export function closeMenu() {
-  if (openMenu) { openMenu.remove(); openMenu = null; }
+let menuAnchor = null;
+export function closeMenu({ refocus = false } = {}) {
+  if (!openMenu) return;
+  openMenu.remove();
+  openMenu = null;
+  const anchor = menuAnchor;
+  menuAnchor = null;
+  if (anchor) {
+    anchor.removeAttribute('aria-expanded');
+    if (refocus && anchor.isConnected) anchor.focus();
+  }
 }
-document.addEventListener('click', (e) => { if (openMenu && !openMenu.contains(e.target)) closeMenu(); }, true);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+// A click on the button that opened the menu closes it (instead of closing and opening it again).
+let swallowAnchorClick = null;
+document.addEventListener('pointerdown', (e) => {
+  if (openMenu && !openMenu.contains(e.target)) {
+    swallowAnchorClick = menuAnchor && menuAnchor.contains(e.target) ? menuAnchor : null;
+    closeMenu();
+  }
+}, true);
+document.addEventListener('click', (e) => {
+  if (swallowAnchorClick && swallowAnchorClick.contains(e.target)) { e.stopPropagation(); e.preventDefault(); }
+  swallowAnchorClick = null;
+  if (openMenu && !openMenu.contains(e.target)) closeMenu();
+}, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenu) { e.preventDefault(); closeMenu({ refocus: true }); } });
 
-/** Shows a menu of [{label, icon, onclick, danger}] next to `anchor` (or at an {x,y} point). */
+/**
+ * Shows a menu of [{label, icon, onclick, danger}] next to `anchor` (an element, or an {x,y} point).
+ * Keyboard: arrows/Home/End move, Escape closes and returns focus to the anchor, Tab closes.
+ */
 export function showMenu(anchor, items) {
   closeMenu();
+  const isEl = anchor instanceof Element;
   const menu = h('div', { class: 'menu', role: 'menu' },
     items.filter(Boolean).map((it) => it === '-' ? h('hr') : h('button', {
-      type: 'button', role: 'menuitem', class: it.danger ? 'danger' : '',
-      onclick: (e) => { e.stopPropagation(); closeMenu(); it.onclick(); },
+      type: 'button', role: 'menuitem', tabindex: -1, class: it.danger ? 'danger' : '',
+      onclick: (e) => {
+        e.stopPropagation();
+        closeMenu({ refocus: true });
+        // Errors of the chosen action (a dialog that failed to load, say) are shown, not lost.
+        Promise.resolve().then(() => it.onclick()).catch(showError);
+      },
     }, it.icon ? icon(it.icon) : null, h('span', {}, it.label))),
   );
+  const entries = () => [...menu.querySelectorAll('[role=menuitem]')];
+  menu.addEventListener('keydown', (e) => {
+    const list = entries();
+    const i = list.indexOf(document.activeElement);
+    let next = null;
+    if (e.key === 'ArrowDown') next = list[(i + 1) % list.length];
+    else if (e.key === 'ArrowUp') next = list[(i - 1 + list.length) % list.length];
+    else if (e.key === 'Home') next = list[0];
+    else if (e.key === 'End') next = list[list.length - 1];
+    else if (e.key === 'Tab') { e.preventDefault(); closeMenu({ refocus: true }); return; }
+    if (next) { e.preventDefault(); next.focus(); }
+  });
   document.body.append(menu);
-  const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
+  const r = isEl ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
   const mw = menu.offsetWidth;
   const mh = menu.offsetHeight;
   // Opens towards the reading direction's start: under the anchor's right edge (left edge in RTL).
@@ -224,7 +295,10 @@ export function showMenu(anchor, items) {
   menu.style.left = `${Math.max(8, left)}px`;
   menu.style.top = `${top}px`;
   openMenu = menu;
-  menu.querySelector('button')?.focus();
+  // Focus goes back to the button (or the row that was right-clicked) when the menu closes.
+  menuAnchor = isEl ? anchor : (document.activeElement !== document.body ? document.activeElement : null);
+  if (isEl) anchor.setAttribute('aria-expanded', 'true');
+  entries()[0]?.focus();
 }
 
 export function copyText(text) {

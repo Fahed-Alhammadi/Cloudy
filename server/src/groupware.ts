@@ -3,8 +3,33 @@ import { createHash, randomUUID } from 'node:crypto';
 import { q, one, tx } from './db.ts';
 import { HttpError } from './http.ts';
 
-let registeredZones = 0;
-const MAX_ZONES = 500;
+
+// ---------------------------------------------------------------- recurrence loop guard
+// ical.js's RecurIterator.next() searches day by day (or hour, minute…) until the contracting BY* rules match. Rules
+// that never match (FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30) make that loop endless inside one synchronous call, which
+// freezes the whole server; only MONTHLY/YEARLY have an escape. Each check costs a few µs, so: at most this many
+// steps to find one occurrence, and this many for everything one iterator does (a listing, a COUNT walk).
+const MAX_STEPS_PER_OCCURRENCE = 50_000;
+const MAX_STEPS_PER_ITERATOR = 250_000;
+
+export class RecurrenceTooComplex extends Error {}
+
+{
+  const proto = ICAL.RecurIterator.prototype as any;
+  const next = proto.next;
+  const check = proto.check_contracting_rules;
+  proto.next = function (this: any, ...args: unknown[]) {
+    this.cloudySteps = 0;
+    return next.apply(this, args);
+  };
+  proto.check_contracting_rules = function (this: any) {
+    this.cloudyTotal = (this.cloudyTotal ?? 0) + 1;
+    if (++this.cloudySteps > MAX_STEPS_PER_OCCURRENCE || this.cloudyTotal > MAX_STEPS_PER_ITERATOR) {
+      throw new RecurrenceTooComplex('This repeat rule never or too rarely produces a date');
+    }
+    return check.call(this);
+  };
+}
 
 export interface Kind {
   key: 'cal' | 'card';
@@ -85,7 +110,11 @@ export async function getObject(k: Kind, collId: number, uri: string): Promise<D
   return one<DavObject>(`SELECT * FROM ${k.objs} WHERE collection_id = $1 AND uri = $2`, [collId, uri]);
 }
 
-/** Parses iCalendar / vCard text into an ical.js component (registering embedded timezones). */
+/**
+ * Parses iCalendar / vCard text into an ical.js component. Embedded VTIMEZONEs are NOT registered in ical.js's
+ * process-wide TimezoneService (they used to be): the first user to upload "Europe/Berlin" would have defined it for
+ * everyone else's events. ical.js resolves a TZID from the VTIMEZONE in the same object by itself.
+ */
 export function parseComponent(data: string): ICAL.Component {
   let parsed: any;
   try {
@@ -94,19 +123,7 @@ export function parseComponent(data: string): ICAL.Component {
     throw new HttpError(400, `Invalid data: ${e?.message ?? e}`);
   }
   if (Array.isArray(parsed) && Array.isArray(parsed[0])) parsed = parsed[0];
-  const comp = new ICAL.Component(parsed);
-  // The registry is process-wide: a user's VTIMEZONE must not redefine a zone others already use, and it stays bounded.
-  for (const tz of comp.getAllSubcomponents('vtimezone')) {
-    try {
-      const tzid = String(tz.getFirstPropertyValue('tzid') ?? '');
-      if (!tzid || ICAL.TimezoneService.has(tzid) || registeredZones >= MAX_ZONES) continue;
-      ICAL.TimezoneService.register(tz);
-      registeredZones++;
-    } catch {
-      /* ignore broken timezone definitions */
-    }
-  }
-  return comp;
+  return new ICAL.Component(parsed);
 }
 
 interface Analysis { uid: string; component: string; first_start: Date | null; last_end: Date | null }
@@ -131,19 +148,37 @@ function analyze(k: Kind, data: string): Analysis {
         const rrule = master.getFirstPropertyValue('rrule') as any;
         const duration = out.last_end.getTime() - out.first_start.getTime();
         out.last_end = null; // unbounded unless UNTIL/COUNT say otherwise
+        // A rule that can't find its second date would hang every listing of this calendar: refuse it now.
+        // (Other ical.js complaints about a rule keep the old behaviour: stored, shown unbounded.)
+        try {
+          const probe = ev.iterator();
+          probe.next();
+          probe.next();
+        } catch (e) {
+          if (e instanceof RecurrenceTooComplex) throw new HttpError(400, `Invalid data: ${e.message}`);
+        }
         if (rrule?.until) {
           out.last_end = new Date(rrule.until.toJSDate().getTime() + duration + 86400000);
         } else if (rrule?.count && rrule.count <= 10000) {
-          const it = ev.iterator();
-          let last: Date | null = null;
-          for (let i = 0, next; i < rrule.count && (next = it.next()); i++) last = next.toJSDate();
-          if (last) out.last_end = new Date(last.getTime() + duration + 86400000);
+          try {
+            const it = ev.iterator();
+            let last: Date | null = null;
+            for (let i = 0, next; i < rrule.count && (next = it.next()); i++) last = next.toJSDate();
+            if (last) out.last_end = new Date(last.getTime() + duration + 86400000);
+          } catch {
+            out.last_end = null; // too expensive (or unreadable) to walk: treat as unbounded
+          }
         }
       }
+      // Moved occurrences (RECURRENCE-ID overrides) can lie outside the series: one moved past the last occurrence
+      // must still be found by a calendar-query for its new date.
       for (const ex of items) {
         if (ex === master) continue;
         const e = new ICAL.Event(ex);
-        if (e.startDate && e.startDate.toJSDate() < out.first_start!) out.first_start = e.startDate.toJSDate();
+        if (!e.startDate) continue;
+        if (e.startDate.toJSDate() < out.first_start!) out.first_start = e.startDate.toJSDate();
+        const end = (e.endDate ?? e.startDate).toJSDate();
+        if (out.last_end && end > out.last_end) out.last_end = end;
       }
     }
   }
@@ -164,7 +199,13 @@ export async function putObject(
   cond: { ifMatch?: string; ifNoneMatch?: string } = {},
 ): Promise<{ obj: DavObject; created: boolean }> {
   if (!URI_RE.test(uri)) throw new HttpError(400, 'Invalid resource name');
-  const a = analyze(k, data);
+  let a: Analysis;
+  try {
+    a = analyze(k, data);
+  } catch (e: any) {
+    // ical.js throws plain errors for data it parsed but can't evaluate (bad DTSTART, RRULE…): the client's fault.
+    throw e instanceof HttpError ? e : new HttpError(400, `Invalid data: ${e?.message ?? e}`);
+  }
   const etag = createHash('md5').update(data).digest('hex');
   return tx(async (db) => {
     const existing = await one<DavObject>(`SELECT * FROM ${k.objs} WHERE collection_id = $1 AND uri = $2 FOR UPDATE`, [coll.id, uri], db);

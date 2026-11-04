@@ -4,6 +4,42 @@ import { h, icon, formatSize, fullDate, toast, showError, modal, confirmDialog, 
 import { passkeysSupported, createPasskey, isPasskeyCancel } from './passkey.js';
 import { t, LANGUAGES, setLanguage } from './i18n.js';
 
+// ---------------------------------------------------------------- password confirmation
+// Sensitive changes ask for the current password. A wrong one (or any other refusal) is shown inside the
+// dialog/form, next to the field, and the dialog stays open for another try.
+
+function passwordInput(label = t('Confirm with your password')) {
+  const input = h('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': label });
+  const error = h('p', { class: 'error', role: 'alert' });
+  const field = h('label', { class: 'field' }, h('span', {}, label), input);
+  return { input, error, field };
+}
+
+function inlineError(pw, e) {
+  pw.error.textContent = t(e?.message || String(e));
+  pw.input.focus();
+  pw.input.select();
+}
+
+/**
+ * Dialog that confirms an action with the password: `submit(password)` does the request and returns its result;
+ * resolves with that result, or null when cancelled.
+ */
+export async function withPasswordDialog({ title, okLabel, danger = false, intro = null, fields = [], submit }) {
+  const pw = passwordInput();
+  let result = null;
+  await modal({
+    title,
+    body: h('div', {}, intro, fields, pw.field, pw.error),
+    buttons: [{ label: t('Cancel'), value: null }, { label: okLabel, value: 'ok', primary: true, danger }],
+    onSubmit: async () => {
+      pw.error.textContent = '';
+      try { result = (await submit(pw.input.value)) ?? {}; return true; } catch (e) { inlineError(pw, e); return false; }
+    },
+  });
+  return result;
+}
+
 export async function renderSettings(main, ctx) {
   const me = await get('/api/me');
   const [appPasswords, passkeys] = await Promise.all([get('/api/me/app-passwords'), get('/api/me/passkeys')]);
@@ -16,6 +52,17 @@ export async function renderSettings(main, ctx) {
   const language = h('select', {}, h('option', { value: '' }, t('Automatic (browser language)')),
     LANGUAGES.map(([code, label]) => h('option', { value: code, selected: me.language === code }, label)));
   const cur = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  // Changing the email address needs the current password (reset links go there); other profile edits don't.
+  const emailPw = passwordInput(t('Current password (needed to change the email)'));
+  const emailPwBox = h('div', { class: 'wide', hidden: true }, emailPw.field, emailPw.error);
+  const emailChanged = () => email.value.trim() !== (me.email || '');
+  email.addEventListener('input', () => {
+    emailPwBox.hidden = !emailChanged();
+    emailPw.input.required = emailChanged();
+    if (!emailChanged()) { emailPw.input.value = ''; emailPw.error.textContent = ''; }
+  });
+  emailPw.input.required = false;
+  const pwError = h('p', { class: 'error wide', role: 'alert' });
   const pw1 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
   const pct = me.quotaBytes ? Math.min(100, (me.used / me.quotaBytes) * 100) : 0;
 
@@ -31,31 +78,46 @@ export async function renderSettings(main, ctx) {
         ? t('{used} of {quota} used, including trash and versions.', { used: formatSize(me.used), quota: formatSize(me.quotaBytes) })
         : t('{used} used (no quota), including trash and versions.', { used: formatSize(me.used) }))),
 
-    h('form', { class: 'card form-grid', onsubmit: async (e) => {
-      e.preventDefault();
+    h('form', { class: 'card form-grid', onsubmit: busyForm(async () => {
+      emailPw.error.textContent = '';
+      const body = { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, language: language.value || null };
+      if (emailChanged()) body.password = emailPw.input.value;
       try {
-        await patch('/api/me', { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, language: language.value || null });
-        // A new language redraws the whole app (sidebar included).
-        if ((me.language || '') !== language.value) await setLanguage(language.value || null);
-        toast(t('Profile saved'));
-        ctx.refreshMe();
-      } catch (err) { showError(err); }
-    } },
+        await patch('/api/me', body);
+      } catch (err) {
+        if (emailChanged()) inlineError(emailPw, err);
+        else showError(err);
+        return;
+      }
+      // A new language redraws the whole app (sidebar included).
+      if ((me.language || '') !== language.value) await setLanguage(language.value || null);
+      toast(t('Profile saved'));
+      await ctx.refreshMe();
+    }) },
       h('h2', { class: 'wide' }, t('Profile')),
       h('label', { class: 'field' }, h('span', {}, t('Display name')), name),
       h('label', { class: 'field' }, h('span', {}, t('Email')), email),
       h('label', { class: 'field' }, h('span', {}, t('Language')), language),
+      emailPwBox,
       h('label', { class: 'check wide' }, notifyShares, t('Email me when something is shared with me')),
-      h('p', { class: 'muted small wide' }, t('Your language is used here, in the Android app and in emails. Your email is also used for password reset links and security notices.')),
+      h('p', { class: 'muted small wide' }, t('Your language is used here, in the Android and desktop apps and in emails. Your email is also used for password reset links and security notices.')),
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save profile')))),
 
-    h('form', { class: 'card form-grid', onsubmit: async (e) => {
-      e.preventDefault();
-      await post('/api/me/password', { current: cur.value, password: pw1.value }).then(() => { toast(t('Password changed')); e.target.reset(); }, showError);
-    } },
+    h('form', { class: 'card form-grid', onsubmit: busyForm(async (e) => {
+      pwError.textContent = '';
+      try {
+        await post('/api/me/password', { current: cur.value, password: pw1.value });
+        toast(t('Password changed'));
+        e.target.reset();
+      } catch (err) {
+        pwError.textContent = t(err.message);
+        cur.focus();
+      }
+    }) },
       h('h2', { class: 'wide' }, t('Password')),
       h('label', { class: 'field' }, h('span', {}, t('Current password')), cur),
       h('label', { class: 'field' }, h('span', {}, t('New password (8+ characters)')), pw1),
+      pwError,
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Change password')))),
 
     passkeysCard(passkeys, rerender),
@@ -73,19 +135,31 @@ export async function renderSettings(main, ctx) {
           if (await confirmDialog(t('Revoke app password'), t('Devices using "{name}" will be signed out.', { name: p.name }), t('Revoke'), true)) await del(`/api/me/app-passwords/${p.id}`).then(rerender, showError);
         } }, t('Revoke'))))) : h('p', { class: 'muted' }, t('No app passwords yet.')),
       h('button', { class: 'btn', onclick: async () => {
-        const label = await promptDialog(t('New app password'), t('Device name'), t('My laptop'), t('Create'));
-        if (!label) return;
-        try {
-          const r = await post('/api/me/app-passwords', { name: label });
-          await modal({ title: t('App password created'), body: h('div', {},
-            h('p', {}, t('Copy it now — it will not be shown again.')),
-            h('div', { class: 'url-row' }, h('code', { class: 'secret' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
-          rerender();
-        } catch (e) { showError(e); }
+        const label = h('input', { type: 'text', required: true, maxlength: 100, value: t('My laptop'), 'aria-label': t('Device name') });
+        const r = await withPasswordDialog({
+          title: t('New app password'), okLabel: t('Create'),
+          fields: [h('label', { class: 'field' }, h('span', {}, t('Device name')), label)],
+          submit: (password) => post('/api/me/app-passwords', { name: label.value.trim(), password }),
+        });
+        if (!r?.password) return;
+        await modal({ title: t('App password created'), body: h('div', {},
+          h('p', {}, t('Copy it now — it will not be shown again.')),
+          h('div', { class: 'url-row' }, h('code', { class: 'secret' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
+        rerender();
       } }, icon('plus'), t('Create app password'))),
 
     deleteAccountCard(),
   ));
+}
+
+/** Form submit handler that disables the form's buttons while `fn` runs (no double submits). */
+function busyForm(fn) {
+  return async (e) => {
+    e.preventDefault();
+    const buttons = [...e.currentTarget.querySelectorAll('button')];
+    buttons.forEach((b) => { b.disabled = true; });
+    try { await fn(e); } catch (err) { showError(err); } finally { buttons.forEach((b) => { b.disabled = false; }); }
+  };
 }
 
 // ---------------------------------------------------------------- delete account
@@ -93,17 +167,10 @@ export async function renderSettings(main, ctx) {
 // Same wording and flow as the Android and iPhone apps: explain what goes, confirm with the password, then sign out.
 function deleteAccountCard() {
   const open = async () => {
-    const pw = h('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
-    let deleted = false;
-    await modal({
-      title: t('Delete account?'),
-      body: h('div', {},
-        h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. It can’t be undone.')),
-        h('label', { class: 'field' }, h('span', {}, t('Confirm with your password')), pw)),
-      buttons: [{ label: t('Cancel'), value: null }, { label: t('Delete account'), value: 'ok', primary: true, danger: true }],
-      onSubmit: async () => {
-        try { await post('/api/me/delete', { password: pw.value }); deleted = true; return true; } catch (e) { showError(e); return false; }
-      },
+    const deleted = await withPasswordDialog({
+      title: t('Delete account?'), okLabel: t('Delete account'), danger: true,
+      intro: h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. It can’t be undone.')),
+      submit: (password) => post('/api/me/delete', { password }),
     });
     if (deleted) location.reload(); // the session is gone: back to the sign-in page
   };
@@ -117,25 +184,29 @@ function deleteAccountCard() {
 function passkeysCard(passkeys, rerender) {
   const add = async () => {
     const name = h('input', { type: 'text', maxlength: 60, placeholder: t('e.g. MacBook, iPhone, YubiKey'), 'aria-label': t('Passkey name') });
-    const pw = h('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
+    const pw = passwordInput();
     let added = false;
     await modal({
       title: t('Add a passkey'),
       body: h('div', {},
         h('p', {}, t('Your device will ask you to confirm with your fingerprint, face, screen lock or security key.')),
         h('label', { class: 'field' }, h('span', {}, t('Name')), name),
-        h('label', { class: 'field' }, h('span', {}, t('Confirm with your password')), pw)),
+        pw.field, pw.error),
       buttons: [{ label: t('Cancel'), value: null }, { label: t('Continue'), value: 'ok', primary: true }],
       onSubmit: async () => {
+        pw.error.textContent = '';
+        let options;
         try {
-          const options = await post('/api/me/passkeys/options', { password: pw.value });
+          options = await post('/api/me/passkeys/options', { password: pw.input.value });
+        } catch (e) { inlineError(pw, e); return false; }
+        try {
           const cred = await createPasskey(options);
           await post('/api/me/passkeys', { ...cred, name: name.value.trim() });
           added = true;
           return true;
         } catch (e) {
-          if (e?.name === 'InvalidStateError') toast(t('This device already has a passkey for your account'), 'error');
-          else if (!isPasskeyCancel(e)) showError(e);
+          if (e?.name === 'InvalidStateError') pw.error.textContent = t('This device already has a passkey for your account');
+          else if (!isPasskeyCancel(e)) pw.error.textContent = t(e?.message || String(e));
           return false;
         }
       },
@@ -168,13 +239,24 @@ function recoveryCodesBody(codes) {
     h('pre', { class: 'recovery-codes' }, text),
     h('div', { class: 'row' },
       h('button', { type: 'button', class: 'btn', onclick: () => copyText(text) }, icon('copy'), t('Copy')),
-      h('a', { class: 'btn', href: URL.createObjectURL(new Blob([`Cloudy recovery codes\n\n${text}\n`], { type: 'text/plain' })), download: 'cloudy-recovery-codes.txt' }, icon('download'), t('Download'))));
+      h('button', { type: 'button', class: 'btn', onclick: () => {
+        // A short-lived blob URL (one per click, released right after) instead of one kept for the whole session.
+        const url = URL.createObjectURL(new Blob([`Cloudy recovery codes\n\n${text}\n`], { type: 'text/plain' }));
+        const a = h('a', { href: url, download: 'cloudy-recovery-codes.txt' });
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, icon('download'), t('Download'))));
 }
 
 function twoFactorCard(me, rerender) {
   const enable = async () => {
-    let setup;
-    try { setup = await post('/api/me/2fa/setup'); } catch (e) { return showError(e); }
+    // Step 1: the password (the server checks it before handing out a new secret).
+    const setup = await withPasswordDialog({
+      title: t('Turn on two-factor authentication'), okLabel: t('Continue'),
+      submit: (password) => post('/api/me/2fa/setup', { password }),
+    });
+    if (!setup?.secret) return;
+    const codeError = h('p', { class: 'error', role: 'alert' });
     const code = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', required: true, placeholder: '123 456', 'aria-label': t('Code from the app') });
     let codes = null;
     await modal({
@@ -183,13 +265,14 @@ function twoFactorCard(me, rerender) {
         h('p', {}, t('1. Scan this QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…).')),
         h('img', { class: 'qr', alt: t('QR code for your authenticator app'), src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(setup.qrSvg) }),
         h('p', { class: 'muted small' }, t("Can't scan? Enter this key manually:"), ' ', h('code', { class: 'secret' }, setup.secret.replace(/(.{4})/g, '$1 ').trim())),
-        h('label', { class: 'field' }, h('span', {}, t('2. Enter the 6-digit code the app shows')), code)),
+        h('label', { class: 'field' }, h('span', {}, t('2. Enter the 6-digit code the app shows')), code), codeError),
       buttons: [{ label: t('Cancel'), value: null }, { label: t('Turn on'), value: 'ok', primary: true }],
       onSubmit: async () => {
+        codeError.textContent = '';
         try {
           codes = (await post('/api/me/2fa/enable', { code: code.value })).recoveryCodes;
           return true;
-        } catch (e) { showError(e); code.select(); return false; }
+        } catch (e) { codeError.textContent = t(e.message); code.focus(); code.select(); return false; }
       },
     });
     if (codes) {
@@ -198,18 +281,7 @@ function twoFactorCard(me, rerender) {
     }
   };
 
-  const withPassword = async (title, okLabel, danger, path) => {
-    const pw = h('input', { type: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
-    let result = null;
-    await modal({
-      title, body: h('label', { class: 'field' }, h('span', {}, t('Confirm with your password')), pw),
-      buttons: [{ label: t('Cancel'), value: null }, { label: okLabel, value: 'ok', primary: true, danger }],
-      onSubmit: async () => {
-        try { result = (await post(path, { password: pw.value })) ?? {}; return true; } catch (e) { showError(e); return false; }
-      },
-    });
-    return result;
-  };
+  const withPassword = (title, okLabel, danger, path) => withPasswordDialog({ title, okLabel, danger, submit: (password) => post(path, { password }) });
 
   return h('div', { class: 'card' }, h('h2', {}, t('Two-factor authentication')),
     me.twoFactor
@@ -289,7 +361,7 @@ export async function renderAdmin(main, ctx) {
       h('button', { class: 'btn primary', onclick: () => userDialog(null, groups, rerender) }, icon('plus'), t('New user'))),
     h('div', { class: 'card' }, h('h2', {}, t('Users ({n})', { n: users.length })),
       h('div', { class: 'table-wrap' }, h('table', { class: 'data-table' },
-        h('thead', {}, h('tr', {}, [t('User'), t('Email'), t('Groups'), t('Storage'), t('Role'), ''].map((th) => h('th', {}, th)))),
+        h('thead', {}, h('tr', {}, [t('User'), t('Email'), t('Groups'), t('Storage'), t('Role'), h('span', { class: 'sr-only' }, t('Actions'))].map((th) => h('th', {}, th)))),
         h('tbody', {}, users.map((u) => h('tr', { class: u.disabled ? 'dim' : '' },
           h('td', {}, h('strong', {}, u.displayName), h('div', { class: 'muted small' }, u.id)),
           h('td', {}, u.email),

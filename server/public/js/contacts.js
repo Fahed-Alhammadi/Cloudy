@@ -2,7 +2,7 @@
 import { api, get, post, put, patch, del } from './api.js';
 import { h, icon, toast, showError, confirmDialog, promptDialog, showMenu, copyText, modal } from './ui.js';
 import { attachDropZone } from './files.js';
-import { t } from './i18n.js';
+import { t, locale } from './i18n.js';
 
 let currentBook = null;
 let currentUri = null;
@@ -36,7 +36,8 @@ const pickFile = (onFile) => {
   input.click();
 };
 
-const initials = (c) => (c.fn || '?').split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+const displayName = (c) => c.fn || c.org || c.emails?.[0] || c.phones?.[0] || t('(no name)');
+const initials = (c) => (c.fn || c.org || '?').split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 
 export async function renderContacts(main, ctx) {
   const books = await get('/api/addressbooks');
@@ -58,13 +59,14 @@ export async function renderContacts(main, ctx) {
     const q = filter.toLowerCase();
     const shown = contacts.filter((c) => !q || [c.fn, c.org, ...c.emails, ...c.phones].join(' ').toLowerCase().includes(q));
     list.replaceChildren(...(shown.length ? shown.map((c) => h('li', {},
-      h('button', { class: `contact-item ${c.uri === currentUri ? 'active' : ''}`, onclick: () => { currentUri = c.uri; drawList(); drawDetail(c); } },
-        h('span', { class: 'avatar' }, initials(c)),
-        h('span', { class: 'grow' }, h('strong', {}, c.fn), h('small', { class: 'muted' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
+      h('button', { class: `contact-item ${c.uri === currentUri ? 'active' : ''}`, 'aria-current': c.uri === currentUri ? 'true' : null, onclick: () => { currentUri = c.uri; drawList(); drawDetail(c, true); } },
+        h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(c)),
+        h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, displayName(c)), h('small', { class: 'muted' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
   };
   search.addEventListener('input', () => { filter = search.value; drawList(); });
 
-  const drawDetail = (c) => {
+  // `reveal`: on phones the form sits below the list, so it is scrolled into view.
+  const drawDetail = (c, reveal = false) => {
     const isNew = !c;
     c = c || { fn: '', givenName: '', familyName: '', emails: [], phones: [], org: '', title: '', address: '', birthday: '', note: '' };
     const f = {
@@ -78,12 +80,21 @@ export async function renderContacts(main, ctx) {
       birthday: h('input', { type: 'date', value: /^\d{4}-\d{2}-\d{2}/.test(c.birthday) ? c.birthday.slice(0, 10) : '' }),
       note: h('textarea', { rows: 3, value: c.note }),
     };
+    let birthdayTouched = false;
+    f.birthday.addEventListener('input', () => { birthdayTouched = true; birthdayNote.hidden = true; });
+    const noYear = /^--(\d{2})-?(\d{2})$/.exec(c.birthday || '');
+    const birthdayNote = h('small', { class: 'muted', hidden: !c.birthday || f.birthday.value !== '' },
+      noYear
+        ? t('{date} (no year)', { date: new Date(2000, Number(noYear[1]) - 1, Number(noYear[2])).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) })
+        : c.birthday);
     const save = async (e) => {
       e.preventDefault();
       const data = {
         givenName: f.givenName.value, familyName: f.familyName.value, org: f.org.value, title: f.title.value,
         emails: f.emails.value.split('\n'), phones: f.phones.value.split('\n'), address: f.address.value,
-        birthday: f.birthday.value, note: f.note.value,
+        // A birthday the date field can't show (no year "--04-15", or with a time) goes back exactly as it came,
+        // unless the user picked a new date; saving used to erase it.
+        birthday: birthdayTouched ? f.birthday.value : (c.birthday || ''), note: f.note.value,
       };
       try {
         const saved = isNew
@@ -95,7 +106,7 @@ export async function renderContacts(main, ctx) {
       } catch (err) { showError(err); }
     };
     detail.replaceChildren(h('form', { class: 'form-grid', onsubmit: save },
-      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big' }, isNew ? icon('plus') : initials(c)), h('h2', {}, isNew ? t('New contact') : c.fn)),
+      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big' }, isNew ? icon('plus') : initials(c)), h('h2', {}, isNew ? t('New contact') : displayName(c))),
       h('label', { class: 'field' }, h('span', {}, t('First name')), f.givenName),
       h('label', { class: 'field' }, h('span', {}, t('Last name')), f.familyName),
       h('label', { class: 'field' }, h('span', {}, t('Organization')), f.org),
@@ -103,26 +114,27 @@ export async function renderContacts(main, ctx) {
       h('label', { class: 'field' }, h('span', {}, t('Email')), f.emails),
       h('label', { class: 'field' }, h('span', {}, t('Phone')), f.phones),
       h('label', { class: 'field wide' }, h('span', {}, t('Address')), f.address),
-      h('label', { class: 'field' }, h('span', {}, t('Birthday')), f.birthday),
+      h('label', { class: 'field' }, h('span', {}, t('Birthday')), f.birthday, birthdayNote),
       h('label', { class: 'field wide' }, h('span', {}, t('Notes')), f.note),
       h('div', { class: 'wide row end' },
         !isNew && h('button', { type: 'button', class: 'btn danger', onclick: async () => {
-          if (!(await confirmDialog(t('Delete contact'), t('Delete {name}?', { name: c.fn }), t('Delete'), true))) return;
+          if (!(await confirmDialog(t('Delete contact'), t('Delete {name}?', { name: displayName(c) }), t('Delete'), true))) return;
           await del(`/api/addressbooks/${book.id}/contacts/${encodeURIComponent(c.uri)}`).catch(showError);
           currentUri = null;
           rerender();
         } }, icon('trash'), t('Delete')),
         h('button', { type: 'submit', class: 'btn primary' }, icon('save'), t('Save'))),
     ));
-    f.givenName.focus();
+    f.givenName.focus({ preventScroll: true });
+    if (reveal && matchMedia('(max-width: 860px)').matches) detail.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
 
   const bookSelect = h('select', { 'aria-label': t('Address book'), onchange: (e) => { currentBook = Number(e.target.value); currentUri = null; rerender(); } },
     books.map((b) => h('option', { value: b.id, selected: b.id === book.id }, b.name)));
 
-  main.replaceChildren(h('section', { class: 'contacts-view' },
+  main.replaceChildren(h('section', { class: 'contacts-view', 'data-drop-label': t('Drop a .vcf or .csv file to import') },
     h('div', { class: 'contacts-side' },
-      h('div', { class: 'row' }, bookSelect, h('button', { class: 'icon-btn', 'aria-label': t('Address book options'), onclick: (e) => showMenu(e.currentTarget, [
+      h('div', { class: 'row' }, bookSelect, h('button', { class: 'icon-btn', 'aria-haspopup': 'menu', 'aria-label': t('Address book options'), onclick: (e) => showMenu(e.currentTarget, [
         { label: t('New address book'), icon: 'plus', onclick: async () => {
           const name = await promptDialog(t('New address book'), t('Name'), '', t('Create'));
           if (name) { const b = await post('/api/addressbooks', { name }).catch(showError); if (b) currentBook = b.id; rerender(); }
@@ -144,7 +156,7 @@ export async function renderContacts(main, ctx) {
       ]) }, icon('more'))),
       search,
       h('div', { class: 'row' },
-        h('button', { class: 'btn primary grow', onclick: () => { currentUri = null; drawList(); drawDetail(null); } }, icon('plus'), t('New contact')),
+        h('button', { class: 'btn primary grow', onclick: () => { currentUri = null; drawList(); drawDetail(null, true); } }, icon('plus'), t('New contact')),
         h('button', { class: 'btn', title: t('Import a .vcf or .csv file'), onclick: () => pickFile((f) => importContacts(book, f, rerender)) }, icon('upload'), t('Import'))),
       list),
     detail));

@@ -2,7 +2,7 @@ import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHash, createHma
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { config } from './config.ts';
 import { q, one } from './db.ts';
-import { HttpError, parseCookies, setCookie, clientIp } from './http.ts';
+import { HttpError, parseCookies, setCookie, clientNet } from './http.ts';
 import { verifyTotp, normalizeRecoveryCode } from './totp.ts';
 import { assertionCredentialId, verifyAssertion } from './webauthn.ts';
 
@@ -32,6 +32,16 @@ function scrypt(pw: string, salt: Buffer): Promise<Buffer> {
 export async function hashPassword(pw: string): Promise<string> {
   const salt = randomBytes(16);
   return `scrypt$${salt.toString('base64')}$${(await scrypt(pw, salt)).toString('base64')}`;
+}
+
+/**
+ * For unknown or disabled accounts: the same scrypt work as a real check, so the answer time doesn't tell whether
+ * an account exists. (The value is a hash of a random password nobody knows.)
+ */
+let dummyHash: Promise<string> | undefined;
+export async function burnPasswordCheck(pw: string): Promise<false> {
+  await verifyPassword(pw, await (dummyHash ??= hashPassword(newToken())));
+  return false;
 }
 
 export async function verifyPassword(pw: string, stored: string): Promise<boolean> {
@@ -64,7 +74,7 @@ function limited(key: string, max: number): boolean {
 }
 
 export function checkRate(req: IncomingMessage, account?: string): void {
-  if (limited(`ip:${clientIp(req)}`, MAX_FAILURES) || (account && limited(`acct:${account.toLowerCase()}`, MAX_ACCOUNT_FAILURES))) {
+  if (limited(`ip:${clientNet(req)}`, MAX_FAILURES) || (account && limited(`acct:${account.toLowerCase()}`, MAX_ACCOUNT_FAILURES))) {
     throw new HttpError(429, 'Too many failed attempts, try again later');
   }
 }
@@ -73,7 +83,7 @@ export function checkRate(req: IncomingMessage, account?: string): void {
 export function recordFailure(req: IncomingMessage | null, account?: string): void {
   const now = Date.now();
   if (failures.size > 5000) for (const [k, f] of failures) if (now - f.first >= WINDOW_MS) failures.delete(k);
-  for (const key of [...(req ? [`ip:${clientIp(req)}`] : []), ...(account ? [`acct:${account.toLowerCase()}`] : [])]) {
+  for (const key of [...(req ? [`ip:${clientNet(req)}`] : []), ...(account ? [`acct:${account.toLowerCase()}`] : [])]) {
     const f = failures.get(key);
     if (!f || now - f.first >= WINDOW_MS) failures.set(key, { n: 1, first: now });
     else f.n++;
@@ -105,7 +115,8 @@ export async function login(req: IncomingMessage, id: string, password: string, 
     `SELECT ${USER_COLS}, password_hash, totp_secret, totp_last_step FROM users WHERE id = $1`,
     [id],
   );
-  if (!row || row.disabled || !(await verifyPassword(password, row.password_hash))) {
+  const ok = row && !row.disabled ? await verifyPassword(password, row.password_hash) : await burnPasswordCheck(password);
+  if (!row || !ok) {
     recordFailure(req, id);
     throw new HttpError(401, 'Invalid username or password');
   }
@@ -153,14 +164,15 @@ export async function loginWithPasskey(req: IncomingMessage, body: Record<string
     recordFailure(req);
     throw new HttpError(401, 'This passkey is not registered with Cloudy');
   }
-  checkRate(req, key.user_id);
+  // No per-account check here: that counter is fed by wrong passwords, which anyone can send for any username, and
+  // must not lock the owner out of their passkey too. Passkey guesses count per client address (above).
   let count: number;
   try {
     count = verifyAssertion(req, {
       publicKey: key.public_key, alg: key.alg, signCount: Number(key.sign_count), userHandle: await passkeyUserHandle(key.user_id),
     }, body);
   } catch (e) {
-    recordFailure(req, key.user_id);
+    recordFailure(req);
     throw e;
   }
   // Conditional update: a replayed or parallel assertion with the same counter loses.
@@ -254,7 +266,6 @@ export async function basicUser(req: IncomingMessage): Promise<User | null> {
   if (cached && cached.until > Date.now()) {
     return (await one<User>(`SELECT ${USER_COLS} FROM users WHERE id = $1 AND NOT disabled`, [cached.user])) ?? null;
   }
-  checkRate(req);
   const decoded = Buffer.from(h.slice(6), 'base64').toString('utf8');
   const i = decoded.indexOf(':');
   if (i < 0) return null;
@@ -264,16 +275,30 @@ export async function basicUser(req: IncomingMessage): Promise<User | null> {
     `SELECT ${USER_COLS}, password_hash FROM users WHERE id = $1 AND NOT disabled`,
     [id],
   );
+  // A valid app password always works, before any rate limit: it is a long random token, so a correct one is never
+  // a guess, and a stale DAV client (old password, revoked app password) or a stranger filling the counters must
+  // not lock out the user's other, correctly configured clients.
+  const app = row && await one(
+    `UPDATE app_passwords SET last_used_at = now() WHERE user_id = $1 AND token_hash = $2 RETURNING id`,
+    [id, sha256(pw)],
+  );
+  if (!app) checkRate(req); // per address; the account limit below only guards guesses of the real password
   let ok = false;
+  let passwordGuess = false;
   if (row) {
-    const app = await one(
-      `UPDATE app_passwords SET last_used_at = now() WHERE user_id = $1 AND token_hash = $2 RETURNING id`,
-      [id, sha256(pw)],
-    );
-    ok = !!app || (!row.totp_enabled && (await verifyPassword(pw, row.password_hash)));
+    if (app) ok = true;
+    // With two-factor on, only app passwords work here (the scrypt still runs, so timing shows nothing).
+    else if (row.totp_enabled) await burnPasswordCheck(pw);
+    else {
+      passwordGuess = true;
+      checkRate(req, id); // per account too, like the login form
+      ok = await verifyPassword(pw, row.password_hash);
+    }
+  } else {
+    await burnPasswordCheck(pw);
   }
   if (!ok || !row) {
-    recordFailure(req);
+    recordFailure(req, passwordGuess ? id : undefined);
     return null;
   }
   basicCache.set(key, { user: id, until: Date.now() + 5 * 60 * 1000 });

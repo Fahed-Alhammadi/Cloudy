@@ -238,7 +238,10 @@ s, _ = anon.req('GET', f'/api/public/{tok}')
 check('expired link is 404', s == 404)
 
 print('== app passwords & WebDAV')
-s, ap = admin.req('POST', '/api/me/app-passwords', {'name': 'test'})
+s, _ = admin.req('POST', '/api/me/app-passwords', {'name': 'test'})
+check('new app password needs the account password', s == 403)
+s, ap = admin.req('POST', '/api/me/app-passwords', {'name': 'test', 'password': ADMIN_PW})
+check('app password created with the password', s == 201 and ap.get('password'), ap)
 dav = Client(basic=f"{ADMIN}:{ap['password']}")
 s, _ = Client(basic=f'{ADMIN}:nope').req('PROPFIND', f'/dav/files/{ADMIN}/', headers={'Depth': '0'})
 check('DAV rejects bad credentials', s == 401)
@@ -508,6 +511,107 @@ s, _ = admin.req('PUT', '/api/admin/mail', {'host': ''})
 s, opts = Client().req('GET', '/api/auth/options')
 check('turning email off hides password reset', opts['passwordReset'] is False)
 
+# (before the 2FA section: its deliberate failures use up the per-address login limit, and DAV checks it again)
+print('== review 2026-11-04 (races, DAV, recurrence guard, account safety)')
+import threading
+def par(*fns):
+    out = [None] * len(fns)
+    ts = [threading.Thread(target=lambda i=i, f=f: out.__setitem__(i, f())) for i, f in enumerate(fns)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    return out
+s, rv = admin.req('POST', f'/api/nodes/{root}/folders', {'name': 'review-' + uuid.uuid4().hex[:6]})
+rvid = rv['id']
+sizes_ok = True
+for i in range(4):
+    s, d = admin.req('POST', f'/api/nodes/{rvid}/folders', {'name': f'd{i}'})
+    s, f = admin.req('POST', f"/api/nodes/{d['id']}/files", {'name': 'f.txt', 'content': 'x' * 1000})
+    par(lambda: admin.req('DELETE', f"/api/nodes/{f['id']}")[0], lambda: admin.req('DELETE', f"/api/nodes/{f['id']}")[0])
+    sizes_ok &= admin.req('GET', f"/api/nodes/{d['id']}")[1]['node']['size'] == 0
+    par(lambda: admin.req('POST', f"/api/trash/{f['id']}/restore")[0], lambda: admin.req('POST', f"/api/trash/{f['id']}/restore")[0])
+    s, dd = admin.req('GET', f"/api/nodes/{d['id']}")
+    sizes_ok &= dd['node']['size'] == 1000 and [c['name'] for c in dd['children']] == ['f.txt']
+check('parallel delete / restore of one file keeps folder sizes right', sizes_ok)
+s, a = admin.req('POST', f'/api/nodes/{rvid}/folders', {'name': 'a'})
+s, b = admin.req('POST', f'/api/nodes/{rvid}/folders', {'name': 'b'})
+res = par(lambda: admin.req('PATCH', f"/api/nodes/{a['id']}", {'parentId': b['id']})[0],
+          lambda: admin.req('PATCH', f"/api/nodes/{b['id']}", {'parentId': a['id']})[0])
+check('crossed folder moves: one wins, no cycle', sorted(res) == [200, 400], res)
+s, body, hd = admin.req('HEAD', f'/api/nodes/{rvid}/download', raw=True)
+check('HEAD on a folder download sends no ZIP', s == 200 and body == b'' and 'zip' in hd.get('Content-Type', ''))
+s, _ = admin.req('POST', f'/api/nodes/{rvid}/folders', {'name': 'bad\x01name'})
+check('control characters in names rejected', s == 400)
+s, up = admin.req('POST', '/api/uploads', {'parentId': rvid, 'name': 'cancelled.bin', 'size': 10})
+admin.req('DELETE', f"/api/uploads/{up['id']}")
+s, _ = admin.req('PUT', f"/api/uploads/{up['id']}", b'0123456789', headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
+check('chunk for a cancelled upload is 404', s == 404 and not any(c['name'] == 'cancelled.bin' for c in admin.req('GET', f'/api/nodes/{rvid}')[1]['children']))
+# public upload link: the owner's file made while a visitor uploads is never replaced
+s, ln = admin.req('POST', f'/api/nodes/{rvid}/shares', {'type': 'link', 'canEdit': True, 'expiresAt': '2999-01-01T00:00:00Z'})
+s, up = Client().req('POST', f"/api/public/{ln['token']}/uploads", {'parentId': rvid, 'name': 'race.txt', 'size': 7})
+admin.req('POST', f'/api/nodes/{rvid}/files', {'name': 'race.txt', 'content': 'owner'})
+s, r = Client().req('PUT', f"/api/uploads/{up['id']}", b'visitor', headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
+names = {c['name']: c['size'] for c in admin.req('GET', f'/api/nodes/{rvid}')[1]['children']}
+check('link upload never overwrites a file the owner made meanwhile', r.get('done') and names.get('race.txt') == 5 and names.get('race (2).txt') == 7, names)
+# DAV
+rvname = rv['name']
+s, _ = dav.req('MKCOL', f'/dav/files/{ADMIN}/{rvname}/m'); dav.req('MKCOL', f'/dav/files/{ADMIN}/{rvname}/m/n')
+s, _ = dav.req('MOVE', f'/dav/files/{ADMIN}/{rvname}/m/n', headers={'Destination': f'{BASE}/dav/files/{ADMIN}/{rvname}/m', 'Overwrite': 'T'})
+s2, _ = dav.req('PROPFIND', f'/dav/files/{ADMIN}/{rvname}/m/n', headers={'Depth': '0'})
+check('DAV MOVE onto its own parent refused before anything is trashed', s == 409 and s2 == 207, (s, s2))
+s, _ = dav.req('MOVE', f'/dav/files/{ADMIN}/{rvname}/m')
+check('DAV MOVE without Destination is 400', s == 400)
+s, _ = dav.req('PUT', f'/dav/files/{ADMIN}/{rvname}/trailing%20', 'x')
+check('DAV PUT with a bad name is 400', s == 400)
+# recurrence that never produces a second date (used to freeze the server)
+s, cals = admin.req('GET', '/api/calendars')
+cal_uri = cals[0]['uri']
+bad_ics = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\nBEGIN:VEVENT\r\nUID:loop-' + uuid.uuid4().hex + '\r\nDTSTAMP:20260101T000000Z\r\n'
+           'DTSTART:20260101T100000Z\r\nDTEND:20260101T110000Z\r\nRRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30;COUNT=2\r\nSUMMARY:loop\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
+t0 = time.time()
+s, _ = dav.req('PUT', f'/dav/calendars/{ADMIN}/{cal_uri}/loop-{uuid.uuid4().hex[:6]}.ics', bad_ics, headers={'Content-Type': 'text/calendar'})
+check('endless RRULE rejected quickly', s == 400 and time.time() - t0 < 10, (s, time.time() - t0))
+s, _ = admin.req('GET', '/status')
+check('server still answers after it', s == 200)
+# a year-less birthday (as phones store it) survives a save from the apps
+s, books = admin.req('GET', '/api/addressbooks')
+bkid = books[0]['id']; buid = 'bday-' + uuid.uuid4().hex[:8]
+dav.req('PUT', f"/dav/addressbooks/{ADMIN}/{books[0]['uri']}/{buid}.vcf", f'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{buid}\r\nFN:Bday Test\r\nN:Test;Bday;;;\r\nBDAY:--04-15\r\nEND:VCARD\r\n', headers={'Content-Type': 'text/vcard'})
+s, cts = admin.req('GET', f'/api/addressbooks/{bkid}/contacts')
+bc = next(c for c in cts if c['uid'] == buid)
+s, saved = admin.req('PUT', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}", {**bc, 'note': 'edited'})
+check('unchanged year-less birthday kept on save', s == 200 and saved['birthday'] == '--04-15' and saved['note'] == 'edited', saved)
+s, saved = admin.req('PUT', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}", {**bc, 'birthday': ''})
+check('empty birthday still clears it', s == 200 and saved['birthday'] == '', saved)
+admin.req('DELETE', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}")
+# email change needs the password; same email / language only do not
+s, me0 = admin.req('GET', '/api/me')
+s, _ = admin.req('PATCH', '/api/me', {'email': me0['email'], 'displayName': me0['displayName']})
+check('profile save with unchanged email needs no password', s == 204)
+s, _ = admin.req('PATCH', '/api/me', {'email': 'changed@example.com'})
+check('email change without password is 403', s == 403 and admin.req('GET', '/api/me')[1]['email'] == me0['email'])
+s, _ = admin.req('PATCH', '/api/me', {'email': 'changed@example.com', 'password': ADMIN_PW})
+s2, me1 = admin.req('GET', '/api/me')
+check('email change with password', s == 204 and me1['email'] == 'changed@example.com')
+admin.req('PATCH', '/api/me', {'email': me0['email'], 'password': ADMIN_PW})
+# a deleted user's shares are not inherited by a new account with the same name
+ghost = 'ghost' + uuid.uuid4().hex[:6]
+admin.req('POST', '/api/admin/users', {'id': ghost, 'password': 'ghost-pass-123'})
+admin.req('POST', f'/api/nodes/{rvid}/shares', {'type': 'user', 'shareWith': ghost, 'expiresAt': '2000-01-01T00:00:00Z'})
+s, shs = admin.req('GET', f'/api/nodes/{rvid}/shares')
+check('user shares carry no expiry', all(x['expiresAt'] is None for x in shs if x['type'] == 'user'), shs)
+admin.req('DELETE', f'/api/admin/users/{ghost}')
+admin.req('POST', '/api/admin/users', {'id': ghost, 'password': 'ghost-pass-123'})
+gc = Client(); gc.req('POST', '/api/login', {'user': ghost, 'password': 'ghost-pass-123'})
+s, inc = gc.req('GET', '/api/shares/incoming')
+check("recreated account doesn't inherit old shares", s == 200 and inc == [], inc)
+s, gt = Client().req('POST', '/api/auth/token', {'user': ghost, 'password': 'ghost-pass-123', 'deviceName': 'e2e'})
+admin.req('PATCH', f'/api/admin/users/{ghost}', {'password': 'ghost-pass-456'})
+s, _ = Client().req('GET', '/api/me', headers={'Authorization': 'Bearer ' + gt['token']})
+check('admin password reset signs devices out', s == 401)
+s, _ = admin.req('PATCH', f'/api/admin/users/{ghost}', {'quotaBytes': 'lots'})
+check('invalid quota is 400', s == 400)
+admin.req('DELETE', f'/api/admin/users/{ghost}')
+admin.req('DELETE', f'/api/nodes/{rvid}')
+
 print('== two-factor authentication')
 import hmac, struct, time
 def totp(secret_b32, step_offset=0):
@@ -520,7 +624,9 @@ carol = 'carol' + uuid.uuid4().hex[:6]
 admin.req('POST', '/api/admin/users', {'id': carol, 'password': 'carol-pass-123'})
 cc = Client()
 cc.req('POST', '/api/login', {'user': carol, 'password': 'carol-pass-123'})
-s, setup = cc.req('POST', '/api/me/2fa/setup')
+s, _ = cc.req('POST', '/api/me/2fa/setup', {'password': 'wrong-pass-1'})
+check('2FA setup needs the password', s == 403)
+s, setup = cc.req('POST', '/api/me/2fa/setup', {'password': 'carol-pass-123'})
 check('2FA setup returns secret + QR', s == 200 and setup['secret'] and '<svg' in setup['qrSvg'] and setup['uri'].startswith('otpauth://totp/'), setup)
 s, _ = cc.req('POST', '/api/me/2fa/enable', {'code': '000000' if totp(setup['secret']) != '000000' else '111111'})
 check('2FA enable rejects wrong code', s == 400)
@@ -558,7 +664,7 @@ check('disabling 2FA needs the password', s == 403)
 s, _ = admin.req('PATCH', f'/api/admin/users/{carol}', {'resetTwoFactor': True})
 s, _ = Client().req('POST', '/api/login', {'user': carol, 'password': 'carol-pass-123'})
 check('admin reset turns 2FA off', s == 200)
-s, setup2 = cc.req('POST', '/api/me/2fa/setup')
+s, setup2 = cc.req('POST', '/api/me/2fa/setup', {'password': 'carol-pass-123'})
 cc.req('POST', '/api/me/2fa/enable', {'code': totp(setup2['secret'])})
 s, _ = cc.req('POST', '/api/me/2fa/disable', {'password': 'carol-pass-123'})
 s, _ = Client().req('POST', '/api/login', {'user': carol, 'password': 'carol-pass-123'})

@@ -1,6 +1,6 @@
 // Passkeys: passwordless browser login and per-user passkey management.
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, numId, HttpError } from '../http.ts';
+import { json, noContent, readJson, numId, HttpError, clientNet } from '../http.ts';
 import { q, one } from '../db.ts';
 import { loginWithPasskey, createSession, passkeyUserHandle, requirePassword } from '../auth.ts';
 import type { User } from '../auth.ts';
@@ -11,10 +11,25 @@ type Authed = (ctx: Ctx, user: User) => Promise<void>;
 
 const TRANSPORTS = new Set(['usb', 'nfc', 'ble', 'internal', 'hybrid', 'smart-card']);
 
+// Sign-in challenges are kept in memory (10,000 at most, oldest dropped first): one client asking for thousands would
+// push out everyone else's and break their passkey sign-in. 120 a minute per address (an IPv6 /64): the login page asks on every render for autofill, and an office
+// behind one NAT address opens it often.
+const optionRequests = new Map<string, number[]>();
+function allowOptions(key: string): boolean {
+  const now = Date.now();
+  const recent = (optionRequests.get(key) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= 120) return false;
+  recent.push(now);
+  optionRequests.set(key, recent);
+  if (optionRequests.size > 10_000) optionRequests.clear();
+  return true;
+}
+
 export function registerPasskeys(r: Router, authed: (h: Authed) => (ctx: Ctx) => Promise<void>) {
   // Sign-in: options for navigator.credentials.get(). No allowCredentials — the browser offers
   // the passkeys it has for this site (discoverable credentials), so no username is needed.
   r.post('/api/passkeys/login/options', async ({ req, res }) => {
+    if (!allowOptions(clientNet(req))) throw new HttpError(429, 'Too many requests, try again later');
     json(res, { challenge: newChallenge(null), rpId: relyingParty(req).id, userVerification: 'required', timeout: 300_000 });
   });
 

@@ -90,7 +90,8 @@ export function registerShares(r: Router, authed: Wrap) {
       `INSERT INTO shares (node_id, owner, type, share_with, can_edit, token, password_hash, expires_at, label)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [node.id, user.id, type, shareWith, !!b.canEdit && (type !== 'link' || node.is_dir), token,
-       type === 'link' ? pw : null, parseExpiry(b.expiresAt), String(b.label ?? '')],
+       // Expiry is a link feature (checked in loadLink); user/group shares never expire, so none is stored for them.
+       type === 'link' ? pw : null, type === 'link' ? parseExpiry(b.expiresAt) : null, String(b.label ?? '')],
     );
     if (shareWith) await notifyShare(req, user, node.id, type, shareWith);
     json(res, shareJson(s!), 201);
@@ -100,7 +101,7 @@ export function registerShares(r: Router, authed: Wrap) {
     const s = await ownShare(user, params.id);
     const b = await readJson(req);
     if (typeof b.canEdit === 'boolean') await q(`UPDATE shares SET can_edit = $2 WHERE id = $1`, [s.id, b.canEdit]);
-    if ('expiresAt' in b) await q(`UPDATE shares SET expires_at = $2 WHERE id = $1`, [s.id, parseExpiry(b.expiresAt)]);
+    if ('expiresAt' in b && s.type === 'link') await q(`UPDATE shares SET expires_at = $2 WHERE id = $1`, [s.id, parseExpiry(b.expiresAt)]);
     if (typeof b.label === 'string') await q(`UPDATE shares SET label = $2 WHERE id = $1`, [s.id, b.label]);
     if ('password' in b && s.type === 'link') {
       await q(`UPDATE shares SET password_hash = $2 WHERE id = $1`, [s.id, b.password ? await hashPassword(String(b.password)) : null]);
@@ -197,9 +198,12 @@ export function registerShares(r: Router, authed: Wrap) {
   r.post('/api/public/:token/auth', async ({ req, res, params }) => {
     checkRate(req);
     const s = await loadLink(params.token);
+    // Also per link: guesses spread over many addresses add up (the account-style counter, keyed by the share).
+    const counter = `link:${s.id}`;
+    checkRate(req, counter);
     const { password } = await readJson(req);
     if (s.password_hash && !(await verifyPassword(String(password ?? ''), s.password_hash))) {
-      recordFailure(req);
+      recordFailure(req, counter);
       throw new HttpError(403, 'Wrong password');
     }
     setCookie(req, res, cookieName(s), await cookieValue(s), 86400);

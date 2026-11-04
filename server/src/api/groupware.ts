@@ -68,14 +68,19 @@ function expand(calendarId: number, obj: DavObject, from: Date, to: Date): Event
     }
     return out;
   }
-  const it = ev.iterator();
-  for (let i = 0, next: Time | null; i < 20000 && (next = it.next()); i++) {
-    if (next.toJSDate() >= to) break;
-    const occ = ev.getOccurrenceDetails(next);
-    const end = endOf(occ.startDate, occ.endDate);
-    if (end.toJSDate() <= from) continue;
-    out.push({ ...base, summary: occ.item.summary ?? '', start: timeOut(occ.startDate), end: timeOut(end) });
-    if (out.length > 1000) break;
+  try {
+    const it = ev.iterator(); // primes the first dates already, so inside the guard
+    for (let i = 0, next: Time | null; i < 20000 && (next = it.next()); i++) {
+      if (next.toJSDate() >= to) break;
+      const occ = ev.getOccurrenceDetails(next);
+      const end = endOf(occ.startDate, occ.endDate);
+      if (end.toJSDate() <= from) continue;
+      out.push({ ...base, summary: occ.item.summary ?? '', start: timeOut(occ.startDate), end: timeOut(end) });
+      if (out.length > 1000) break;
+    }
+  } catch (e) {
+    // A stored rule that needs too much searching (G.RecurrenceTooComplex): show what was found, keep the listing.
+    if (!(e instanceof G.RecurrenceTooComplex)) throw e;
   }
   return out;
 }
@@ -171,8 +176,16 @@ function applyContact(v: Comp, b: any) {
     p.setValue(['', '', String(b.address).trim(), '', '', '', ''] as any);
     v.addProperty(p);
   }
-  v.removeAllProperties('bday');
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(b.birthday ?? ''))) v.addPropertyWithValue('bday', ICAL.Time.fromDateString(b.birthday));
+  // Birthday: YYYY-MM-DD, or --MM-DD (no year, as phones store it). A value the client sends back unchanged (what
+  // contactOut showed it, e.g. a date-time from another CardDAV client) or doesn't send at all stays as it is: the
+  // apps' editors only know YYYY-MM-DD, and every save used to erase other forms.
+  const bday = String(b.birthday ?? '').trim();
+  const stored = String(v.getFirstPropertyValue('bday') ?? '');
+  if (b.birthday !== undefined && !(bday && bday === stored)) {
+    v.removeAllProperties('bday');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(bday)) v.addPropertyWithValue('bday', ICAL.Time.fromDateString(bday));
+    else if (/^--\d{2}-\d{2}$/.test(bday)) v.addPropertyWithValue('bday', ICAL.VCardTime.fromDateAndOrTimeString(bday, 'date'));
+  }
   v.updatePropertyWithValue('rev', ICAL.Time.now());
 }
 

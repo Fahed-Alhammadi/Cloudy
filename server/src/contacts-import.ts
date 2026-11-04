@@ -90,7 +90,21 @@ function normalizeCard(raw: string[]): string {
     let line = raw[i];
     if (!line.trim()) continue;
     const isQP = /;(ENCODING=)?QUOTED-PRINTABLE[;:]/i.test(line.slice(0, (splitProp(line)?.[0].length ?? 0) + 1));
-    while (isQP && line.endsWith('=') && i + 1 < raw.length) line = line.slice(0, -1) + raw[++i];
+    if (isQP && line.endsWith('=') && i + 1 < raw.length) {
+      // Collected and joined once (appending in the loop was quadratic: a few MB of soft breaks took minutes).
+      // A property that grows past MAX_LINE (an embedded photo) is dropped, its continuation lines still consumed.
+      const parts = [line.slice(0, -1)];
+      let length = parts[0].length;
+      while (i + 1 < raw.length) {
+        const next = raw[++i];
+        const more = next.endsWith('=');
+        if (length <= MAX_LINE) parts.push(more ? next.slice(0, -1) : next);
+        length += next.length;
+        if (!more) break;
+      }
+      if (length > MAX_LINE) continue;
+      line = parts.join('');
+    }
     if (/^[ \t]/.test(line) && lines.length) lines[lines.length - 1] += line.slice(1);
     else lines.push(line);
   }

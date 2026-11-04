@@ -5,7 +5,7 @@ import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import type { IncomingMessage } from 'node:http';
 import type { Router, Ctx } from './http.ts';
-import { json, noContent, readJson, HttpError, publicOrigin, clientIp } from './http.ts';
+import { json, noContent, readJson, HttpError, publicOrigin, clientIp, clientNet } from './http.ts';
 import { config } from './config.ts';
 import { q, one } from './db.ts';
 import type { User } from './auth.ts';
@@ -165,6 +165,18 @@ export async function notifyPasswordChanged(req: IncomingMessage, userId: string
   });
 }
 
+/** Security notice to the OLD address after the account's email changed (a stolen session can't redirect resets quietly). */
+export function notifyEmailChanged(req: IncomingMessage, user: User, oldEmail: string, newEmail: string): void {
+  if (!oldEmail) return;
+  const lang = pickLanguage(user.language, req);
+  void (async () => sendMail({
+    to: oldEmail, lang,
+    subject: mailText(lang, 'emailSubject'),
+    text: mailText(lang, 'emailText', { user: user.display_name || user.id, id: user.id, email: newEmail || '—', ip: clientIp(req) }),
+    action: { label: mailText(lang, 'open'), url: (await mailOrigin()) ?? publicOrigin(req) },
+  }))().catch((e) => console.error('email change notice failed:', e.message));
+}
+
 // ---------------------------------------------------------------- password reset
 
 // Keeps the reset endpoint from being used to flood inboxes: per IP and per account.
@@ -193,7 +205,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
   r.post('/api/auth/forgot', async ({ req, res }) => {
     const login = String((await readJson(req)).login ?? '').trim();
     if (!login || !(await mailEnabled())) return noContent(res);
-    if (!allowReset(`ip:${clientIp(req)}`, 5, 3600_000)) throw new HttpError(429, 'Too many requests, try again later');
+    if (!allowReset(`ip:${clientNet(req)}`, 5, 3600_000)) throw new HttpError(429, 'Too many requests, try again later');
     const origin = await mailOrigin();
     if (!origin) {
       console.warn('Password reset requested but neither PUBLIC_URL nor the email settings know the address of this server: set PUBLIC_URL or save the email settings again.');
@@ -226,6 +238,8 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     if (!row) throw new HttpError(400, 'This reset link is invalid or has expired. Ask for a new one.');
     await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [row.user_id, await hashPassword(password)]);
     await q(`DELETE FROM sessions WHERE user_id = $1`, [row.user_id]);
+    // Device tokens are app passwords: whoever had the account (the reason for a reset) loses those too.
+    await q(`DELETE FROM app_passwords WHERE user_id = $1`, [row.user_id]);
     forgetBasicCache();
     await notifyPasswordChanged(req, row.user_id);
     noContent(res);

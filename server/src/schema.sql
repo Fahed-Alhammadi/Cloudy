@@ -248,3 +248,6 @@ CREATE TABLE IF NOT EXISTS password_resets (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_shares boolean NOT NULL DEFAULT true;
 -- Preferred UI/email language (i18n.ts LANGUAGES); NULL = follow the browser / phone.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS language text;
+-- User shares point at users by name (no foreign key): ones left by accounts deleted with older versions would be inherited
+-- by a new account with the same name. deleteUser removes them now; this clears the old ones.
+DELETE FROM shares s WHERE s.type = 'user' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = s.share_with);
