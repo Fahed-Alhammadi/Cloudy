@@ -2,7 +2,7 @@
 // (safeStorage: Keychain on macOS, DPAPI on Windows, libsecret/kwallet on Linux) when available.
 import { app, safeStorage } from 'electron';
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { SyncState } from './sync.ts';
 
@@ -32,10 +32,36 @@ async function readJson<T>(name: string): Promise<T | null> {
   }
 }
 
-async function writeJson(name: string, data: unknown): Promise<void> {
-  const tmp = file(`${name}.${randomBytes(4).toString('hex')}.tmp`); // writes can overlap (worker save + settings change)
-  await writeFile(tmp, JSON.stringify(data), { mode: 0o600 }); // settings hold the device token: this user only
-  await rename(tmp, file(name));
+/**
+ * Writes to one file run one after the other, in call order: two saves in flight (a worker's and the end of a cycle)
+ * could otherwise finish in the wrong order and put an older sync state back. The content is taken at call time.
+ */
+const queues = new Map<string, Promise<void>>();
+function queued(name: string, job: () => Promise<void>): Promise<void> {
+  const next = (queues.get(name) ?? Promise.resolve()).catch(() => {}).then(job);
+  queues.set(name, next);
+  return next;
+}
+
+/** Atomic and durable: temp file, fsync, rename. A crash leaves the old file or the new one, never a half-written one. */
+function writeJson(name: string, data: unknown): Promise<void> {
+  const text = JSON.stringify(data);
+  return queued(name, async () => {
+    const tmp = file(`${name}.${randomBytes(4).toString('hex')}.tmp`);
+    try {
+      const fh = await open(tmp, 'w', 0o600); // settings hold the device token: this user only
+      try {
+        await fh.writeFile(text);
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await rename(tmp, file(name));
+    } catch (e) {
+      await rm(tmp, { force: true }).catch(() => {});
+      throw e;
+    }
+  });
 }
 
 export async function loadSettings(): Promise<Settings> {
@@ -61,4 +87,5 @@ export function decodeToken(s: Settings): string | null {
 
 export const loadState = () => readJson<SyncState>('sync-state.json');
 export const saveState = (s: SyncState) => writeJson('sync-state.json', s);
-export const clearState = () => rm(file('sync-state.json'), { force: true });
+/** After any save still in flight, so a late write cannot bring the old state back. */
+export const clearState = () => queued('sync-state.json', () => rm(file('sync-state.json'), { force: true }));

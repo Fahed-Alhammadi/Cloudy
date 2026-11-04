@@ -95,5 +95,16 @@
   "Choose \"Restart to update\" in the menu to install it.": "Elige «Reiniciar para actualizar» en el menú para instalarla.",
   "Cloudy is up to date. Checked at {time}.": "Cloudy está actualizado. Comprobado a las {time}.",
   "Could not load the folders: {message}": "No se pudieron cargar las carpetas: {message}",
-  "Try again": "Reintentar"
+  "Try again": "Reintentar",
+  "\"{name}\" was kept on this computer": "«{name}» se ha conservado en este ordenador",
+  "Choose another folder: this one holds Cloudy’s own settings.": "Elige otra carpeta: esta contiene los ajustes de Cloudy.",
+  "Connect the disk it is on, or choose the folder again under Settings.": "Conecta el disco en el que está o vuelve a elegir la carpeta en Ajustes.",
+  "It has changes that are not on the server yet. It is no longer synced; move what you need elsewhere.": "Tiene cambios que aún no están en el servidor. Ya no se sincroniza; mueve a otro sitio lo que necesites.",
+  "Showing 50 of {count}.": "Se muestran 50 de {count}.",
+  "Sign in again to keep syncing {path}. Another account starts over with a new folder.": "Vuelve a iniciar sesión para seguir sincronizando {path}. Otra cuenta empieza de nuevo con una carpeta nueva.",
+  "Signing in…": "Iniciando sesión…",
+  "Status": "Estado",
+  "The Cloudy folder no longer exists on the server": "La carpeta de Cloudy ya no existe en el servidor",
+  "The download was incomplete. It is tried again.": "La descarga quedó incompleta. Se volverá a intentar.",
+  "Its folder links to a place outside the sync folder": "Su carpeta apunta a un lugar fuera de la carpeta sincronizada"
 }

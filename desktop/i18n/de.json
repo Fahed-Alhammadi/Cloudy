@@ -95,5 +95,16 @@
   "Choose \"Restart to update\" in the menu to install it.": "Wähle „Neu starten und aktualisieren“ im Menü, um es zu installieren.",
   "Cloudy is up to date. Checked at {time}.": "Cloudy ist auf dem neuesten Stand. Geprüft um {time}.",
   "Could not load the folders: {message}": "Die Ordner konnten nicht geladen werden: {message}",
-  "Try again": "Erneut versuchen"
+  "Try again": "Erneut versuchen",
+  "\"{name}\" was kept on this computer": "„{name}“ wurde auf diesem Computer behalten",
+  "Choose another folder: this one holds Cloudy’s own settings.": "Wähle einen anderen Ordner: Dieser enthält die Einstellungen von Cloudy selbst.",
+  "Connect the disk it is on, or choose the folder again under Settings.": "Schließe das Laufwerk an, auf dem er liegt, oder wähle den Ordner unter „Einstellungen“ neu.",
+  "It has changes that are not on the server yet. It is no longer synced; move what you need elsewhere.": "Er enthält Änderungen, die noch nicht auf dem Server sind. Er wird nicht mehr synchronisiert; verschiebe, was du brauchst, an einen anderen Ort.",
+  "Showing 50 of {count}.": "50 von {count} werden angezeigt.",
+  "Sign in again to keep syncing {path}. Another account starts over with a new folder.": "Melde dich erneut an, um {path} weiter zu synchronisieren. Ein anderes Konto beginnt neu mit einem neuen Ordner.",
+  "Signing in…": "Anmeldung läuft…",
+  "Status": "Status",
+  "The Cloudy folder no longer exists on the server": "Der Cloudy-Ordner existiert auf dem Server nicht mehr",
+  "The download was incomplete. It is tried again.": "Der Download war unvollständig. Er wird erneut versucht.",
+  "Its folder links to a place outside the sync folder": "Sein Ordner verweist auf einen Ort außerhalb des Sync-Ordners"
 }

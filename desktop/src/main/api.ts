@@ -1,7 +1,7 @@
 // Cloudy JSON API client for the sync engine (bearer device token, same endpoints as the mobile apps).
 import { open } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 export interface RemoteNode {
@@ -51,6 +51,47 @@ export function isPrivateHost(host: string): boolean {
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** No answer at all from the server (Node's fetch, undici, Electron's `net::ERR_*`, our own timeouts). */
+export function isNetworkError(e: any): boolean {
+  const code = String(e?.cause?.code ?? e?.code ?? '');
+  return (e instanceof TypeError && e.message === 'fetch failed') || code.startsWith('UND_ERR') || /^net::ERR_/.test(String(e?.message ?? ''))
+    || ['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE'].includes(code);
+}
+
+/** Worth sending a chunk again: no answer, a busy/failing server (not "storage full"), an offset mismatch or a chunk still in progress. */
+const retryable = (e: any) => isNetworkError(e) || (e instanceof ApiError && ((e.status >= 500 && e.status !== 507) || e.status === 429
+  || (e.status === 409 && (typeof e.body?.received === 'number' || /in progress/i.test(e.message)))));
+
+/** JSON calls and upload chunks give up after this long; downloads and live events after this long without data. */
+const JSON_TIMEOUT = 120_000;
+const CHUNK_TIMEOUT = 15 * 60_000;
+const IDLE_TIMEOUT = 120_000;
+const EVENTS_IDLE = 90_000; // the server sends a ping every 25 s
+
+function timedOut(): Error {
+  return Object.assign(new Error('The server did not answer in time'), { code: 'ETIMEDOUT' });
+}
+
+/** A signal that fires on `signal` or after `ms` (0 = never); `expired()` tells our timeout from the caller's abort. */
+function deadline(signal: AbortSignal | undefined, ms: number) {
+  const own = new AbortController();
+  const timer = ms ? setTimeout(() => own.abort(), ms) : null;
+  return {
+    signal: signal ? AbortSignal.any([signal, own.signal]) : own.signal,
+    /** for idle timeouts: called whenever data arrives */
+    touch() { if (timer) timer.refresh(); },
+    expired: () => own.signal.aborted && !signal?.aborted,
+    abort: () => own.abort(),
+    done() { if (timer) clearTimeout(timer); },
+  };
+}
+
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) return reject(signal.reason);
+  const t = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+});
+
 export class Api {
   server: string;
   token: string;
@@ -86,10 +127,22 @@ export class Api {
     return res;
   }
 
-  async json<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await this.request(method, path, body === undefined ? undefined : JSON.stringify(body),
-      body === undefined ? {} : { 'Content-Type': 'application/json' });
-    return (res.status === 204 ? undefined : await res.json()) as T;
+  /** `request` + reading the JSON answer, given up after `ms` (a server or network that hangs must not stall a sync forever). */
+  async call<T>(method: string, path: string, body?: BodyInit, headers: Record<string, string> = {}, signal?: AbortSignal, ms = JSON_TIMEOUT): Promise<T> {
+    const d = deadline(signal, ms);
+    try {
+      const res = await this.request(method, path, body, headers, d.signal);
+      return (res.status === 204 ? undefined : await res.json()) as T;
+    } catch (e) {
+      throw d.expired() ? timedOut() : e;
+    } finally {
+      d.done();
+    }
+  }
+
+  json<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return this.call<T>(method, path, body === undefined ? undefined : JSON.stringify(body),
+      body === undefined ? {} : { 'Content-Type': 'application/json' }, signal);
   }
 
   me = () => this.json<Me>('GET', '/api/me');
@@ -99,49 +152,91 @@ export class Api {
   move = (id: number, parentId: number, name: string) => this.json<RemoteNode>('PATCH', `/api/nodes/${id}`, { parentId, name });
   trash = (id: number) => this.json<void>('DELETE', `/api/nodes/${id}`);
 
-  /** Streams a file to `dest`. */
+  /** Streams a file to `dest`; a connection that stops sending data for `IDLE_TIMEOUT` fails instead of hanging. */
   async download(id: number, dest: string, signal?: AbortSignal): Promise<void> {
-    const res = await this.request('GET', `/api/nodes/${id}/download`, undefined, {}, signal);
-    await pipeline(Readable.fromWeb(res.body as any), createWriteStream(dest));
+    const d = deadline(signal, IDLE_TIMEOUT);
+    try {
+      const res = await this.request('GET', `/api/nodes/${id}/download`, undefined, {}, d.signal);
+      d.touch();
+      const alive = new Transform({ transform(chunk, _enc, cb) { d.touch(); cb(null, chunk); } });
+      await pipeline(Readable.fromWeb(res.body as any), alive, createWriteStream(dest));
+    } catch (e) {
+      throw d.expired() ? timedOut() : e;
+    } finally {
+      d.done();
+    }
   }
 
-  /** Chunked upload (resumable on the server); replaces a file with the same name, keeping the old one as a version. */
+  /**
+   * Chunked upload; replaces a file with the same name, keeping the old one as a version. A chunk that fails on the
+   * way (dropped connection, server restart) is retried a few times from the offset the server actually stored.
+   */
   async upload(parentId: number, name: string, file: string, size: number, signal?: AbortSignal): Promise<{ id: number }> {
-    const up = await this.json<{ id: string; chunkSize: number }>('POST', '/api/uploads', { parentId, name, size });
+    const up = await this.json<{ id: string; chunkSize: number }>('POST', '/api/uploads', { parentId, name, size }, signal);
     const fh = await open(file, 'r');
     try {
       let offset = 0;
+      let failures = 0;
       const buf = Buffer.alloc(Math.min(up.chunkSize, Math.max(size, 1)));
       for (;;) {
         const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, size - offset), offset);
-        const res = await this.request('PUT', `/api/uploads/${up.id}`, buf.subarray(0, bytesRead),
-          { 'Upload-Offset': String(offset), 'Content-Type': 'application/octet-stream' }, signal);
-        const r = (await res.json()) as { received: number; done: boolean; node?: { id: number } };
+        if (bytesRead === 0 && offset < size) throw new Error('File got shorter while uploading');
+        let r: { received: number; done: boolean; node?: { id: number } };
+        try {
+          r = await this.call('PUT', `/api/uploads/${up.id}`, buf.subarray(0, bytesRead),
+            { 'Upload-Offset': String(offset), 'Content-Type': 'application/octet-stream' }, signal, CHUNK_TIMEOUT);
+        } catch (e) {
+          // The server may have stored none, part or all of the chunk: carry on from what it has (404: the upload is gone).
+          for (let err = e; ; ) {
+            if (signal?.aborted || !retryable(err) || ++failures > 4) throw err;
+            await sleep(500 * 2 ** failures, signal);
+            try {
+              offset = (await this.json<{ received: number }>('GET', `/api/uploads/${up.id}`, undefined, signal)).received;
+              break;
+            } catch (e2) {
+              err = e2;
+            }
+          }
+          continue;
+        }
+        failures = 0;
         offset = r.received;
         if (r.done) return r.node!;
-        if (bytesRead === 0) throw new Error('File got shorter while uploading');
       }
     } catch (e) {
-      await this.request('DELETE', `/api/uploads/${up.id}`).catch(() => {});
+      // Best effort and short: the server also expires abandoned uploads after a day.
+      await this.call('DELETE', `/api/uploads/${up.id}`, undefined, {}, undefined, 10_000).catch(() => {});
       throw e;
     } finally {
       await fh.close();
     }
   }
 
-  /** Server-Sent Events (`/api/events`): calls `onChange` for every change event until `signal` aborts. */
-  async events(onChange: () => void, signal: AbortSignal): Promise<void> {
-    const res = await this.request('GET', '/api/events', undefined, { Accept: 'text/event-stream' }, signal);
-    const decoder = new TextDecoder();
-    let buf = '';
-    for await (const chunk of res.body as any as AsyncIterable<Uint8Array>) {
-      buf += decoder.decode(chunk, { stream: true });
-      let i;
-      while ((i = buf.indexOf('\n\n')) >= 0) {
-        const block = buf.slice(0, i);
-        buf = buf.slice(i + 2);
-        if (/^event: change$/m.test(block)) onChange();
+  /**
+   * Server-Sent Events (`/api/events`): calls `onChange` for every change event until `signal` aborts or the stream
+   * ends. A stream that goes silent (no ping for `EVENTS_IDLE`: sleep, Wi-Fi change, a proxy dropping it) is ended too,
+   * so the caller reconnects instead of waiting for ever.
+   */
+  async events(onChange: () => void, signal: AbortSignal, idleMs = EVENTS_IDLE): Promise<void> {
+    const d = deadline(signal, idleMs);
+    try {
+      const res = await this.request('GET', '/api/events', undefined, { Accept: 'text/event-stream' }, d.signal);
+      const decoder = new TextDecoder();
+      let buf = '';
+      for await (const chunk of res.body as any as AsyncIterable<Uint8Array>) {
+        d.touch();
+        buf += decoder.decode(chunk, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          if (/^event: change$/m.test(block)) onChange();
+        }
       }
+    } catch (e) {
+      throw d.expired() ? timedOut() : e;
+    } finally {
+      d.done();
     }
   }
 }

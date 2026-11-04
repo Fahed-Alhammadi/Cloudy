@@ -95,5 +95,16 @@
   "Choose \"Restart to update\" in the menu to install it.": "اختر «إعادة التشغيل للتحديث» من القائمة لتثبيته.",
   "Cloudy is up to date. Checked at {time}.": "Cloudy محدَّث. تم التحقق في {time}.",
   "Could not load the folders: {message}": "تعذّر تحميل المجلدات: {message}",
-  "Try again": "أعد المحاولة"
+  "Try again": "أعد المحاولة",
+  "\"{name}\" was kept on this computer": "تم الإبقاء على \"{name}\" على هذا الكمبيوتر",
+  "Choose another folder: this one holds Cloudy’s own settings.": "اختر مجلدًا آخر: هذا المجلد يحتوي على إعدادات Cloudy نفسها.",
+  "Connect the disk it is on, or choose the folder again under Settings.": "وصّل القرص الذي يوجد عليه، أو اختر المجلد من جديد في الإعدادات.",
+  "It has changes that are not on the server yet. It is no longer synced; move what you need elsewhere.": "فيه تغييرات لم تصل إلى الخادم بعد. لم يعد يُزامَن؛ انقل ما تحتاجه إلى مكان آخر.",
+  "Showing 50 of {count}.": "يُعرض 50 من {count}.",
+  "Sign in again to keep syncing {path}. Another account starts over with a new folder.": "سجّل الدخول مجددًا لمواصلة مزامنة {path}. أي حساب آخر يبدأ من جديد بمجلد جديد.",
+  "Signing in…": "جارٍ تسجيل الدخول…",
+  "Status": "الحالة",
+  "The Cloudy folder no longer exists on the server": "لم يعد مجلد Cloudy موجودًا على الخادم",
+  "The download was incomplete. It is tried again.": "لم يكتمل التنزيل. ستتم المحاولة مرة أخرى.",
+  "Its folder links to a place outside the sync folder": "مجلده رابط إلى مكان خارج مجلد المزامنة"
 }

@@ -45,6 +45,7 @@ p { margin: 6px 0; }
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
 .hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .error { color: var(--danger); min-height: 1.2em; }
 .error:empty { min-height: 0; }
 .note { background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; }
@@ -62,6 +63,7 @@ input:not([type]), input[type=password] {
   font: inherit; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
 }
 input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (forced-colors: active) { .dot { forced-color-adjust: none; border: 1px solid CanvasText; } }
 input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
 
 button {

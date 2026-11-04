@@ -1,11 +1,11 @@
 // Cloudy desktop: a tray (menu bar) app that keeps one local folder in sync with the user's Cloudy files.
 // The settings window (src/ui) talks to this process through the `cloudy` IPC channel (src/preload/preload.ts).
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification, powerMonitor, net } from 'electron';
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { Api, ApiError, normalizeServer } from './api.ts';
-import { SyncEngine, type Status, type Activity, type Problem } from './sync.ts';
+import { SyncEngine, stateFitsServer, type Status, type Activity, type Problem } from './sync.ts';
 import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveState, clearState, type Settings } from './store.ts';
 import { t, setLanguage, language, isRtl, strings } from './i18n.ts';
 import { Updater, type UpdateState } from './updater.ts';
@@ -37,6 +37,8 @@ const configured = () => signedIn() && !!settings.folder;
 
 function messages() {
   return {
+    incomplete: t('The download was incomplete. It is tried again.'),
+    outside: t('Its folder links to a place outside the sync folder'),
     case: t('Another item has the same name with different upper/lower case'),
     windowsName: t('The name is not allowed on Windows'),
     badName: t('The name is not allowed'),
@@ -48,10 +50,11 @@ function messages() {
 
 // ---------------------------------------------------------------- sync engine
 
-async function stopEngine(): Promise<void> {
+/** `save`: the same account and folder go on later (quit, sign in again), so keep what the running cycle finished. */
+async function stopEngine(save = false): Promise<void> {
   const e = engine;
   engine = null;
-  await e?.stop();
+  await e?.stop({ save });
 }
 
 async function startEngine(): Promise<void> {
@@ -76,6 +79,7 @@ async function startEngine(): Promise<void> {
       }
     },
     confirmDeletes: async (count, where) => {
+      if (process.platform === 'darwin') app.focus({ steal: true }); // a menu bar app: the question must not hide behind other windows
       const { response } = await dialog.showMessageBox({
         type: 'warning',
         message: where === 'local'
@@ -107,12 +111,27 @@ async function startEngine(): Promise<void> {
     } catch {}
   });
   engine.on('problems', (p: Problem[]) => { problems = p; try { refresh(); } catch {} });
+  engine.on('kept', (folder: string) => {
+    try {
+      notify(t('"{name}" was kept on this computer', { name: folder }),
+        t('It has changes that are not on the server yet. It is no longer synced; move what you need elsewhere.'));
+    } catch {}
+  });
   engine.start();
   if (settings.paused) engine.pause();
 }
 
 function notify(title: string, body: string): void {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
+}
+
+/** A second line under the status: what to do about it, or the error behind "Offline". */
+function statusDetail(): string | null {
+  const s = engine?.status;
+  if (!s) return null;
+  if (s.phase === 'error' && s.code === 'missing-folder') return t('Connect the disk it is on, or choose the folder again under Settings.');
+  if (s.phase === 'offline') return s.error ?? null;
+  return null;
 }
 
 function statusText(): string {
@@ -124,7 +143,10 @@ function statusText(): string {
     case 'auth': return t('Signed out: sign in again');
     case 'offline': return t('Offline: will retry');
     case 'paused': return t('Paused');
-    case 'error': return s.error?.startsWith('Folder not found') ? t('Sync folder not found') : t('Problem: {message}', { message: s.error ?? '' });
+    case 'error':
+      if (s.code === 'missing-folder') return t('Sync folder not found');
+      if (s.code === 'remote-missing') return t('The Cloudy folder no longer exists on the server');
+      return t('Problem: {message}', { message: s.error ?? '' });
     case 'syncing': return s.total ? t('Syncing {done} of {total}', { done: s.done, total: s.total }) : t('Checking for changes…');
     default: return problems.length ? t('{count} items could not be synced', { count: problems.length }) : t('Up to date');
   }
@@ -165,8 +187,8 @@ function buildMenu(): void {
     { type: 'separator' },
     { label: t('Settings…'), click: () => showWindow() },
   ];
-  if (u?.state === 'ready') items.push({ label: t('Restart to update to {version}', { version: u.version }), click: () => updater.install() });
-  else if (u?.state === 'available') items.push({ label: t('Download Cloudy {version}…', { version: u.version }), click: () => void shell.openExternal(u.url) });
+  if (u?.state === 'ready') items.push({ label: t('Restart to update to {version}', { version: u.version }), click: () => void installUpdate() });
+  else if (u?.state === 'available' && /^https:\/\/github\.com\//.test(u.url)) items.push({ label: t('Download Cloudy {version}…', { version: u.version }), click: () => void shell.openExternal(u.url) });
   items.push({ type: 'separator' }, { label: t('Quit Cloudy'), role: 'quit' });
   tray.setContextMenu(Menu.buildFromTemplate(items));
 }
@@ -192,13 +214,16 @@ function showWindow(): void {
     show: false,
     autoHideMenuBar: true,
     icon: path.join(OUT, 'icons', 'icon.png'),
-    webPreferences: { preload: path.join(OUT, 'preload.cjs'), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: path.join(OUT, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, spellcheck: false },
   });
+  // The window needs no camera, notifications, clipboard reading…: every permission request is refused.
+  win.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
   win.removeMenu();
   win.on('closed', () => { win = null; if (process.platform === 'darwin') app.dock?.hide(); });
   win.once('ready-to-show', () => { win?.show(); if (process.platform === 'darwin') app.focus({ steal: true }); });
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    if (/^https:\/\//.test(url) || (settings.server && url.startsWith(settings.server + '/'))) void shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -223,6 +248,7 @@ function snapshot() {
     paused: settings.paused,
     status: engine?.status ?? null,
     statusText: statusText(),
+    statusDetail: statusDetail(),
     activity: engine?.activity ?? [],
     problems,
     update: updater?.state,
@@ -262,20 +288,60 @@ async function applyOpenAtLogin(): Promise<void> {
 
 // ---------------------------------------------------------------- IPC
 
-/** Checks a folder chosen for syncing: not the home folder or a whole drive. */
+const inside = (child: string, parent: string) => {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/** Checks a folder chosen for syncing: not the home folder or a whole drive, and not where Cloudy keeps its own data. */
 function badFolder(folder: string): string | null {
   const p = path.resolve(folder);
   if (p === path.parse(p).root || p === homedir()) return t('Choose a folder inside your home folder, not the whole drive or home folder.');
+  const data = app.getPath('userData');
+  if (inside(p, data) || inside(data, p)) return t('Choose another folder: this one holds Cloudy’s own settings.');
   return null;
 }
+
+// IPC arguments come from the window: checked before use, whatever the window sends.
+const str = (v: unknown, max = 4096): string => {
+  if (typeof v !== 'string' || v.length > max) throw new Error('bad argument');
+  return v;
+};
+const absPath = (v: unknown): string => {
+  const p = str(v);
+  if (!path.isAbsolute(p) || p.includes('\0')) throw new Error('bad argument');
+  return path.resolve(p);
+};
+/** Top-level folder names for selective sync: plain names only (they become paths under the sync folder). */
+const folderNames = (v: unknown): string[] => {
+  if (!Array.isArray(v) || v.length > 10_000) throw new Error('bad argument');
+  return [...new Set(v.map((n) => {
+    const s = str(n, 1024);
+    if (!s || s === '.' || s === '..' || /[\/\\\0]/.test(s)) throw new Error('bad argument');
+    return s;
+  }))];
+};
 
 const handlers: Record<string, (...args: any[]) => unknown> = {
   state: () => snapshot(),
 
-  async login(server: string, user: string, password: string, code?: string) {
+  async login(server: unknown, user: unknown, password: unknown, code?: unknown) {
     try {
-      const url = normalizeServer(server);
-      const r = await Api.login(url, user.trim(), password, code || undefined, `Desktop (${hostname()})`, userAgent, net.fetch);
+      const url = normalizeServer(str(server, 2048));
+      const r = await Api.login(url, str(user, 256).trim(), str(password, 1024), code ? str(code, 64) : undefined, `Desktop (${hostname()})`, userAgent, net.fetch);
+      // Signing in again after being signed out keeps the folder and its sync state; another account starts over
+      // (its files must not be merged with this folder without asking).
+      if (settings.folder && (settings.server !== url || settings.user !== r.user.id || settings.rootId !== r.user.rootId)) {
+        await stopEngine();
+        await clearState();
+        settings.folder = undefined;
+        settings.excluded = [];
+      } else if (settings.folder) {
+        // Same account: keep the state only if it still describes this server (not a reset one that reuses ids).
+        await stopEngine();
+        const fresh = new Api(url, r.token, userAgent, net.fetch);
+        if (!(await stateFitsServer(fresh, await loadState()).catch(() => false))) await clearState();
+      }
       settings.server = url;
       settings.user = r.user.id;
       settings.displayName = r.user.displayName;
@@ -301,7 +367,8 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   },
 
   async chooseFolder() {
-    const r = await dialog.showOpenDialog(win!, {
+    if (!win) return null;
+    const r = await dialog.showOpenDialog(win, {
       title: t('Choose the folder to keep in sync'),
       defaultPath: settings.folder ?? homedir(),
       properties: ['openDirectory', 'createDirectory'],
@@ -310,11 +377,20 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   },
 
   /** First setup, or a new local folder: syncing starts over (files already there are compared, not overwritten). */
-  async setup(folder: string, excluded: string[]) {
+  async setup(rawFolder: unknown, rawExcluded: unknown) {
+    if (!signedIn()) return { error: t('Not signed in') };
+    const folder = absPath(rawFolder);
+    const excluded = folderNames(rawExcluded);
     const bad = badFolder(folder);
     if (bad) return { error: bad };
-    await mkdir(folder, { recursive: true });
-    if (settings.folder !== folder) { await stopEngine(); await clearState(); } // the old engine must not save its state again
+    if (settings.folder !== folder) {
+      await stopEngine(); // the old engine must not save its state again
+      await clearState();
+      await mkdir(folder, { recursive: true });
+    } else if (!(await lstat(folder).catch(() => null))?.isDirectory()) {
+      // The same folder, with its sync history: never recreated empty (that would delete everything on the server).
+      return { error: t('Sync folder not found') };
+    }
     settings.folder = folder;
     settings.excluded = excluded;
     await saveSettings(settings);
@@ -323,18 +399,20 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
     return { ok: true };
   },
 
-  async folderHasFiles(folder: string) {
-    return (await readdir(folder).catch(() => [])).some((n) => !n.startsWith('.'));
+  async folderHasFiles(folder: unknown) {
+    return (await readdir(absPath(folder)).catch(() => [])).some((n) => !n.startsWith('.'));
   },
 
-  async setExcluded(excluded: string[]) {
+  async setExcluded(raw: unknown) {
+    const excluded = folderNames(raw);
     settings.excluded = excluded;
     await saveSettings(settings);
     await engine?.setExcluded(excluded);
     refresh();
   },
 
-  async setOpenAtLogin(on: boolean) {
+  async setOpenAtLogin(on: unknown) {
+    if (typeof on !== 'boolean') throw new Error('bad argument');
     settings.openAtLogin = on;
     await saveSettings(settings);
     await applyOpenAtLogin();
@@ -345,9 +423,19 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   syncNow: () => engine?.schedule(0),
   openFolder: () => settings.folder && shell.openPath(settings.folder),
   openWeb: () => settings.server && shell.openExternal(settings.server),
-  openRelease: () => updater.state.state === 'available' && shell.openExternal(updater.state.url),
+  openRelease: () => updater.state.state === 'available' && /^https:\/\/github\.com\//.test(updater.state.url) && shell.openExternal(updater.state.url),
   checkUpdates: () => updater.check(),
-  installUpdate: () => updater.install(),
+  installUpdate: () => installUpdate(),
+
+  /** Signed out by the server (token revoked or expired): sign in again, keeping the folder and what was synced. */
+  async signInAgain() {
+    await stopEngine(true);
+    settings.token = undefined;
+    settings.tokenEncrypted = undefined;
+    await saveSettings(settings);
+    problems = [];
+    refresh();
+  },
 
   async logout() {
     const { response } = await dialog.showMessageBox(win!, {
@@ -369,10 +457,31 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   },
 };
 
-ipcMain.handle('cloudy', (e, name: string, ...args: unknown[]) => {
-  if (e.sender !== win?.webContents || !Object.hasOwn(handlers, name)) throw new Error('unknown call');
+ipcMain.handle('cloudy', (e, name: unknown, ...args: unknown[]) => {
+  if (e.sender !== win?.webContents || typeof name !== 'string' || !Object.hasOwn(handlers, name)) throw new Error('unknown call');
   return handlers[name](...args);
 });
+
+// ---------------------------------------------------------------- quit
+
+// Quitting (menu, log out, shutdown, update): stop the engine first so running transfers end cleanly and what the
+// cycle finished is saved; bounded, so quitting never hangs.
+let quitting = false;
+async function flush(): Promise<void> {
+  await Promise.race([stopEngine(true), new Promise((r) => setTimeout(r, 4000))]);
+}
+app.on('before-quit', (e) => {
+  if (quitting || !engine) return;
+  e.preventDefault();
+  quitting = true;
+  void flush().finally(() => app.quit());
+});
+async function installUpdate(): Promise<void> {
+  if (updater.state.state !== 'ready') return;
+  quitting = true;
+  await flush();
+  updater.install();
+}
 
 // ---------------------------------------------------------------- start
 
