@@ -1,3 +1,7 @@
-• Show password: tap the eye in the password field to check what you typed
+• Show password: tap the eye in the password field
 • Help, Send feedback and Rate Cloudy in More
-• New to Cloudy? "Don't have a server yet?" on the sign-in screen links to the setup guide
+• New? "Don't have a server yet?" links to the setup guide
+• Uploads resume after a dropped connection and can be cancelled
+• Read-only shares no longer offer actions that would fail; Leave share
+• Share to Cloudy: faster, with progress and cancel
+• Many fixes and accessibility improvements

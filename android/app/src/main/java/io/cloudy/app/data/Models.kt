@@ -13,6 +13,8 @@ data class User(
     val rootId: Long = 0,
     /** Preferred language code (en, ar, de, fr, es); null = follow the phone. Shared with the web app. */
     val language: String? = null,
+    /** Days deleted files stay in the trash (`/api/me` only). */
+    val trashDays: Int? = null,
 )
 
 /** An app password / device token (Settings → App passwords on the web, More → Devices here). */
@@ -88,6 +90,10 @@ data class Share(
 
 @Serializable
 data class UploadSession(val id: String, val chunkSize: Long, val received: Long = 0, val size: Long = 0)
+
+/** `GET /api/uploads/{id}`: how far an upload session got (to resume it). */
+@Serializable
+data class UploadStatus(val received: Long, val size: Long)
 
 @Serializable
 data class UploadedNode(val id: Long, val name: String, val size: Long)

@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -94,8 +95,10 @@ import androidx.navigation.NavController
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import io.cloudy.app.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.cloudy.app.Services
 import io.cloudy.app.data.ApiException
+import io.cloudy.app.data.SafeName
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.outlined.DocumentScanner
 import androidx.compose.material3.Switch
@@ -119,6 +122,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.io.IOException
 import androidx.activity.compose.BackHandler
@@ -152,40 +156,63 @@ fun queryName(context: Context, uri: Uri): Pair<String, Long> {
 /** [nameFor] can rename an item (e.g. a scan saved under the name the user typed). */
 suspend fun uploadUris(context: Context, parentId: Long, uris: List<Uri>, state: UploadState, nameFor: (Uri) -> String? = { null }): Int {
     var ok = 0
-    state.remaining = uris.size
     for (uri in uris) {
         // Content-provider queries and copies can take seconds (cloud-backed pickers): never on the UI thread.
-        val (queried, knownSize) = withContext(Dispatchers.IO) { queryName(context, uri) }
+        val (queried, knownSize) = try { withContext(Dispatchers.IO) { queryName(context, uri) } } catch (e: Exception) { uri.lastPathSegment.orEmpty() to -1L }
         val name = nameFor(uri) ?: queried
         state.name = name
         state.progress = 0f
+        var temp: File? = null
         try {
             // Unknown size: copy to cache first so the server gets an exact length.
             var source: () -> java.io.InputStream = { context.contentResolver.openInputStream(uri) ?: throw IOException(context.getString(R.string.cannot_read, name)) }
             var size = knownSize
-            var temp: File? = null
             if (size < 0) {
-                temp = File(context.cacheDir, "up-${System.nanoTime()}")
                 val open = source
-                size = withContext(Dispatchers.IO) { open().use { i -> temp.outputStream().use { i.copyTo(it) } }; temp.length() }
-                source = { temp.inputStream() }
+                val t = withContext(Dispatchers.IO) { File(context.cacheDir, "up-${System.nanoTime()}") }.also { temp = it }
+                size = withContext(Dispatchers.IO) { open().use { i -> t.outputStream().use { i.copyTo(it) } }; t.length() }
+                source = { t.inputStream() }
             }
-            Services.api.upload(parentId, name, size, source) { sent -> state.progress = if (size > 0) sent.toFloat() / size else 1f }
-            temp?.let { withContext(Dispatchers.IO) { it.delete() } }
+            Services.api.upload(parentId, name, size, source, { sent -> state.progress = if (size > 0) sent.toFloat() / size else 1f })
             ok++
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             toast(context, "$name: ${e.message}")
+        } finally {
+            temp?.let { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { it.delete() } }
+            state.remaining--
         }
-        state.remaining--
     }
-    state.name = null
+    if (state.remaining <= 0) state.name = null
     return ok
+}
+
+/**
+ * Uploads started from the Files screens. They run in the app's scope, one batch after the other, so going back,
+ * opening another folder or rotating the phone doesn't stop them; every folder screen shows the progress.
+ */
+object Uploads {
+    val state = UploadState()
+    /** Folder ids whose upload batch finished (their screens reload, also without live updates). */
+    val finished = kotlinx.coroutines.flow.MutableSharedFlow<Long>(extraBufferCapacity = 8)
+    private val queue = kotlinx.coroutines.sync.Mutex()
+
+    fun start(context: Context, parentId: Long, uris: List<Uri>, nameFor: (Uri) -> String? = { null }) {
+        if (uris.isEmpty()) return
+        val app = context.applicationContext
+        state.remaining += uris.size
+        Services.appScope.launch {
+            val n = queue.withLock { uploadUris(app, parentId, uris, state, nameFor) }
+            finished.tryEmit(parentId)
+            toast(app, app.getString(R.string.uploaded_n_of_m, n, uris.size))
+        }
+    }
 }
 
 /** The file on the device for handing to another app: the offline copy, or a download into the cache. */
 internal suspend fun localCopy(context: Context, node: FileNode): Uri {
     val offline = withContext(Dispatchers.IO) { Services.offline.localFile(node) }
-    val file = offline ?: File(context.cacheDir, "open/${node.id}-${node.etag}/${node.name}").also {
+    val file = offline ?: File(context.cacheDir, "open/${node.id}-${SafeName.etag(node.etag)}/${SafeName.segment(node.name)}").also {
         if (!withContext(Dispatchers.IO) { it.exists() }) {
             if (node.size > 5_000_000) toast(context, context.getString(R.string.downloading_name, node.name))
             withContext(Dispatchers.IO) {
@@ -231,15 +258,15 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
     var error by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
-    var newFolder by remember { mutableStateOf(false) }
-    var newTextFile by remember { mutableStateOf(false) }
-    var scanned by remember { mutableStateOf<Uri?>(null) } // a scanned PDF waiting for its name
+    // Open dialogs survive rotation (TextPrompt keeps what was typed).
+    var newFolder by rememberSaveable { mutableStateOf(false) }
+    var newTextFile by rememberSaveable { mutableStateOf(false) }
+    var scanned by rememberSaveable { mutableStateOf<Uri?>(null) } // a scanned PDF waiting for its name
     var selecting by remember { mutableStateOf(false) }
     val viewPrefs = remember { ViewPrefs(context) }
     var grid by remember { mutableStateOf(viewPrefs.grid) }
     var sort by remember { mutableStateOf(viewPrefs.sort) }
-    val uploads = remember { UploadState() }
-    val snackbar = remember { SnackbarHostState() }
+    val uploads = Uploads.state
 
     suspend fun load() {
         try {
@@ -251,6 +278,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
             withContext(Dispatchers.IO) { if (Services.offline.hasCachedListing(folderId)) Services.offline.cacheListing(l) }
         } catch (e: ApiException) {
             error = e.message
+            if (e.status == 404) listing = null // deleted (or unshared) meanwhile: say so instead of the old contents
         } catch (e: IOException) {
             val cached = withContext(Dispatchers.IO) { Services.offline.cachedListing(folderId) }
             if (cached != null) { listing = cached; offlineMode = true } else error = context.getString(R.string.offline_error, e.message ?: "")
@@ -258,18 +286,12 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
     }
     LaunchedEffect(folderId) { load() }
     // Live updates: reload when this folder changes on any device (short delay batches bursts like uploads).
-    LaunchedEffect(folderId) { Live.events.filter { folderId in it.folders }.collectLatest { delay(400); load() } }
+    LaunchedEffect(folderId) { Live.events.filter { Live.affects(it, folderId) }.collectLatest { delay(400); load() } }
+    LaunchedEffect(folderId) { Uploads.finished.filter { it == folderId }.collect { load() } }
     val reload: () -> Unit = { scope.launch { load() } }
     val canEdit = listing?.perm != "read" && !offlineMode
 
-    fun startUpload(uris: List<Uri>, nameFor: (Uri) -> String? = { null }) {
-        if (uris.isEmpty()) return
-        scope.launch {
-            val n = uploadUris(context, folderId, uris, uploads, nameFor)
-            snackbar.showSnackbar(context.getString(R.string.uploaded_n_of_m, n, uris.size))
-            load()
-        }
-    }
+    fun startUpload(uris: List<Uri>, nameFor: (Uri) -> String? = { null }) = Uploads.start(context, folderId, uris, nameFor)
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { startUpload(it) }
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { startUpload(it) }
     val scan = rememberDocumentScanner { scanned = it }
@@ -311,7 +333,6 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
                 }
             }
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             if (offlineMode) Text(stringResource(R.string.offline_mode), Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
@@ -353,7 +374,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
         scope.launch { runCatching { Services.api.mkdir(folderId, name) }.onFailure { toast(context, it.message ?: context.getString(R.string.failed)) }; load() }
     }
     scanned?.let { pdf ->
-        val stamp = remember { LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm")) }
+        val stamp = rememberSaveable { LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm")) }
         TextPrompt(stringResource(R.string.scan_save_title), stringResource(R.string.scan_default_name, stamp), confirm = stringResource(R.string.upload),
             onDismiss = { scanned = null }) { name ->
             scanned = null
@@ -399,12 +420,13 @@ fun NodeList(
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
-    var sheetFor by remember { mutableStateOf<FileNode?>(null) }
+    // The open actions sheet (and its dialog, see NodeActions) survives rotation.
+    var sheetFor by rememberSaveable(stateSaver = jsonSaver<FileNode>()) { mutableStateOf<FileNode?>(null) }
     // Selected ids survive rotation; files that disappear (deleted on another device) drop out by themselves.
     var selectedIds by rememberSaveable { mutableStateOf(listOf<Long>()) }
     val selected = remember(selectedIds, items) { items.filter { it.id in selectedIds } }
     val selecting = selected.isNotEmpty()
-    var bulk by remember { mutableStateOf<String?>(null) }
+    var bulk by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(selecting) { onSelecting(selecting) }
     BackHandler(selecting) { selectedIds = emptyList() }
 
@@ -480,9 +502,9 @@ fun NodeList(
 @Composable
 fun NodeActions(node: FileNode, nav: NavController, canModify: Boolean, reload: () -> Unit, scope: CoroutineScope, onSelect: (() -> Unit)? = null, onClose: () -> Unit) {
     val context = LocalContext.current
-    val me = Services.session.user.value
+    val me by Services.session.user.collectAsStateWithLifecycle()
     val isOwner = node.owner == me?.id
-    var dialog by remember { mutableStateOf<String?>(null) }
+    var dialog by rememberSaveable { mutableStateOf<String?>(null) }
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(node.mime.ifEmpty { "application/octet-stream" })) { uri ->
         if (uri != null) scope.launch {
             try {
@@ -588,9 +610,9 @@ fun FolderPicker(title: String, exclude: Set<Long>, onDismiss: () -> Unit, onPic
 fun LinkDialog(node: FileNode, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var password by remember { mutableStateOf("") }
-    var expires by remember { mutableStateOf<LocalDate?>(null) } // last day the link works
-    var allowUpload by remember { mutableStateOf(false) }
+    var password by rememberSaveable { mutableStateOf("") }
+    var expires by rememberSaveable { mutableStateOf<LocalDate?>(null) } // last day the link works
+    var allowUpload by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -611,10 +633,7 @@ fun LinkDialog(node: FileNode, onDismiss: () -> Unit) {
                     if (expires != null) IconButton(onClick = { expires = null }) { Icon(Icons.Outlined.LinkOff, stringResource(R.string.link_remove_expiry)) }
                 }
                 // Public upload into shared folders (a "file drop"); files can't take uploads.
-                if (node.isDir) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.link_allow_upload), Modifier.weight(1f))
-                    Switch(allowUpload, { allowUpload = it })
-                }
+                if (node.isDir) SwitchRow(stringResource(R.string.link_allow_upload), allowUpload) { allowUpload = it }
             }
         },
         confirmButton = {
@@ -693,10 +712,12 @@ fun SharesDialog(node: FileNode, onDismiss: () -> Unit) {
 fun PeopleDialog(node: FileNode, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var target by remember { mutableStateOf("") }
-    var canEdit by remember { mutableStateOf(false) }
+    var target by rememberSaveable { mutableStateOf("") }
+    var canEdit by rememberSaveable { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
     var suggestions by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     LaunchedEffect(target) {
+        delay(250) // one lookup per pause in typing, not per letter
         if (target.length >= 1) runCatching { Services.api.sharees(target.removePrefix("group:")) }.onSuccess { s ->
             suggestions = s.users.map { it.id to it.displayName } + s.groups.map { "group:${it.id}" to context.getString(R.string.group_name, it.id) }
         }
@@ -710,16 +731,19 @@ fun PeopleDialog(node: FileNode, onDismiss: () -> Unit) {
                 suggestions.take(5).forEach { (id, label) ->
                     Text("$label ($id)", Modifier.fillMaxWidth().clickable { target = id }.padding(vertical = 8.dp))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(canEdit, { canEdit = it }); Text(stringResource(R.string.can_edit))
+                Row(Modifier.fillMaxWidth().toggleable(canEdit, role = androidx.compose.ui.semantics.Role.Checkbox) { canEdit = it },
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(canEdit, onCheckedChange = null, Modifier.padding(12.dp)); Text(stringResource(R.string.can_edit))
                 }
             }
         },
         confirmButton = {
-            TextButton(enabled = target.isNotBlank(), onClick = {
+            TextButton(enabled = target.isNotBlank() && !busy, onClick = {
+                busy = true // a second tap would share twice
                 scope.launch {
                     try { Services.api.shareWith(node.id, target.trim(), canEdit); toast(context, context.getString(R.string.shared_toast)); onDismiss() }
                     catch (e: Exception) { toast(context, e.message ?: context.getString(R.string.failed)) }
+                    busy = false
                 }
             }) { Text(stringResource(R.string.share)) }
         },
@@ -736,7 +760,7 @@ fun NodeListScreen(nav: NavController, kind: String) {
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf(ListCache.list(kind)) }
     var error by remember { mutableStateOf<String?>(null) }
-    val me = Services.session.user.value
+    val me by Services.session.user.collectAsStateWithLifecycle()
     val title = mapOf("recent" to R.string.recent, "favorites" to R.string.favorites, "shared-in" to R.string.shared_with_you,
         "shared-out" to R.string.shared_by_you, "offline" to R.string.available_offline)[kind]?.let { stringResource(it) } ?: kind
     val linkWord = stringResource(R.string.link_word)
@@ -792,12 +816,21 @@ fun SearchScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     var q by rememberSaveable { mutableStateOf("") }
     var results by remember { mutableStateOf<List<FileNode>>(emptyList()) }
+    // The query [results] belong to: while a newer one runs, "No matches" isn't claimed for it yet.
+    var searched by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var reloadKey by remember { mutableIntStateOf(0) }
     var filter by rememberSaveable { mutableStateOf(TypeFilter.ALL) }
+    val me by Services.session.user.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() } // open the keyboard right away
-    LaunchedEffect(q) {
+    LaunchedEffect(q, reloadKey) {
+        val query = q.trim()
+        if (query.isEmpty()) { results = emptyList(); searched = null; error = null; return@LaunchedEffect }
         kotlinx.coroutines.delay(250)
-        results = if (q.isBlank()) emptyList() else runCatching { Services.api.search(q.trim()) }.getOrDefault(emptyList())
+        try { results = Services.api.search(query); error = null }
+        catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; error = e.message; results = emptyList() }
+        searched = query
     }
     Scaffold(topBar = {
         TopAppBar(
@@ -808,8 +841,13 @@ fun SearchScreen(nav: NavController) {
         Column(Modifier.padding(pad)) {
             TypeFilterRow(filter) { filter = it }
             val shown = results.filter(filter.matches)
-            if (q.isNotBlank() && shown.isEmpty()) EmptyState(Icons.Outlined.Search, stringResource(R.string.no_matches))
-            else NodeList(shown, nav, canModify = { true }, reload = {}, scope = scope, subtitle = { it.path })
+            when {
+                q.isNotBlank() && searched != q.trim() && shown.isEmpty() -> Loading()
+                error != null && q.isNotBlank() -> EmptyState(Icons.Outlined.CloudOff, error!!)
+                q.isNotBlank() && shown.isEmpty() -> EmptyState(Icons.Outlined.Search, stringResource(R.string.no_matches))
+                // Results include files shared with you: only your own can be renamed, moved or deleted (as in Recent).
+                else -> NodeList(shown, nav, canModify = { it.owner == me?.id }, reload = { reloadKey++ }, scope = scope, subtitle = { it.path })
+            }
         }
     }
 }

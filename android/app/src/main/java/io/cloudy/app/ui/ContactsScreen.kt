@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Delete
@@ -90,8 +91,11 @@ fun ContactsScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var books by remember { mutableStateOf<List<DavCollection>>(emptyList()) }
-    var book by remember { mutableStateOf<DavCollection?>(null) }
+    // The chosen address book survives rotation: an editor restored after it saves into the book it came from.
+    var book by rememberSaveable(stateSaver = jsonSaver<DavCollection>()) { mutableStateOf<DavCollection?>(null) }
     var contacts by remember { mutableStateOf<List<Contact>?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) } // ignore a second tap on Save while one is in flight
     var query by rememberSaveable { mutableStateOf("") }
     var editing by rememberSaveable(stateSaver = jsonSaver<Contact>()) { mutableStateOf<Contact?>(null) }
     var bookMenu by remember { mutableStateOf(false) }
@@ -127,7 +131,7 @@ fun ContactsScreen() {
         scope.launch {
             try {
                 val file = withContext(Dispatchers.IO) {
-                    File(context.cacheDir, "export").apply { mkdirs() }.resolve("${b.name.replace(Regex("[^\\w .-]"), "_")}.vcf")
+                    File(context.cacheDir, "export").apply { mkdirs() }.resolve(io.cloudy.app.data.SafeName.segment("${b.name.replace(Regex("[^\\w .-]"), "_")}.vcf"))
                         .apply { writeText(Services.api.exportContacts(b.id)) }
                 }
                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
@@ -140,20 +144,28 @@ fun ContactsScreen() {
         }
     }
 
-    LaunchedEffect(Unit) {
-        runCatching { Services.api.addressBooks() }.onSuccess { books = it; if (book == null) book = it.firstOrNull() }
-            .onFailure { toast(context, it.message ?: context.getString(R.string.failed)); contacts = emptyList() }
+    // A failed load shows the error with Try again, not "No contacts yet".
+    LaunchedEffect(reloadKey) {
+        if (books.isNotEmpty()) return@LaunchedEffect
+        runCatching { Services.api.addressBooks() }
+            .onSuccess { list -> books = list; book = list.firstOrNull { it.id == book?.id } ?: list.firstOrNull(); if (list.isEmpty()) contacts = emptyList() }
+            .onFailure { loadError = it.message ?: context.getString(R.string.failed) }
     }
-    LaunchedEffect(book, reloadKey) {
-        book?.let { b -> contacts = runCatching { Services.api.contacts(b.id) }.getOrElse { toast(context, it.message ?: context.getString(R.string.failed)); emptyList() } }
+    LaunchedEffect(book?.id, reloadKey) {
+        val b = book ?: return@LaunchedEffect
+        runCatching { Services.api.contacts(b.id) }
+            .onSuccess { contacts = it; loadError = null }
+            .onFailure { if (contacts == null) loadError = it.message ?: context.getString(R.string.failed) else toast(context, it.message ?: context.getString(R.string.failed)) }
     }
 
     // After rotation the editor is restored before the address book has reloaded; open it once it has.
     val editBook = book
     editing?.takeIf { editBook != null }?.let { c ->
         ContactEditor(c, editBook!!.id, onClose = { editing = null }) { op ->
-            scope.launch {
+            if (!saving) scope.launch {
+                saving = true
                 try { op(); editing = null; reloadKey++ } catch (e: Exception) { toast(context, e.message ?: context.getString(R.string.failed)) }
+                saving = false
             }
         }
         return
@@ -185,7 +197,7 @@ fun ContactsScreen() {
                         Text(book?.name ?: stringResource(R.string.tab_contacts), style = MaterialTheme.typography.titleLarge); Icon(Icons.Outlined.ExpandMore, stringResource(R.string.choose_book))
                     }
                     DropdownMenu(bookMenu, { bookMenu = false }) {
-                        books.forEach { b -> DropdownMenuItem({ Text(b.name) }, onClick = { book = b; bookMenu = false }) }
+                        books.forEach { b -> DropdownMenuItem({ Text(b.name) }, onClick = { if (b.id != book?.id) { contacts = null; book = b }; bookMenu = false }) }
                     }
                 }
             }, actions = {
@@ -212,6 +224,7 @@ fun ContactsScreen() {
                 query.isBlank() || listOf(c.fn, c.org, *c.emails.toTypedArray(), *c.phones.toTypedArray()).any { it.contains(query, ignoreCase = true) }
             }
             when {
+                list == null && loadError != null -> EmptyState(Icons.Outlined.CloudOff, loadError!!) { loadError = null; reloadKey++ }
                 list == null -> Loading()
                 list.isEmpty() -> EmptyState(Icons.Outlined.Contacts,
                     stringResource(if (contacts.isNullOrEmpty()) R.string.contacts_empty else R.string.no_matches))
@@ -250,11 +263,14 @@ private fun ContactEditor(c: Contact, bookId: Long, onClose: () -> Unit, onSave:
     var emails by rememberSaveable { mutableStateOf(c.emails.joinToString("\n")) }
     var phones by rememberSaveable { mutableStateOf(c.phones.joinToString("\n")) }
     var address by rememberSaveable { mutableStateOf(c.address) }
-    var birthday by rememberSaveable { mutableStateOf(c.birthday.take(10)) }
+    val shownBirthday = c.birthday.take(10)
+    var birthday by rememberSaveable { mutableStateOf(shownBirthday) }
     var note by rememberSaveable { mutableStateOf(c.note) }
     var confirmDelete by remember { mutableStateOf(false) }
     // Empty, or a real date as YYYY-MM-DD (what vCard stores); anything else would be dropped by the server.
-    val birthdayOk = birthday.isBlank() || runCatching { LocalDate.parse(birthday.trim()) }.isSuccess
+    // A birthday left as it was is fine in any form the contact already had (e.g. "--04-15" without a year).
+    val birthdayUnchanged = birthday.trim() == shownBirthday.trim() && c.birthday.isNotBlank()
+    val birthdayOk = birthday.isBlank() || birthdayUnchanged || runCatching { LocalDate.parse(birthday.trim()) }.isSuccess
     fun pickBirthday() {
         val d = runCatching { LocalDate.parse(birthday.trim()) }.getOrDefault(LocalDate.of(1990, 1, 1))
         DatePickerDialog(context, { _, y, m, dd -> birthday = LocalDate.of(y, m + 1, dd).toString() }, d.year, d.monthValue - 1, d.dayOfMonth).show()
@@ -271,7 +287,7 @@ private fun ContactEditor(c: Contact, bookId: Long, onClose: () -> Unit, onSave:
                     val updated = c.copy(givenName = given.trim(), familyName = family.trim(), org = org.trim(), title = title.trim(),
                         emails = emails.lines().map { it.trim() }.filter { it.isNotEmpty() },
                         phones = phones.lines().map { it.trim() }.filter { it.isNotEmpty() },
-                        address = address.trim(), birthday = birthday.trim(), note = note)
+                        address = address.trim(), birthday = if (birthdayUnchanged) c.birthday else birthday.trim(), note = note)
                     onSave { Services.api.saveContact(bookId, updated) }
                 }) { Text(stringResource(R.string.save)) }
             },
@@ -280,8 +296,10 @@ private fun ContactEditor(c: Contact, bookId: Long, onClose: () -> Unit, onSave:
         Column(Modifier.padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (!isNew) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Avatar(c, 56)
-                c.phones.firstOrNull()?.let { p -> IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$p"))) }) { Icon(Icons.Outlined.Call, stringResource(R.string.call)) } }
-                c.emails.firstOrNull()?.let { m -> IconButton(onClick = { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$m"))) }) { Icon(Icons.Outlined.Email, stringResource(R.string.email)) } }
+                // Tablets without a phone app (or phones without a mail app) have nothing to open these with.
+                fun launch(i: Intent) = runCatching { context.startActivity(i) }.onFailure { toast(context, context.getString(R.string.no_app_found)) }
+                c.phones.firstOrNull()?.let { p -> IconButton(onClick = { launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", p, null))) }) { Icon(Icons.Outlined.Call, stringResource(R.string.call)) } }
+                c.emails.firstOrNull()?.let { m -> IconButton(onClick = { launch(Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", m, null))) }) { Icon(Icons.Outlined.Email, stringResource(R.string.email)) } }
             }
             OutlinedTextField(given, { given = it }, label = { Text(stringResource(R.string.first_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(family, { family = it }, label = { Text(stringResource(R.string.last_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())

@@ -43,7 +43,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.material3.TextButton
 import io.cloudy.app.data.ConnectionCheck
+import io.cloudy.app.work.BackupSettings
 import io.cloudy.app.work.Jobs
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -68,13 +70,14 @@ suspend fun <T> retryingConnection(attempts: Int = 4, work: suspend () -> T): T 
 fun LoginScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var server by remember { mutableStateOf(Services.session.lastServer.ifEmpty { "https://" }) }
-    var user by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
-    var needCode by remember { mutableStateOf(false) }
+    // Everything typed survives rotation and process death (the password too: it stays in this app's saved state).
+    var server by rememberSaveable { mutableStateOf(Services.session.lastServer.ifEmpty { "https://" }) }
+    var user by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var needCode by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun submit() {
         var url = server.trim().trimEnd('/')
@@ -92,6 +95,10 @@ fun LoginScreen() {
                     Services.api.checkServer(url)
                     Services.api.login(url, user.trim(), password, "${Build.MANUFACTURER} ${Build.MODEL}", if (needCode) code else null)
                 }
+                // Another account (or server: node ids are per server) signed in here before: its offline copies go.
+                // Photo backup is turned off only for another user; the same user at a new address keeps it.
+                if (Services.session.isOtherUser(r.user.id)) BackupSettings(context).enabled = false
+                if (Services.session.isOtherAccount(url, r.user.id)) Services.offline.clearAll()
                 Services.session.signIn(url, r.token, r.user)
                 Jobs.schedule(context)
             } catch (e: io.cloudy.app.data.ApiException) {

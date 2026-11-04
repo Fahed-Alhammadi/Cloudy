@@ -6,7 +6,8 @@ enum ListKind: String, Hashable { case recent, favorites, shared }
 
 enum Route: Hashable {
     case folder(Int64, String)
-    case text(FileNode)
+    /// `canEdit`: the user may save changes (false in read-only shares, where saving would get a 403).
+    case text(FileNode, canEdit: Bool = true)
     case list(ListKind)
     case links
     case trash
@@ -42,7 +43,7 @@ extension View {
         navigationDestination(for: Route.self) { route in
             switch route {
             case .folder(let id, let name): FolderView(id: id, title: name)
-            case .text(let node): TextFileView(node: node)
+            case .text(let node, let canEdit): TextFileView(node: node, canEdit: canEdit)
             case .list(let kind): NodeListView(kind: kind)
             case .links: LinksView()
             case .trash: TrashView()
@@ -96,6 +97,7 @@ struct FolderView: View {
     @State private var actions = FileActions()
     @State private var query = ""
     @State private var results: [FileNode]?
+    @State private var searchError: String?
     @State private var filter = TypeFilter.all
     @State private var newFolder = false
     @State private var newText = false
@@ -115,6 +117,8 @@ struct FolderView: View {
                     ErrorState(message: loadError) { Task { await load() } }
                 } else if listing == nil {
                     ProgressView()
+                } else if let searchError, results != nil && shown.isEmpty {
+                    ErrorState(message: searchError) { Task { await search(debounce: false) } }
                 } else if results != nil && shown.isEmpty {
                     ContentUnavailableView.search(text: query)
                 } else if results == nil && shown.isEmpty && uploads.jobs(in: id).isEmpty {
@@ -133,7 +137,11 @@ struct FolderView: View {
             }
             .task(id: query) { await search() }
             .refreshable { await load() }
-            .task { actions.changed = { Task { await load() } }; await load() }
+            .task {
+                actions.changed = { Task { await load() } }
+                actions.canModify = { _ in canEdit } // read-only shares: no rename, move or delete (like web and Android)
+                await load()
+            }
             .onLiveChange(folders: [id]) { Task { await load() } }
             .toolbar {
                 if !actions.selecting { viewButtons }
@@ -190,6 +198,11 @@ struct FolderView: View {
         if grid && results == nil {
             ScrollView {
                 VStack(spacing: 12) {
+                    if listing?.perm == "read" {
+                        Label("Shared with you as read-only", systemImage: "lock")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     ForEach(jobs) { job in UploadRow(job: job) }
                 }
                 .padding(.horizontal)
@@ -210,6 +223,10 @@ struct FolderView: View {
                 Section {
                     ForEach(shown) { node in
                         FileRow(node: node, actions: actions, subtitle: results != nil ? node.path : nil)
+                    }
+                } header: {
+                    if listing?.perm == "read" && results == nil {
+                        Label("Shared with you as read-only", systemImage: "lock").textCase(nil)
                     }
                 } footer: {
                     Color.clear.frame(height: 60) // room for the + button
@@ -290,12 +307,22 @@ struct FolderView: View {
         }
     }
 
-    private func search() async {
+    private func search(debounce: Bool = true) async {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { results = nil; return }
-        try? await Task.sleep(nanoseconds: 300_000_000) // debounce typing
+        guard !q.isEmpty else { results = nil; searchError = nil; return }
+        if debounce { try? await Task.sleep(nanoseconds: 300_000_000) } // debounce typing
         guard !Task.isCancelled else { return }
-        results = (try? await API.shared.search(q)) ?? []
+        do {
+            let found = try await API.shared.search(q)
+            guard !Task.isCancelled else { return } // a newer query is on its way
+            results = found
+            searchError = nil
+        } catch {
+            // Typing on cancels the previous request: that is not "no results".
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
+            results = []
+            searchError = errorText(error)
+        }
     }
 
     private func uploadPhotos(_ items: [PhotosPickerItem]) async {
@@ -312,16 +339,24 @@ struct FolderView: View {
         }
     }
 
+    /// Copies each picked file into tmp first (the picked URL is only readable for a while), off the main thread:
+    /// copying a large video from iCloud Drive or a USB drive takes seconds and froze the screen.
     private func uploadFiles(_ urls: [URL]) {
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            let copy = FileCache.tempURL(url.lastPathComponent)
-            do {
-                try FileManager.default.copyItem(at: url, to: copy)
-                uploads.start(copy, name: url.lastPathComponent, parentId: id)
-            } catch {
-                actions.error = errorText(error)
+        let folder = id
+        Task {
+            for url in urls {
+                do {
+                    let copy = try await Task.detached(priority: .userInitiated) { () throws -> URL in
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        let copy = FileCache.tempURL(url.lastPathComponent)
+                        try FileManager.default.copyItem(at: url, to: copy)
+                        return copy
+                    }.value
+                    uploads.start(copy, name: url.lastPathComponent, parentId: folder)
+                } catch {
+                    actions.error = errorText(error)
+                }
             }
         }
     }
@@ -343,9 +378,12 @@ private struct UploadRow: View {
                     ProgressView(value: job.fraction)
                 }
             }
-            if job.error != nil {
-                Button { uploads.dismiss(job.id) } label: { Image(systemName: "xmark") }.buttonStyle(.borderless)
+            // Stops a running upload, or clears a failed one from the list.
+            Button { uploads.dismiss(job.id) } label: {
+                Image(systemName: "xmark").foregroundStyle(.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
             }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(job.error == nil ? Text("Cancel upload") : Text("Dismiss"))
         }
     }
 }

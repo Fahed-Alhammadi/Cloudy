@@ -48,6 +48,10 @@ class BackupSettings(context: Context) {
     var lastResult: String
         get() = prefs.getString("lastResult", "") ?: ""
         set(v) = prefs.edit().putString("lastResult", v).apply()
+    /** "<folder id>|<media uri>|<size>|<upload id>" of an upload that was interrupted, to resume it on the next run. */
+    var pending: String
+        get() = prefs.getString("pending", "") ?: ""
+        set(v) = prefs.edit().putString("pending", v).apply()
 }
 
 object Jobs {
@@ -63,11 +67,13 @@ object Jobs {
         if (settings.enabled) {
             val c = Constraints.Builder()
                 .setRequiredNetworkType(if (settings.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true) // background uploads wait while the battery is low; "Back up now" doesn't
                 .build()
             wm.enqueueUniquePeriodicWork("backup", ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<BackupWorker>(15, TimeUnit.MINUTES).setConstraints(c).build())
         } else {
             wm.cancelUniqueWork("backup")
+            wm.cancelUniqueWork("backup-now")
         }
         wm.enqueueUniquePeriodicWork("offline", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<OfflineWorker>(1, TimeUnit.HOURS)
@@ -90,8 +96,16 @@ object Jobs {
 
 class OfflineWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        if (!Services.session.isLoggedIn) return Result.success()
-        return runCatching { Services.offline.sync() }.fold({ Result.success() }, { Result.retry() })
+        // Nothing pinned: no network and no disk work (this runs every hour).
+        if (!Services.session.isLoggedIn || Services.offline.pinned.isEmpty()) return Result.success()
+        return try {
+            Services.offline.sync()
+            Result.success()
+        } catch (e: io.cloudy.app.data.ApiException) {
+            if (e.status == 401) Result.success() else Result.retry() // signed out: nothing to retry
+        } catch (e: java.io.IOException) {
+            Result.retry()
+        }
     }
 }
 
@@ -102,7 +116,13 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         val settings = BackupSettings(ctx)
-        if (!settings.enabled || !Services.session.isLoggedIn || !Jobs.hasMediaPermission(ctx)) return Result.success()
+        if (!settings.enabled || !Services.session.isLoggedIn) return Result.success()
+        if (!Jobs.hasMediaPermission(ctx)) {
+            // Access was taken away in the system settings: say so on the Photo backup screen.
+            settings.lastResult = ctx.getString(R.string.backup_permission_needed)
+            settings.lastRun = System.currentTimeMillis()
+            return Result.success()
+        }
         val api = Services.api
         var uploaded = 0
         try {
@@ -112,29 +132,40 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 ?: api.mkdir(rootId, settings.folder)
             val existing = api.node(folder.id).children.orEmpty().associate { it.name to it.size }.toMutableMap()
 
+            // ">=": several photos can share the last run's second (bursts, screenshots); the name and size check
+            // below skips the ones already uploaded.
             val items = query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, settings.lastAdded) +
                 (if (settings.includeVideos) query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, settings.lastAdded) else emptyList())
             for (item in items.sortedBy { it.added }) {
-                if (isStopped) break
+                if (isStopped || !settings.enabled) break
                 var name = item.name
                 val prev = existing[name]
-                if (prev == item.size) {
-                    settings.lastAdded = item.added
-                    continue
-                }
-                if (prev != null) {
+                if (prev != null && prev != item.size) {
+                    // Another file has that name (e.g. IMG_0001.jpg from an older phone): keep both.
                     val dot = name.lastIndexOf('.')
                     val suffix = "_" + ContentUris.parseId(item.uri)
                     name = if (dot > 0) name.substring(0, dot) + suffix + name.substring(dot) else name + suffix
                 }
-                api.upload(folder.id, name, item.size, { ctx.contentResolver.openInputStream(item.uri)!! })
+                if (existing[name] == item.size) {
+                    settings.lastAdded = item.added
+                    continue
+                }
+                // A big video can outlast the job's time limit: its upload session is kept and continued next time.
+                val key = "${folder.id}|${item.uri}|${item.size}|"
+                val resume = settings.pending.takeIf { it.startsWith(key) }?.removePrefix(key)
+                api.upload(folder.id, name, item.size, { ctx.contentResolver.openInputStream(item.uri) ?: throw java.io.IOException("Cannot read $name") },
+                    resumeId = resume, onSession = { settings.pending = key + it }, keepOnFailure = true)
+                settings.pending = ""
                 existing[name] = item.size
                 settings.lastAdded = item.added
                 uploaded++
             }
             settings.lastResult = ctx.getString(R.string.backup_result_uploaded, uploaded)
             return Result.success()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e // stopped by the system (time limit, constraints): WorkManager runs it again
         } catch (e: Exception) {
+            if (e is io.cloudy.app.data.ApiException && e.status == 401) return Result.success() // signed out
             settings.lastResult = ctx.getString(R.string.backup_result_failed, e.message ?: "")
             return Result.retry()
         } finally {
@@ -145,7 +176,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     private fun query(collection: Uri, since: Long): List<Item> {
         val out = mutableListOf<Item>()
         val cols = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_ADDED)
-        applicationContext.contentResolver.query(collection, cols, "${MediaStore.MediaColumns.DATE_ADDED} > ?", arrayOf(since.toString()),
+        applicationContext.contentResolver.query(collection, cols, "${MediaStore.MediaColumns.DATE_ADDED} >= ?", arrayOf(since.toString()),
             "${MediaStore.MediaColumns.DATE_ADDED} ASC")?.use { c ->
             while (c.moveToNext()) {
                 val id = c.getLong(0)

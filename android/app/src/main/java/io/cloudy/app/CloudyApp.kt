@@ -35,6 +35,10 @@ class CloudyApp : Application(), ImageLoaderFactory {
         Services.session = Session(this)
         Services.api = Api(Services.session)
         Services.offline = Offline(this, Services.api)
+        // A rejected token (revoked under Devices on the web, account deleted) signs out, also when only a background
+        // job (photo backup, offline sync) is running; set here so it never holds on to an old activity.
+        val main = android.os.Handler(mainLooper)
+        Services.api.onUnauthorized = { main.post { if (Services.session.token != null) Services.session.signOut() } }
         if (Services.session.isLoggedIn) Jobs.schedule(this) // runs in the background
         // Load the small settings files now, off the UI thread, so screens never wait for the disk on first use.
         Services.appScope.launch(Dispatchers.IO) { listOf("view", "lang", "backup", "applock").forEach { getSharedPreferences(it, MODE_PRIVATE).all } }

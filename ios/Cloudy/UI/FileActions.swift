@@ -18,6 +18,10 @@ final class FileActions {
     var sharing: FileNode?
     var deleting: FileNode?
     var deletingMany: [FileNode]?
+    var leaving: FileNode?
+    /// Whether the user may rename, move or delete a file here (edit on its folder); the screen sets it. Read-only
+    /// shares only offer the other actions, the same as on the web and Android.
+    var canModify: (FileNode) -> Bool = { _ in true }
     /// Multi-select: started from a file's menu ("Select"); taps then tick files.
     var selecting = false
     var selection = Set<Int64>()
@@ -28,6 +32,7 @@ final class FileActions {
     /// Called after a change so the screen reloads (live updates usually do it too).
     var changed: () -> Void = {}
     private var task: Task<Void, Never>?
+    private var taskId: UUID?
 
     /// Downloads (or reuses the cached copy) and shows the file in Quick Look: images, video, audio,
     /// PDF and office documents all preview natively.
@@ -42,6 +47,8 @@ final class FileActions {
     private func fetch(_ node: FileNode, then: @escaping (URL) -> Void) {
         task?.cancel()
         downloading = node
+        let me = UUID()
+        taskId = me
         task = Task {
             do {
                 let url = try await FileCache.fetch(node)
@@ -51,7 +58,8 @@ final class FileActions {
             } catch {
                 self.error = errorText(error)
             }
-            downloading = nil
+            // A download that was replaced by a newer one must not hide the newer one's progress.
+            if taskId == me { downloading = nil }
         }
     }
 
@@ -62,6 +70,8 @@ final class FileActions {
         guard let first = files.first else { error = String(localized: "Folders can't be sent. Select files."); return }
         task?.cancel()
         downloading = files.count == 1 ? first : FileNode(id: 0, name: String(localized: "\(files.count) files"), isDir: false)
+        let me = UUID()
+        taskId = me
         task = Task {
             do {
                 var urls: [URL] = []
@@ -72,7 +82,7 @@ final class FileActions {
             } catch {
                 self.error = errorText(error)
             }
-            downloading = nil
+            if taskId == me { downloading = nil }
         }
     }
 
@@ -121,26 +131,43 @@ final class FileActions {
         }
     }
 
+    /// Whether a text file's content may be saved: the server's own answer when the listing has one (shared with you,
+    /// search results), otherwise the same edit permission as rename/move/delete.
+    func canEditContent(_ node: FileNode) -> Bool { node.canEdit ?? canModify(node) }
+
+    /// Only the owner can share a file (the server answers 403 to everyone else).
+    func isOwner(_ node: FileNode) -> Bool { node.owner == nil || node.owner == Session.shared.user?.id }
+
     /// Context-menu / swipe actions for a row.
     @MainActor @ViewBuilder
     func menu(for node: FileNode) -> some View {
+        let modify = canModify(node)
         Button { self.select(node) } label: { Label("Select", systemImage: "checkmark.circle") }
         if !node.isDir {
             Button { self.open(node) } label: { Label("Open", systemImage: "eye") }
         }
         Button { self.export(node) } label: { Label(node.isDir ? "Send as ZIP" : "Send to…", systemImage: "square.and.arrow.up") }
-        Button { self.sharing = node } label: { Label("Share", systemImage: "person.crop.circle.badge.plus") }
+        if isOwner(node) {
+            Button { self.sharing = node } label: { Label("Share", systemImage: "person.crop.circle.badge.plus") }
+        }
         Button {
             self.run { try await API.shared.setFavorite(node.id, !node.isFavorite) }
         } label: {
             node.isFavorite ? Label("Remove from favorites", systemImage: "star.slash") : Label("Add to favorites", systemImage: "star")
         }
         Divider()
-        Button { self.renameText = node.name; self.renaming = node } label: { Label("Rename", systemImage: "pencil") }
-        Button { self.transferring = Transfer(nodes: [node], copy: false) } label: { Label("Move", systemImage: "folder") }
+        if modify {
+            Button { self.renameText = node.name; self.renaming = node } label: { Label("Rename", systemImage: "pencil") }
+            Button { self.transferring = Transfer(nodes: [node], copy: false) } label: { Label("Move", systemImage: "folder") }
+        }
         Button { self.transferring = Transfer(nodes: [node], copy: true) } label: { Label("Copy", systemImage: "doc.on.doc") }
-        Divider()
-        Button(role: .destructive) { self.deleting = node } label: { Label("Delete", systemImage: "trash") }
+        if node.shareId != nil && node.shareType == "user" {
+            Button(role: .destructive) { self.leaving = node } label: { Label("Leave share", systemImage: "rectangle.portrait.and.arrow.right") }
+        }
+        if modify {
+            Divider()
+            Button(role: .destructive) { self.deleting = node } label: { Label("Delete", systemImage: "trash") }
+        }
     }
 }
 
@@ -174,6 +201,13 @@ private struct FileActionsModifier: ViewModifier {
                                 titleVisibility: .visible) {
                 Button("Move to trash", role: .destructive) {
                     if let n = actions.deleting { actions.run { try await API.shared.delete(n.id) } }
+                }
+            }
+            .confirmationDialog(Text("Remove \"\(actions.leaving?.name ?? "")\" from your shared items?"),
+                                isPresented: Binding(get: { actions.leaving != nil }, set: { if !$0 { actions.leaving = nil } }),
+                                titleVisibility: .visible) {
+                Button("Leave share", role: .destructive) {
+                    if let id = actions.leaving?.shareId { actions.run { try await API.shared.deleteShare(id) } }
                 }
             }
             .confirmationDialog(Text("Move \(actions.deletingMany?.count ?? 0) items to the trash?"),
@@ -263,9 +297,10 @@ private struct SelectionModifier: ViewModifier {
 
 extension FileNode {
     /// Where tapping the row goes: folders and text files push a screen; other files open in Quick Look.
-    var route: Route? {
+    /// `canEdit`: text files open read-only without it.
+    func route(canEdit: Bool) -> Route? {
         if isDir { return .folder(id, name) }
-        if isText(self) { return .text(self) }
+        if isText(self) { return .text(self, canEdit: canEdit) }
         return nil
     }
 }
@@ -283,6 +318,7 @@ struct ActionsButton: View {
                 .foregroundStyle(circle ? Color.primary : Color.secondary)
                 .frame(width: circle ? 30 : 36, height: circle ? 30 : 44)
                 .background { if circle { Circle().fill(.regularMaterial) } }
+                .frame(width: circle ? 44 : 36, height: 44) // 44 pt touch target around the small grid circle
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -306,7 +342,7 @@ struct FileRow: View {
             if actions.selecting {
                 // Multi-select: the List (in edit mode) handles the tap and draws the checkmark.
                 NodeRow(node: node, subtitle: subtitle)
-            } else if let route = node.route {
+            } else if let route = node.route(canEdit: actions.canEditContent(node)) {
                 // A hidden link makes the whole row tappable without the disclosure chevron.
                 ZStack {
                     NavigationLink(value: route) { EmptyView() }.opacity(0)
@@ -320,8 +356,12 @@ struct FileRow: View {
         .contextMenu { if !actions.selecting { actions.menu(for: node) } }
         .swipeActions(edge: .trailing) {
             if !actions.selecting {
-                Button(role: .destructive) { actions.deleting = node } label: { Label("Delete", systemImage: "trash") }
-                Button { actions.sharing = node } label: { Label("Share", systemImage: "person.crop.circle.badge.plus") }.tint(.accentColor)
+                if actions.canModify(node) {
+                    Button(role: .destructive) { actions.deleting = node } label: { Label("Delete", systemImage: "trash") }
+                }
+                if actions.isOwner(node) {
+                    Button { actions.sharing = node } label: { Label("Share", systemImage: "person.crop.circle.badge.plus") }.tint(.accentColor)
+                }
             }
         }
     }
@@ -368,7 +408,7 @@ struct FileTile: View {
                     if isSelected { actions.selection.remove(node.id) } else { actions.selection.insert(node.id) }
                 } label: { tile.opacity(isSelected ? 1 : 0.75) }
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
-            } else if let route = node.route {
+            } else if let route = node.route(canEdit: actions.canEditContent(node)) {
                 NavigationLink(value: route) { tile }
             } else {
                 Button { actions.open(node) } label: { tile }
@@ -385,7 +425,7 @@ struct FileTile: View {
                     .padding(6)
                     .allowsHitTesting(false)
             } else {
-                ActionsButton(node: node, actions: actions, circle: true).padding(4)
+                ActionsButton(node: node, actions: actions, circle: true)
             }
         }
         .task(id: node.etag) {

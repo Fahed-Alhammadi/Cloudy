@@ -285,4 +285,8 @@
     <string name="help">المساعدة</string>
     <string name="send_feedback">إرسال ملاحظات</string>
     <string name="rate_app">تقييم Cloudy</string>
+    <string name="try_again">حاول مرة أخرى</string>
+    <string name="purge_confirm">سيتم حذف «%1$s» نهائيًا.</string>
+    <string name="trash_note">تُزال العناصر المحذوفة نهائيًا بعد %1$d يومًا.</string>
+    <string name="no_app_found">لا يوجد تطبيق على هذا الجهاز يمكنه فتح هذا</string>
 </resources>

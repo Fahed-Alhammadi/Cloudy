@@ -43,13 +43,10 @@ class Offline(context: Context, private val api: Api) {
 
     // The in-memory check comes first, so files that aren't offline never touch the disk (called while drawing lists).
     fun localFile(node: FileNode): File? =
-        if (state.etags[node.id] != node.etag) null else File(root, "files/${node.id}/${node.name}").takeIf { it.exists() }
+        if (state.etags[node.id] != node.etag) null else File(root, "files/${node.id}/${SafeName.segment(node.name)}").takeIf { it.exists() }
 
     /** The node as last seen online, if its content is on the device: lets the app open it without network. */
     fun savedNode(id: Long): FileNode? = state.nodes[id]?.takeIf { localFile(it) != null }
-
-    /** Any downloaded copy, even if outdated (used when offline). */
-    fun anyLocalFile(id: Long): File? = File(root, "files/$id").listFiles()?.firstOrNull()
 
     fun hasCachedListing(id: Long): Boolean = File(root, "dirs/$id.json").exists()
 
@@ -112,12 +109,17 @@ class Offline(context: Context, private val api: Api) {
         keep += n.id
         state = state.copy(nodes = state.nodes + (n.id to n))
         if (localFile(n) != null) return null
+        // The new version goes to a side folder first: if the download fails (network lost), the previous copy
+        // stays and can still be opened offline.
+        val tmp = File(root, "tmp/${n.id}")
+        tmp.deleteRecursively()
+        api.download(n.id, File(tmp, SafeName.segment(n.name)))
         val dir = File(root, "files/${n.id}")
         dir.deleteRecursively()
-        val dest = File(dir, n.name)
-        api.download(n.id, dest)
+        dir.parentFile?.mkdirs()
+        if (!tmp.renameTo(dir)) throw java.io.IOException("Could not save ${n.name}")
         state = state.copy(etags = state.etags + (n.id to n.etag))
-        return dest
+        return File(dir, SafeName.segment(n.name))
     }
 
     /** Deletes content no longer reachable from a pinned item. */
@@ -130,6 +132,7 @@ class Offline(context: Context, private val api: Api) {
                 save()
             }
         }
+        File(root, "tmp").deleteRecursively() // downloads that were interrupted
         File(root, "files").listFiles()?.forEach { f -> if (f.name.toLongOrNull() !in live) f.deleteRecursively() }
         File(root, "dirs").listFiles()?.forEach { f -> if (f.nameWithoutExtension.toLongOrNull() !in live) f.delete() }
         state = state.copy(etags = state.etags.filterKeys { it in live }, nodes = state.nodes.filterKeys { it in live })

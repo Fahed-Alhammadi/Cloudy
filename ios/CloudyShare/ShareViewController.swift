@@ -1,6 +1,7 @@
 import UIKit
 import SwiftUI
 import UniformTypeIdentifiers
+import Observation
 
 /// "Share to Cloudy": collects the shared files into a temporary folder, then shows `ShareView`, which uploads
 /// them with the app's device token (shared Keychain) to a folder on the server the app is signed in to.
@@ -12,11 +13,14 @@ final class ShareViewController: UIViewController {
         view.backgroundColor = .systemBackground
         API.shared.server = UserDefaults(suiteName: appGroup)?.string(forKey: "server") ?? ""
         API.shared.token = Keychain.get("token")
-        Task { await present(items: await collect()) }
+        // The sheet shows at once ("Preparing…"); copying a long video out of Photos can take a while.
+        let model = ShareModel()
+        present(model)
+        Task { model.items = await collect() }
     }
 
-    private func present(items: [SharedItem]) {
-        let host = UIHostingController(rootView: ShareView(items: items, signedIn: API.shared.token != nil && !API.shared.server.isEmpty) { [weak self] in
+    private func present(_ model: ShareModel) {
+        let host = UIHostingController(rootView: ShareView(model: model, signedIn: API.shared.token != nil && !API.shared.server.isEmpty) { [weak self] in
             self?.finish()
         })
         addChild(host)
@@ -40,7 +44,8 @@ final class ShareViewController: UIViewController {
             for provider in item.attachments ?? [] {
                 guard provider.hasItemConformingToTypeIdentifier(UTType.data.identifier) else { continue }
                 guard let src = await file(from: provider) else { continue }
-                var name = provider.suggestedName.flatMap { $0.isEmpty ? nil : $0 } ?? src.lastPathComponent
+                // The sharing app chooses the name: keep it to one path component inside `work`.
+                var name = safeFileName(provider.suggestedName.flatMap { $0.isEmpty ? nil : $0 } ?? src.lastPathComponent)
                 if !name.contains("."), let ext = src.pathExtension.isEmpty ? nil : src.pathExtension { name += ".\(ext)" }
                 var candidate = name, n = 2
                 while used.contains(candidate.lowercased()) {
@@ -50,7 +55,8 @@ final class ShareViewController: UIViewController {
                 }
                 used.insert(candidate.lowercased())
                 let dest = work.appendingPathComponent(candidate)
-                if (try? FileManager.default.copyItem(at: src, to: dest)) != nil {
+                // `src` is already our own copy: move it (a second copy doubled the time and disk space for big videos).
+                if (try? FileManager.default.moveItem(at: src, to: dest)) != nil {
                     let size = (try? FileManager.default.attributesOfItem(atPath: dest.path)[.size] as? NSNumber)?.int64Value ?? 0
                     out.append(SharedItem(name: candidate, url: dest, size: size))
                 }
@@ -64,12 +70,18 @@ final class ShareViewController: UIViewController {
             // The URL is only valid inside the handler, so the copy happens here (synchronously).
             provider.loadFileRepresentation(forTypeIdentifier: UTType.data.identifier) { url, _ in
                 guard let url else { return cont.resume(returning: nil) }
-                let tmp = self.work.appendingPathComponent("in-\(UUID().uuidString)").appendingPathComponent(url.lastPathComponent)
+                let tmp = self.work.appendingPathComponent("in-\(UUID().uuidString)").appendingPathComponent(safeFileName(url.lastPathComponent))
                 try? FileManager.default.createDirectory(at: tmp.deletingLastPathComponent(), withIntermediateDirectories: true)
                 cont.resume(returning: (try? FileManager.default.copyItem(at: url, to: tmp)) != nil ? tmp : nil)
             }
         }
     }
+}
+
+/// The files to upload; nil while they are still being copied out of the sharing app.
+@MainActor @Observable
+final class ShareModel {
+    var items: [SharedItem]?
 }
 
 struct SharedItem: Identifiable {

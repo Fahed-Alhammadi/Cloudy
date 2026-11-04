@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -245,12 +247,16 @@ fun shareText(context: Context, text: String) {
 @Composable
 fun Loading() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 
+/** Centered icon and text; [onRetry] adds a "Try again" button (for load errors). */
 @Composable
-fun EmptyState(icon: ImageVector, text: String) =
+fun EmptyState(icon: ImageVector, text: String, onRetry: (() -> Unit)? = null) =
     Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
             Text(text, color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+            if (onRetry != null) androidx.compose.material3.OutlinedButton(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
+                Text(stringResource(R.string.try_again))
+            }
         }
     }
 
@@ -259,7 +265,7 @@ fun TextPrompt(
     title: String, initial: String = "", label: String = stringResource(R.string.name), confirm: String = stringResource(R.string.ok),
     onDismiss: () -> Unit, onConfirm: (String) -> Unit,
 ) {
-    var value by remember { mutableStateOf(initial) }
+    var value by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(initial) } // survives rotation
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -278,6 +284,23 @@ fun ConfirmDialog(title: String, text: String, confirm: String, onDismiss: () ->
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirm, color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
+
+/**
+ * A label with a switch at the end. The whole row toggles it (a bigger target) and TalkBack reads both together
+ * ("All day, switch, on") instead of a bare "switch, off".
+ */
+@Composable
+fun SwitchRow(label: String, checked: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onChange: (Boolean) -> Unit) =
+    Row(modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        androidx.compose.material3.Switch(checked, onCheckedChange = null, enabled = enabled)
+    }
+
+/** For a ListItem whose trailing Switch (with `onCheckedChange = null`) it toggles, as one TalkBack element. */
+fun Modifier.toggleRow(checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit): Modifier =
+    toggleable(checked, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = onChange)
 
 /** Lets rememberSaveable keep a @Serializable model, so an open form survives rotation and process death. */
 val saveJson = Json { ignoreUnknownKeys = true }

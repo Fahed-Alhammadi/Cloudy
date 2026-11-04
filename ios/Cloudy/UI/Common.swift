@@ -237,12 +237,14 @@ struct ErrorState: View {
 // MARK: - Live updates
 
 extension View {
-    /// Calls `action` when the server reports a change in one of `folders` (or in "shared with me" if `shares`).
+    /// Calls `action` when the server reports a change in one of `folders` (or in "shared with me" if `shares`),
+    /// and after the live-update stream reconnected (changes may have been missed meanwhile).
     func onLiveChange(folders: Set<Int64> = [], shares: Bool = false, any: Bool = false, _ action: @escaping () -> Void) -> some View {
         onReceive(NotificationCenter.default.publisher(for: .cloudyChange)) { note in
             guard let ev = note.object as? ChangeEvent else { return }
             if any || (shares && ev.shares == true) || !(folders.isDisjoint(with: ev.folders ?? [])) { action() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .cloudyResync)) { _ in action() }
     }
 }
 

@@ -190,8 +190,10 @@ struct ContactDetail: View {
             if !contact.address.isEmpty {
                 Section("Address") { Text(contact.address).textSelection(.enabled) }
             }
-            if let b = dayFormatter.date(from: contact.birthday) {
+            if let b = birthdayDate(contact.birthday) {
                 Section("Birthday") { Text(b.formatted(date: .long, time: .omitted)) }
+            } else if !contact.birthday.isEmpty {
+                Section("Birthday") { Text(contact.birthday) } // e.g. "--04-15" (no year) from another app
             }
             if !contact.note.isEmpty {
                 Section("Notes") { Text(contact.note).textSelection(.enabled) }
@@ -228,6 +230,7 @@ struct ContactEditor: View {
     let onSaved: () -> Void
     @State private var c: Contact
     @State private var hasBirthday: Bool
+    @State private var birthdayCleared = false
     @State private var birthday: Date
     @State private var saving = false
     @State private var error: String?
@@ -240,7 +243,7 @@ struct ContactEditor: View {
         if c.emails.isEmpty { c.emails = [""] }
         if c.phones.isEmpty { c.phones = [""] }
         _c = State(initialValue: c)
-        let b = dayFormatter.date(from: contact.birthday)
+        let b = birthdayDate(contact.birthday)
         _hasBirthday = State(initialValue: b != nil)
         _birthday = State(initialValue: b ?? Calendar.current.date(byAdding: .year, value: -30, to: Date())!)
     }
@@ -254,16 +257,18 @@ struct ContactEditor: View {
                     TextField("Company", text: $c.org).textContentType(.organizationName)
                     TextField("Job title", text: $c.title).textContentType(.jobTitle)
                 }
+                // `item(…)` instead of `$c.phones[i]`: after a swipe-to-delete SwiftUI can still ask the removed row
+                // for its value, and subscripting past the end crashed the app.
                 Section("Phone") {
                     ForEach(c.phones.indices, id: \.self) { i in
-                        TextField("Phone", text: $c.phones[i]).keyboardType(.phonePad).textContentType(.telephoneNumber)
+                        TextField("Phone", text: item(\.phones, i)).keyboardType(.phonePad).textContentType(.telephoneNumber)
                     }
                     .onDelete { c.phones.remove(atOffsets: $0) }
                     Button { c.phones.append("") } label: { Label("Add phone", systemImage: "plus.circle") }
                 }
                 Section("Email") {
                     ForEach(c.emails.indices, id: \.self) { i in
-                        TextField("Email", text: $c.emails[i]).keyboardType(.emailAddress).textContentType(.emailAddress)
+                        TextField("Email", text: item(\.emails, i)).keyboardType(.emailAddress).textContentType(.emailAddress)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                     }
                     .onDelete { c.emails.remove(atOffsets: $0) }
@@ -272,6 +277,7 @@ struct ContactEditor: View {
                 Section {
                     TextField("Address", text: $c.address, axis: .vertical).lineLimit(2...5).textContentType(.fullStreetAddress)
                     Toggle("Birthday", isOn: $hasBirthday.animation())
+                        .onChange(of: hasBirthday) { _, on in if !on { birthdayCleared = true } }
                     if hasBirthday {
                         DatePicker("Birthday", selection: $birthday, in: ...Date(), displayedComponents: .date)
                     }
@@ -293,15 +299,23 @@ struct ContactEditor: View {
         }
     }
 
+    /// The server needs a name or a company (it answers "Name required" otherwise), as on the web and Android.
     private var isEmpty: Bool {
-        ([c.givenName, c.familyName, c.org] + c.emails + c.phones).allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+        [c.givenName, c.familyName, c.org].allSatisfy { $0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    private func item(_ list: WritableKeyPath<Contact, [String]>, _ i: Int) -> Binding<String> {
+        Binding(get: { i < c[keyPath: list].count ? c[keyPath: list][i] : "" },
+                set: { if i < c[keyPath: list].count { c[keyPath: list][i] = $0 } })
     }
 
     private func save() {
         var out = c
         out.emails = c.emails.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         out.phones = c.phones.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        out.birthday = hasBirthday ? dayFormatter.string(from: birthday) : ""
+        // A birthday this editor can't show (no year, other format) stays as it was unless the switch was turned off.
+        let unparsed = birthdayDate(c.birthday) == nil && !c.birthday.isEmpty
+        out.birthday = hasBirthday ? dayFormatter.string(from: birthday) : (unparsed && !birthdayCleared ? c.birthday : "")
         saving = true
         Task {
             do {
@@ -314,4 +328,13 @@ struct ContactEditor: View {
             saving = false
         }
     }
+}
+
+/// Birthdays from the server: `YYYY-MM-DD`, also with a time (`1990-04-15T00:00:00`) or as `19900415`.
+func birthdayDate(_ s: String) -> Date? {
+    if s.count >= 10, let d = dayFormatter.date(from: String(s.prefix(10))) { return d }
+    if s.count == 8, s.allSatisfy(\.isNumber) {
+        return dayFormatter.date(from: "\(s.prefix(4))-\(s.dropFirst(4).prefix(2))-\(s.suffix(2))")
+    }
+    return nil
 }

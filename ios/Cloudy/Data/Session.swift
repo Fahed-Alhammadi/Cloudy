@@ -61,8 +61,15 @@ final class Session {
     /// `revoke`: also invalidate the token on the server (not when the server already rejected it).
     func signOut(revoke: Bool = true) {
         guard user != nil else { return }
-        if revoke { Task { await API.shared.logout(); Keychain.delete("token") } } else { Keychain.delete("token") }
+        // The revoke request gets the token explicitly: `API.shared.token` is cleared below, before the task runs
+        // (it used to go out without one, so the server kept the device signed in). The Keychain entry goes now, so a
+        // quick sign-in again can't have its new token deleted by this task.
+        if revoke, let token = API.shared.token { Task { await API.shared.logout(token: token) } }
+        Keychain.delete("token")
         API.shared.token = nil
+        // "Share to Cloudy" remembers a folder of this account; it means nothing to the next one.
+        Session.sharedDefaults.removeObject(forKey: "shareFolderId")
+        Session.sharedDefaults.removeObject(forKey: "shareFolderName")
         defaults.removeObject(forKey: "user")
         user = nil
         FileCache.clear()

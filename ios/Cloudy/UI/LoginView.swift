@@ -3,7 +3,8 @@ import SwiftUI
 struct LoginView: View {
     @Environment(Session.self) private var session
     @Environment(\.openURL) private var openURL
-    @State private var server = UserDefaults.standard.string(forKey: "server") ?? ""
+    /// The last server (kept in the App Group since the share extension; signing out keeps the address).
+    @State private var server = Session.shared.server
     @State private var user = ""
     @State private var password = ""
     @State private var code = ""

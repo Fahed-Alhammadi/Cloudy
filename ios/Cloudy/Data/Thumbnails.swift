@@ -17,7 +17,7 @@ actor Thumbnails {
     }
 
     func image(for node: FileNode, pixels: CGFloat = 360) async -> UIImage? {
-        let key = "\(node.id)-\((node.etag ?? "").filter { $0.isLetter || $0.isNumber })"
+        let key = "\(node.id)-\(safeToken(node.etag ?? ""))"
         if let img = memory.object(forKey: key as NSString) { return img }
         if let task = loading[key] { return await task.value }
         let file = dir.appendingPathComponent(key + ".jpg")

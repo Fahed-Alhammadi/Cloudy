@@ -1,6 +1,7 @@
 package io.cloudy.app.ui
 
 import io.cloudy.app.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import android.graphics.Bitmap
@@ -104,7 +105,7 @@ fun PreviewScreen(nav: NavController, id: Long) {
     val scope = rememberCoroutineScope()
     var node by remember { mutableStateOf<FileNode?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var sheet by remember { mutableStateOf(false) }
+    var sheet by rememberSaveable { mutableStateOf(false) }
     var canEdit by remember { mutableStateOf(false) }
     var dirty by remember { mutableStateOf(false) } // the text editor has unsaved changes
     var confirmLeave by remember { mutableStateOf(false) }
@@ -158,7 +159,15 @@ fun PreviewScreen(nav: NavController, id: Long) {
         nav.popBackStack()
     }
     if (sheet) node?.let { n ->
-        NodeActions(n, nav, canModify = n.owner == Services.session.user.value?.id, reload = {}, scope = scope) { sheet = false }
+        // After an action the file is read again: a new name or favorite shows here, and a file that was deleted
+        // or moved away (gone from this place) closes the preview instead of staying on screen.
+        NodeActions(n, nav, canModify = n.owner == Services.session.user.value?.id, reload = {
+            scope.launch {
+                runCatching { Services.api.node(id) }
+                    .onSuccess { if (it.node.parentId != n.parentId) nav.popBackStack() else node = it.node }
+                    .onFailure { if ((it as? io.cloudy.app.data.ApiException)?.status == 404) nav.popBackStack() }
+            }
+        }, scope = scope) { sheet = false }
     }
 }
 
@@ -177,22 +186,39 @@ private fun ZoomableImage(n: FileNode) {
     }
 }
 
+/**
+ * Keeps the player across rotation (scoped to this screen's back-stack entry), so turning the phone to watch a video
+ * in landscape doesn't restart it from the beginning.
+ */
+@OptIn(UnstableApi::class)
+class PlayerHolder(app: android.app.Application) : androidx.lifecycle.AndroidViewModel(app) {
+    private var player: ExoPlayer? = null
+
+    fun player(n: FileNode): ExoPlayer = player ?: ExoPlayer.Builder(getApplication())
+        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(Services.api.http)))
+        .build().apply {
+            val local = Services.offline.localFile(n)
+            setMediaItem(MediaItem.fromUri(local?.toURI()?.toString() ?: Services.api.downloadUrl(n.id, inline = true)))
+            prepare()
+            playWhenReady = true
+        }.also { player = it }
+
+    override fun onCleared() { player?.release(); player = null }
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 private fun MediaPlayer(n: FileNode) {
-    val context = LocalContext.current
-    val player = remember {
-        ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(Services.api.http)))
-            .build().apply {
-                val local = Services.offline.localFile(n)
-                setMediaItem(MediaItem.fromUri(local?.toURI()?.toString() ?: Services.api.downloadUrl(n.id, inline = true)))
-                prepare()
-                playWhenReady = true
-            }
+    val holder: PlayerHolder = androidx.lifecycle.viewmodel.compose.viewModel()
+    val player = remember(holder) { holder.player(n) }
+    // Pauses when the app goes to the background (there's no media notification to stop it from there), but not
+    // for the stop that is part of a rotation.
+    val activity = LocalContext.current.findActivity()
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+        if (activity?.isChangingConfigurations != true) player.pause()
     }
-    DisposableEffect(Unit) { onDispose { player.release() } }
-    AndroidView({ PlayerView(it).apply { this.player = player } }, Modifier.fillMaxSize().background(Color.Black))
+    AndroidView({ PlayerView(it).apply { this.player = player } }, Modifier.fillMaxSize().background(Color.Black),
+        onRelease = { it.player = null })
 }
 
 /** A PDF, or with [preview] an office document converted to PDF by the server. Cached per file version. */
@@ -204,7 +230,7 @@ private fun PdfView(n: FileNode, preview: Boolean = false) {
     LaunchedEffect(n.id, n.etag) {
         try {
             val file = withContext(Dispatchers.IO) {
-                (if (preview) null else Services.offline.localFile(n)) ?: File(context.cacheDir, "pdf/${n.id}-${n.etag}.pdf").also {
+                (if (preview) null else Services.offline.localFile(n)) ?: File(context.cacheDir, "pdf/${n.id}-${io.cloudy.app.data.SafeName.etag(n.etag)}.pdf").also {
                     if (!it.exists()) it.parentFile?.listFiles()?.filter { f -> f.name.startsWith("${n.id}-") }?.forEach { f -> f.delete() }
                 }
             }
@@ -324,8 +350,16 @@ fun TrashScreen(nav: NavController) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<TrashItem>?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     var confirmEmpty by remember { mutableStateOf(false) }
-    suspend fun load() { items = runCatching { Services.api.trash() }.getOrElse { toast(context, it.message ?: context.getString(R.string.failed)); emptyList() } }
+    var purging by rememberSaveable(stateSaver = jsonSaver<TrashItem>()) { mutableStateOf<TrashItem?>(null) }
+    val trashDays = Services.session.user.collectAsStateWithLifecycle().value?.trashDays
+    // A failed load says so (with Try again) instead of claiming the trash is empty.
+    suspend fun load() {
+        runCatching { Services.api.trash() }
+            .onSuccess { items = it; loadError = null }
+            .onFailure { if (items == null) loadError = it.message ?: context.getString(R.string.failed) else toast(context, it.message ?: context.getString(R.string.failed)) }
+    }
     LaunchedEffect(Unit) { load() }
     fun act(block: suspend () -> Unit) = scope.launch { runCatching { block() }.onFailure { toast(context, it.message ?: context.getString(R.string.failed)) }; load() }
 
@@ -339,9 +373,15 @@ fun TrashScreen(nav: NavController) {
         Box(Modifier.padding(pad)) {
             val list = items
             when {
+                list == null && loadError != null -> EmptyState(Icons.Outlined.CloudOff, loadError!!) { loadError = null; scope.launch { load() } }
                 list == null -> Loading()
                 list.isEmpty() -> EmptyState(Icons.Outlined.DeleteSweep, stringResource(R.string.trash_empty))
                 else -> LazyColumn {
+                    // Same note as on the web: how long deleted files are kept.
+                    if (trashDays != null) item {
+                        Text(stringResource(R.string.trash_note, trashDays), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    }
                     items(list, key = { it.id }) { t ->
                         ListItem(
                             leadingContent = { FileIcon(FileNode(t.id, t.name, t.isDir, mime = t.mime)) },
@@ -350,13 +390,19 @@ fun TrashScreen(nav: NavController) {
                             trailingContent = {
                                 androidx.compose.foundation.layout.Row {
                                     IconButton(onClick = { act { Services.api.restore(t.id) } }) { Icon(Icons.Outlined.Restore, stringResource(R.string.restore)) }
-                                    IconButton(onClick = { act { Services.api.purge(t.id) } }) { Icon(Icons.Outlined.DeleteForever, stringResource(R.string.delete_permanently)) }
+                                    IconButton(onClick = { purging = t }) { Icon(Icons.Outlined.DeleteForever, stringResource(R.string.delete_permanently)) }
                                 }
                             },
                         )
                     }
                 }
             }
+        }
+    }
+    purging?.let { t ->
+        ConfirmDialog(stringResource(R.string.delete_permanently), stringResource(R.string.purge_confirm, t.name), stringResource(R.string.delete), { purging = null }) {
+            purging = null
+            act { Services.api.purge(t.id) }
         }
     }
     if (confirmEmpty) ConfirmDialog(stringResource(R.string.empty_trash), stringResource(R.string.empty_trash_text), stringResource(R.string.empty), { confirmEmpty = false }) {

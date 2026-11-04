@@ -2,21 +2,35 @@ import SwiftUI
 
 /// The sheet shown by "Share to Cloudy": the files, the destination folder (remembered), and Upload.
 struct ShareView: View {
-    let items: [SharedItem]
+    let model: ShareModel
     let signedIn: Bool
     let done: () -> Void
 
     @State private var folder = Folder.remembered()
     @State private var uploading = false
     @State private var progress = 0
+    @State private var fraction = 0.0
     @State private var finished = false
     @State private var error: String?
+    /// Files that are already on the server: "Upload" after an error goes on with the rest.
+    @State private var uploaded = Set<UUID>()
+    @State private var task: Task<Void, Never>?
+    @State private var closed = false
+
+    private var items: [SharedItem] { model.items ?? [] }
 
     var body: some View {
         NavigationStack {
             List {
                 if !signedIn {
                     Section { Label("Sign in to Cloudy first, then share again.", systemImage: "person.crop.circle.badge.exclamationmark") }
+                } else if model.items == nil {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text("Preparing files…").foregroundStyle(.secondary)
+                        }
+                    }
                 } else if items.isEmpty {
                     Section { Label("Nothing to upload", systemImage: "tray") }
                 } else {
@@ -30,7 +44,8 @@ struct ShareView: View {
                     Section("Files") {
                         ForEach(items) { item in
                             HStack {
-                                Image(systemName: icon(for: item.name)).foregroundStyle(.tint).frame(width: 24)
+                                Image(systemName: uploaded.contains(item.id) ? "checkmark.circle.fill" : icon(for: item.name))
+                                    .foregroundStyle(uploaded.contains(item.id) ? AnyShapeStyle(.green) : AnyShapeStyle(.tint)).frame(width: 24)
                                 Text(item.name).lineLimit(1).truncationMode(.middle)
                                 Spacer()
                                 Text(item.size.formatted(.byteCount(style: .file))).foregroundStyle(.secondary).font(.footnote)
@@ -45,10 +60,12 @@ struct ShareView: View {
             .navigationTitle("Upload to Cloudy")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: done).disabled(uploading) }
+                // Also stops a running upload (a big video can take minutes). The extension may end before the app's
+                // DELETE of the partial upload goes out; the server removes unfinished uploads after a day anyway.
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { task?.cancel(); close() } }
                 ToolbarItem(placement: .confirmationAction) {
                     if finished {
-                        Button("Done", action: done)
+                        Button("Done", action: close)
                     } else {
                         Button(action: upload) { Text("Upload").bold() }.disabled(!signedIn || items.isEmpty || uploading)
                     }
@@ -57,7 +74,7 @@ struct ShareView: View {
             .overlay {
                 if uploading {
                     VStack(spacing: 12) {
-                        ProgressView(value: Double(progress), total: Double(items.count)).frame(width: 200)
+                        ProgressView(value: fraction).frame(width: 200)
                         Text("Uploading \(progress + 1) of \(items.count)…").font(.footnote).foregroundStyle(.secondary)
                     }
                     .padding(24)
@@ -68,6 +85,13 @@ struct ShareView: View {
                 }
             }
         }
+    }
+
+    /// Ends the extension once: Cancel or Done during the short "Uploaded" pause must not complete the request twice.
+    private func close() {
+        guard !closed else { return }
+        closed = true
+        done()
     }
 
     private func icon(for name: String) -> String {
@@ -83,17 +107,32 @@ struct ShareView: View {
     private func upload() {
         uploading = true
         error = nil
-        Task {
+        let count = Double(max(items.count, 1))
+        task = Task {
             do {
                 let target = folder.id == 0 ? try await rootId() : folder.id
-                for (i, item) in items.enumerated() {
+                for (i, item) in items.enumerated() where !uploaded.contains(item.id) {
                     progress = i
-                    _ = try await API.shared.upload(target, name: item.name, file: item.url) { _, _ in }
+                    fraction = Double(i) / count
+                    _ = try await API.shared.upload(target, name: item.name, file: item.url) { sent, total in
+                        let part = total > 0 ? Double(sent) / Double(total) : 1
+                        DispatchQueue.main.async { fraction = (Double(i) + part) / count }
+                    }
+                    uploaded.insert(item.id)
                 }
                 finished = true
                 // Close by itself once the result was seen; "Done" also works.
                 try? await Task.sleep(for: .seconds(1.2))
-                done()
+                close()
+            } catch is CancellationError {
+            } catch let e as URLError where e.code == .cancelled {
+            } catch let e as APIError where e.status == 401 {
+                self.error = String(localized: "Sign in to Cloudy first, then share again.") // token revoked or expired
+            } catch let e as APIError where e.status == 404 && folder.id != 0 {
+                // The remembered folder was deleted (or belongs to another account): pick again.
+                folder = Folder(id: 0, name: String(localized: "Files"))
+                folder.remember()
+                self.error = String(localized: "The folder no longer exists. Choose another one.")
             } catch {
                 self.error = errorText(error)
             }

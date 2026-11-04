@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.AlertDialog
@@ -126,7 +127,12 @@ fun DevicesScreen(nav: NavController) {
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<AppPassword>?>(null) }
     var revoking by remember { mutableStateOf<AppPassword?>(null) }
-    suspend fun load() { items = runCatching { Services.api.appPasswords() }.getOrElse { toast(context, it.message ?: context.getString(R.string.failed)); emptyList() } }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    suspend fun load() {
+        runCatching { Services.api.appPasswords() }
+            .onSuccess { items = it; loadError = null }
+            .onFailure { if (items == null) loadError = it.message ?: context.getString(R.string.failed) else toast(context, it.message ?: context.getString(R.string.failed)) }
+    }
     LaunchedEffect(Unit) { load() }
 
     Scaffold(topBar = {
@@ -138,6 +144,7 @@ fun DevicesScreen(nav: NavController) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             val list = items
             when {
+                list == null && loadError != null -> EmptyState(Icons.Outlined.CloudOff, loadError!!) { loadError = null; scope.launch { load() } }
                 list == null -> Loading()
                 list.isEmpty() -> EmptyState(Icons.Outlined.Devices, stringResource(R.string.no_devices))
                 else -> LazyColumn {

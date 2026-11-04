@@ -129,7 +129,7 @@ extension MoreView {
         } catch let e as APIError where e.status == 404 { // servers before 1.12 have no self-service deletion
             deleteError = String(localized: "This server can’t delete accounts yet. Ask its operator to update Cloudy or to delete your account.")
         } catch {
-            deleteError = error.localizedDescription
+            deleteError = errorText(error) // also explains offline / unreachable / certificate problems
         }
     }
 }

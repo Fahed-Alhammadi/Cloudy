@@ -1012,6 +1012,34 @@
         }
       }
     },
+    "Cancel upload" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "إلغاء الرفع"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hochladen abbrechen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Annuler l’envoi"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancelar la subida"
+          }
+        }
+      }
+    },
     "Changes apply to all repeats of this event." : {
       "localizations" : {
         "ar" : {
@@ -1939,6 +1967,34 @@
         }
       }
     },
+    "Dismiss" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "إغلاق"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausblenden"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masquer"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar"
+          }
+        }
+      }
+    },
     "Documents" : {
       "localizations" : {
         "ar" : {
@@ -2779,6 +2835,34 @@
         }
       }
     },
+    "Has events" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "فيه أحداث"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hat Termine"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A des événements"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tiene eventos"
+          }
+        }
+      }
+    },
     "Help" : {
       "localizations" : {
         "ar" : {
@@ -3111,6 +3195,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dernière utilisation : %@"
+          }
+        }
+      }
+    },
+    "Leave share" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مغادرة المشاركة"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigabe verlassen"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quitter le partage"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abandonar el recurso compartido"
           }
         }
       }
@@ -4207,6 +4319,34 @@
         }
       }
     },
+    "Preparing files…" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "جارٍ تجهيز الملفات…"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dateien werden vorbereitet…"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Préparation des fichiers…"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparando los archivos…"
+          }
+        }
+      }
+    },
     "Previous month" : {
       "localizations" : {
         "ar" : {
@@ -4343,6 +4483,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Récents"
+          }
+        }
+      }
+    },
+    "Remove \"%@\" from your shared items?" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "إزالة «%@» من العناصر المشتركة معك؟"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ aus deinen geteilten Elementen entfernen?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retirer « %@ » de vos éléments partagés ?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Quitar «%@» de tus elementos compartidos?"
           }
         }
       }
@@ -4963,6 +5131,34 @@
         }
       }
     },
+    "Shared with you as read-only" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تمت مشاركته معك للقراءة فقط"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur lesend mit dir geteilt"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partagé avec vous en lecture seule"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compartido contigo en solo lectura"
+          }
+        }
+      }
+    },
     "Show password" : {
       "localizations" : {
         "ar" : {
@@ -5355,6 +5551,34 @@
         }
       }
     },
+    "The folder no longer exists. Choose another one." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لم يعد المجلد موجودًا. اختر مجلدًا آخر."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Ordner existiert nicht mehr. Wähle einen anderen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le dossier n’existe plus. Choisissez-en un autre."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La carpeta ya no existe. Elige otra."
+          }
+        }
+      }
+    },
     "The server's HTTPS certificate isn't trusted" : {
       "localizations" : {
         "ar" : {
@@ -5407,6 +5631,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cet appareil"
+          }
+        }
+      }
+    },
+    "This file isn't UTF-8 text, so it can only be viewed here." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "هذا الملف ليس نصًا بترميز UTF-8، لذا يمكن عرضه هنا فقط."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Datei ist kein UTF-8-Text und kann hier nur angezeigt werden."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ce fichier n’est pas du texte UTF-8 : il peut seulement être affiché ici."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Este archivo no es texto UTF-8, así que aquí solo se puede ver."
           }
         }
       }

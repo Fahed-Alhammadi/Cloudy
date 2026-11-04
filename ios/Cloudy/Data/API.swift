@@ -111,7 +111,10 @@ final class API: @unchecked Sendable {
         return try decode(data)
     }
 
-    func logout() async { _ = try? await send("POST", "/api/auth/revoke") }
+    /// Revokes `token` on the server. It is passed in because sign-out clears `self.token` right away.
+    func logout(token: String) async {
+        _ = try? await send("POST", "/api/auth/revoke", headers: ["Authorization": "Bearer \(token)"])
+    }
     func me() async throws -> User { try await get("/api/me") }
     /// Deletes the account and all its data on the server for good (needs the account password).
     func deleteAccount(password: String) async throws { try await sendJSON("POST", "/api/me/delete", ["password": password]) }
@@ -143,8 +146,11 @@ final class API: @unchecked Sendable {
     func createTextFile(_ parentId: Int64, _ name: String) async throws -> FileNode {
         try decode(await sendJSON("POST", "/api/nodes/\(parentId)/files", ["name": name, "content": ""]))
     }
-    func downloadText(_ id: Int64) async throws -> String {
-        String(decoding: try await send("GET", "/api/nodes/\(id)/download?inline"), as: UTF8.self)
+    /// The file's text, or nil when it isn't valid UTF-8 (saving a lossy decoding would corrupt it).
+    func downloadText(_ id: Int64) async throws -> (text: String, utf8: Bool) {
+        let data = try await send("GET", "/api/nodes/\(id)/download?inline")
+        if let s = String(data: data, encoding: .utf8) { return (s, true) }
+        return (String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self), false)
     }
     func saveText(_ id: Int64, _ text: String) async throws {
         try await send("PUT", "/api/nodes/\(id)/content", body: Data(text.utf8), contentType: "text/plain; charset=utf-8")
@@ -183,43 +189,79 @@ final class API: @unchecked Sendable {
         try fm.moveItem(at: tmp, to: dest)
     }
 
-    /// Resumable chunked upload of a local file; returns the new node id.
-    func upload(_ parentId: Int64, name: String, file: URL, progress: @escaping (Int64, Int64) -> Void) async throws -> Int64 {
+    /// Resumable chunked upload of a local file; returns the new node id (nil: the file arrived, but the response that
+    /// would have named it was lost). A chunk whose response got lost (network drop, proxy 5xx, server restart) is
+    /// retried from the offset the server reports, so a chunk it already stored is neither sent twice nor turned into an
+    /// "Offset mismatch" failure.
+    @discardableResult
+    func upload(_ parentId: Int64, name: String, file: URL, progress: @escaping (Int64, Int64) -> Void) async throws -> Int64? {
         let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
         let s: UploadSession = try decode(await sendJSON("POST", "/api/uploads", ["parentId": parentId, "name": name, "size": size]))
-        let fh = try FileHandle(forReadingFrom: file)
-        defer { try? fh.close() }
-        var offset: Int64 = 0
-        while true {
-            try Task.checkCancellation()
-            try fh.seek(toOffset: UInt64(offset))
-            let chunk = try fh.read(upToCount: s.chunkSize) ?? Data()
-            var attempt = 0
-            var result: ChunkResult?
-            while result == nil {
+        do {
+            let fh = try FileHandle(forReadingFrom: file)
+            defer { try? fh.close() }
+            var offset: Int64 = 0
+            var failures = 0
+            while true {
+                try Task.checkCancellation()
+                try fh.seek(toOffset: UInt64(offset))
+                let chunk = try fh.read(upToCount: s.chunkSize) ?? Data()
+                let result: ChunkResult
                 do {
                     result = try decode(await send("PUT", "/api/uploads/\(s.id)", body: chunk, headers: ["Upload-Offset": String(offset)]))
-                } catch let e as URLError where e.code != .cancelled {
-                    attempt += 1
-                    if attempt > 5 { throw e }
-                    try await Task.sleep(nanoseconds: UInt64(1 << attempt) * 1_000_000_000)
+                    failures = 0
+                } catch where API.isTransient(error) {
+                    failures += 1
+                    if failures > 5 { throw error }
+                    try await Task.sleep(nanoseconds: UInt64(1 << failures) * 1_000_000_000)
+                    // Continue from what the server actually has (the lost response may have been a success).
+                    do {
+                        let st: UploadStatus = try await get("/api/uploads/\(s.id)")
+                        offset = st.received
+                    } catch let e as APIError where e.status == 404 && offset + Int64(chunk.count) == size {
+                        // The last chunk went through: the server finished the file and removed the upload.
+                        progress(size, size)
+                        return nil
+                    } catch {
+                        // Status unknown (still offline): try the same chunk again.
+                    }
+                    continue
                 }
+                offset = result.received
+                progress(offset, size)
+                if result.done, let node = result.node { return node.id }
+                if chunk.isEmpty { throw APIError(status: 0, message: String(localized: "File ended before the declared size")) }
             }
-            offset = result!.received
-            progress(offset, size)
-            if result!.done, let node = result!.node { return node.id }
-            if chunk.isEmpty { throw APIError(status: 0, message: String(localized: "File ended before the declared size")) }
+        } catch {
+            // Cancelled or failed for good: let the server drop the partial upload now instead of a day later.
+            let id = s.id
+            Task.detached { try? await API.shared.send("DELETE", "/api/uploads/\(id)") }
+            throw error
         }
+    }
+
+    /// Worth retrying a chunk: the connection failed, the server/proxy was briefly unavailable, or the server is still
+    /// busy with the previous attempt or stored more than we know (these two 409s, word for word from
+    /// server/src/api/files.ts). Other 409s ("Target folder no longer exists") are final and keep the server's message.
+    static func isTransient(_ error: Error) -> Bool {
+        if let e = error as? URLError { return e.code != .cancelled }
+        if let e = error as? APIError {
+            if e.status == 409 { return e.message == "Offset mismatch" || e.message == "Chunk already in progress" }
+            return e.status == 502 || e.status == 503 || e.status == 504
+        }
+        return false
     }
 
     // MARK: live updates (Server-Sent Events); returns when the stream ends
 
-    func streamEvents(_ onEvent: (ChangeEvent) -> Void) async throws {
+    /// `onOpen` runs once the server accepted the stream.
+    func streamEvents(onOpen: () -> Void = {}, _ onEvent: (ChangeEvent) -> Void) async throws {
         var req = try request("GET", "/api/events")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         req.timeoutInterval = 70 // the server pings every 25 s
         let (bytes, res) = try await http.bytes(for: req)
         if let h = res as? HTTPURLResponse, h.statusCode != 200 { throw APIError(status: h.statusCode, message: "HTTP \(h.statusCode)") }
+        onOpen()
         var event = ""
         // `lines` skips blank lines, so each `data:` line (one JSON object) is dispatched on its own.
         for try await line in bytes.lines {

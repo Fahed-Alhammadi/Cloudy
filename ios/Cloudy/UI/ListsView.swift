@@ -19,10 +19,14 @@ struct NodeListView: View {
         }
         .navigationTitle(title)
         .refreshable { await load() }
-        .task { actions.changed = { Task { await load() } }; await load() }
+        .task {
+            actions.changed = { Task { await load() } }
+            actions.canModify = { $0.owner == Session.shared.user?.id } // others' files: their folder isn't ours to change
+            await load()
+        }
         .onLiveChange(shares: kind == .shared, any: kind != .shared) { Task { await load() } }
         .fileActions(actions)
-        .selectionMode(actions, items: nodes ?? [], canModify: { $0.owner == Session.shared.user?.id })
+        .selectionMode(actions, items: nodes ?? [], canModify: actions.canModify)
     }
 
     private var title: LocalizedStringKey {

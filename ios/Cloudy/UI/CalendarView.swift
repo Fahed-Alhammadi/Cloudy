@@ -112,6 +112,9 @@ struct CalendarView: View {
             }
         }
         .padding(.vertical, 4)
+        // Seven columns can't grow with the largest accessibility sizes (numbers turned into "…"); the selected day's
+        // title and events below still use the full size.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in
             if abs(v.translation.width) > abs(v.translation.height) { shift(v.translation.width < 0 ? 1 : -1) }
         })
@@ -128,6 +131,7 @@ struct CalendarView: View {
             VStack(spacing: 3) {
                 Text("\(cal.component(.day, from: day))")
                     .font(.callout.weight(isToday ? .bold : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.6) // never "…" in the 32 pt circle
                     .foregroundStyle(isSelected ? Color.white : isToday ? Color.accentColor : inMonth ? Color.primary : Color.secondary.opacity(0.6))
                     .frame(width: 32, height: 32)
                     .background(isSelected ? Circle().fill(Color.accentColor) : nil)
@@ -141,6 +145,8 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(day.formatted(date: .complete, time: .omitted))
+        .accessibilityValue(dots.isEmpty ? Text(verbatim: "") : Text("Has events"))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func color(_ e: CalEvent) -> Color {
@@ -293,7 +299,15 @@ struct EventEditor: View {
                     }
                 }
             }
-            .onChange(of: start) { old, new in end = end.addingTimeInterval(new.timeIntervalSince(old)) } // keep the duration
+            .onChange(of: start) { old, new in
+                // Keep the duration. All-day events move by whole days: a time interval across a daylight-saving change
+                // is an hour short or long and could land the end on the day before (a 2-day event became 1 day).
+                if allDay, let days = cal.dateComponents([.day], from: cal.startOfDay(for: old), to: cal.startOfDay(for: new)).day {
+                    end = cal.date(byAdding: .day, value: days, to: end) ?? end
+                } else {
+                    end = end.addingTimeInterval(new.timeIntervalSince(old))
+                }
+            }
             .navigationTitle(event == nil ? "New event" : "Edit event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

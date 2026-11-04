@@ -22,6 +22,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import io.cloudy.app.data.AppLock
 import io.cloudy.app.data.Lang
@@ -182,15 +183,19 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoreScreen(nav: NavController) {
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val user by remember { mutableStateOf(Services.session.user.value) }
+    // Observed, so the storage numbers refreshed by /api/me below show without leaving the screen.
+    val u by Services.session.user.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
     var deleteAccount by rememberSaveable { mutableStateOf(false) }
     var chooseLanguage by remember { mutableStateOf(false) }
     var lockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
-    LaunchedEffect(Unit) { runCatching { Services.api.me() }.onSuccess { Services.session.updateUser(it.copy(rootId = it.rootId.takeIf { r -> r > 0 } ?: user?.rootId ?: 0)) } }
-    val u = Services.session.user.value
+    LaunchedEffect(Unit) {
+        runCatching { Services.api.me() }.onSuccess { me ->
+            val known = Services.session.user.value ?: return@onSuccess // signed out meanwhile
+            Services.session.updateUser(me.copy(rootId = me.rootId.takeIf { r -> r > 0 } ?: known.rootId))
+        }
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.more)) }) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
@@ -254,17 +259,16 @@ fun MoreScreen(nav: NavController) {
                 val lockAvailable = remember { AppLock.isAvailable(context) }
                 val confirmTitle = stringResource(R.string.app_lock_turn_on)
                 ListItem(
+                    modifier = Modifier.toggleRow(lockOn, enabled = lockAvailable || lockOn) { on ->
+                        if (!on) { AppLock.setEnabled(context, false); lockOn = false }
+                        // Turning it on asks once, so nobody locks themselves out by accident.
+                        else context.findActivity()?.let { AppLock.confirm(it, confirmTitle) { AppLock.setEnabled(context, true); lockOn = true } }
+                    },
                     colors = itemColors,
                     leadingContent = { Badge(Icons.Outlined.Fingerprint, SettingColor.Green) },
                     headlineContent = { Text(stringResource(R.string.app_lock)) },
                     supportingContent = { Text(stringResource(if (lockAvailable || lockOn) R.string.app_lock_summary else R.string.app_lock_unavailable)) },
-                    trailingContent = {
-                        Switch(lockOn, enabled = lockAvailable || lockOn, onCheckedChange = { on ->
-                            if (!on) { AppLock.setEnabled(context, false); lockOn = false }
-                            // Turning it on asks once, so nobody locks themselves out by accident.
-                            else context.findActivity()?.let { AppLock.confirm(it, confirmTitle) { AppLock.setEnabled(context, true); lockOn = true } }
-                        })
-                    },
+                    trailingContent = { Switch(lockOn, onCheckedChange = null, enabled = lockAvailable || lockOn) },
                 )
                 Entry(R.string.devices, Icons.Outlined.Devices, SettingColor.Indigo, "devices")
             }
@@ -304,7 +308,9 @@ fun MoreScreen(nav: NavController) {
     if (deleteAccount) DeleteAccountDialog { deleteAccount = false }
     if (confirmLogout) ConfirmDialog(stringResource(R.string.log_out), stringResource(R.string.log_out_text), stringResource(R.string.log_out), { confirmLogout = false }) {
         confirmLogout = false
-        scope.launch { Services.api.logout(); Services.session.signOut() }
+        // Signed out at once; the token is revoked in the background (no waiting for a slow or missing network).
+        val server = Services.session.server
+        Services.session.signOut()?.let { token -> Services.appScope.launch { Services.api.revoke(server, token) } }
     }
 }
 
@@ -342,6 +348,7 @@ fun DeleteAccountDialog(onDismiss: () -> Unit) {
                     try {
                         Services.api.deleteAccount(password)
                         BackupSettings(context).enabled = false
+                        Jobs.schedule(context) // cancels the backup job
                         Services.offline.clearAll()
                         Services.session.signOut()
                         toast(context, done)
@@ -363,11 +370,12 @@ fun DeleteAccountDialog(onDismiss: () -> Unit) {
 fun BackupScreen(nav: NavController) {
     val context = LocalContext.current
     val settings = remember { BackupSettings(context) }
-    var enabled by remember { mutableStateOf(settings.enabled) }
+    // The switch stays on while the "existing photos" question is open; both survive rotation.
+    var enabled by rememberSaveable { mutableStateOf(settings.enabled) }
     var wifiOnly by remember { mutableStateOf(settings.wifiOnly) }
     var videos by remember { mutableStateOf(settings.includeVideos) }
     var folder by remember { mutableStateOf(settings.folder) }
-    var askExisting by remember { mutableStateOf(false) }
+    var askExisting by rememberSaveable { mutableStateOf(false) }
 
     fun apply() {
         settings.enabled = enabled; settings.wifiOnly = wifiOnly; settings.includeVideos = videos
@@ -384,16 +392,17 @@ fun BackupScreen(nav: NavController) {
     }) { pad ->
         Column(Modifier.padding(pad).padding(horizontal = 8.dp)) {
             ListItem(headlineContent = { Text(stringResource(R.string.backup_auto)) }, supportingContent = { Text(stringResource(R.string.backup_auto_summary)) },
-                trailingContent = {
-                    Switch(enabled, { on ->
-                        if (on) {
-                            enabled = true
-                            if (Jobs.hasMediaPermission(context)) askExisting = true else permission.launch(Jobs.mediaPermissions())
-                        } else { enabled = false; apply() }
-                    })
-                })
-            ListItem(headlineContent = { Text(stringResource(R.string.backup_videos)) }, trailingContent = { Switch(videos, { videos = it; apply() }) })
-            ListItem(headlineContent = { Text(stringResource(R.string.backup_wifi)) }, trailingContent = { Switch(wifiOnly, { wifiOnly = it; apply() }) })
+                modifier = Modifier.toggleRow(enabled) { on ->
+                    if (on) {
+                        enabled = true
+                        if (Jobs.hasMediaPermission(context)) askExisting = true else permission.launch(Jobs.mediaPermissions())
+                    } else { enabled = false; apply() }
+                },
+                trailingContent = { Switch(enabled, onCheckedChange = null) })
+            ListItem(headlineContent = { Text(stringResource(R.string.backup_videos)) }, modifier = Modifier.toggleRow(videos) { videos = it; apply() },
+                trailingContent = { Switch(videos, onCheckedChange = null) })
+            ListItem(headlineContent = { Text(stringResource(R.string.backup_wifi)) }, modifier = Modifier.toggleRow(wifiOnly) { wifiOnly = it; apply() },
+                trailingContent = { Switch(wifiOnly, onCheckedChange = null) })
             OutlinedTextField(folder, { folder = it; apply() }, label = { Text(stringResource(R.string.backup_folder)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             Button(enabled = enabled, onClick = { apply(); Jobs.backupNow(context); toast(context, context.getString(R.string.backup_started)) }, modifier = Modifier.padding(16.dp)) { Text(stringResource(R.string.backup_now)) }
             if (settings.lastRun > 0) Text(stringResource(R.string.backup_last_run, DateFormat.getDateTimeInstance().format(Date(settings.lastRun)), settings.lastResult),

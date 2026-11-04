@@ -51,6 +51,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,7 +122,10 @@ fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (File
             val isSelected = selected?.contains(node.id) == true
             Column(Modifier.clip(RoundedCornerShape(18.dp))
                 .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                .combinedClickable(onClick = { onOpen(node) }, onLongClick = { onActions(node) }).padding(4.dp)) {
+                .combinedClickable(onClick = { onOpen(node) }, onLongClick = { onActions(node) })
+                // While selecting, TalkBack says whether each tile is ticked (the list rows have a checkbox for it).
+                .then(if (selected != null) Modifier.semantics { this.selected = isSelected } else Modifier)
+                .padding(4.dp)) {
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(iconFor(node).second.copy(alpha = 0.10f)),
                     contentAlignment = Alignment.Center) {
                     // Thumbnails for images (Coil downsamples and caches); other types show their icon.

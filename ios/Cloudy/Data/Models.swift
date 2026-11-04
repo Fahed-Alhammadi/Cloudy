@@ -100,6 +100,12 @@ struct UploadSession: Codable {
     var received: Int64?
 }
 
+/// `GET /api/uploads/{id}`: how much of an unfinished upload the server has.
+struct UploadStatus: Codable {
+    var received: Int64
+    var size: Int64?
+}
+
 struct UploadedNode: Codable {
     var id: Int64
     var name: String
@@ -217,6 +223,33 @@ struct ImportResult: Codable {
     var duplicates: Int?
     var skipped: Int?
     var errors: [String]?
+}
+
+// MARK: - Local file names
+
+/// A file name from the server (or another app) as exactly one path component, so it can't point outside the folder
+/// it is put in: a malicious server, or anyone in the middle of a local-network http:// connection, could otherwise send
+/// "../../Library/Preferences/x.plist". Same rules as the desktop client's `checkName`: `/`, `\`, NUL (and other control
+/// characters) become "_", and "", "." and ".." become `fallback`. Long names are cut to the 255-byte file-system limit,
+/// keeping the extension.
+func safeFileName(_ name: String, fallback: String = "file") -> String {
+    var s = String(String.UnicodeScalarView(name.unicodeScalars.map { c in
+        c == "/" || c == "\\" || c.value < 0x20 || c.value == 0x7F ? "_" : c
+    }))
+    if s.isEmpty || s == "." || s == ".." { s = fallback }
+    if s.utf8.count > 255 {
+        let ext = (s as NSString).pathExtension
+        let tail = ext.isEmpty || ext.utf8.count > 16 ? "" : "." + ext
+        var base = String(s.dropLast(tail.count))
+        while base.utf8.count + tail.utf8.count > 255 { base.removeLast() }
+        s = base + tail
+    }
+    return s
+}
+
+/// Ids and etags used in local paths and cache keys: ASCII letters, digits, "_" and "-" only.
+func safeToken(_ s: String) -> String {
+    String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-") }))
 }
 
 // MARK: - Dates

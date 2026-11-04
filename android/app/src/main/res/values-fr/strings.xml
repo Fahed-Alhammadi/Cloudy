@@ -285,4 +285,8 @@
     <string name="help">Aide</string>
     <string name="send_feedback">Envoyer un commentaire</string>
     <string name="rate_app">Noter Cloudy</string>
+    <string name="try_again">Réessayer</string>
+    <string name="purge_confirm">« %1$s » sera supprimé définitivement.</string>
+    <string name="trash_note">Les éléments supprimés sont effacés définitivement après %1$d jours.</string>
+    <string name="no_app_found">Aucune application de cet appareil ne peut ouvrir ceci</string>
 </resources>

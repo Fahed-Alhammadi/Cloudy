@@ -285,4 +285,8 @@
     <string name="help">Ayuda</string>
     <string name="send_feedback">Enviar comentarios</string>
     <string name="rate_app">Valorar Cloudy</string>
+    <string name="try_again">Reintentar</string>
+    <string name="purge_confirm">«%1$s» se eliminará para siempre.</string>
+    <string name="trash_note">Los elementos eliminados se borran definitivamente tras %1$d días.</string>
+    <string name="no_app_found">Ninguna app de este dispositivo puede abrir esto</string>
 </resources>
