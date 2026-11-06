@@ -58,7 +58,7 @@ src/main/main.ts      tray, window, IPC handlers, login item
 src/main/sync.ts      sync engine
 src/main/api.ts       Cloudy API client (chunked upload, download, SSE)
 src/main/store.ts     settings.json / sync-state.json (userData), token encryption
-src/main/updater.ts   updates from the newest GitHub release (desktop-X.Y.Z, older ones desktop-vX.Y.Z) (electron-updater, generic feed)
+src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z; the bridge release after 1.2.0 also desktop-vX.Y.Z) (electron-updater, generic feed)
 src/main/i18n.ts      t() + LANGUAGES; translations in i18n/<lang>.json (English keys, as on the web)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
 src/ui/               settings window (plain HTML/JS/CSS, no framework)

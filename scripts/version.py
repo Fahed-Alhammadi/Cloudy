@@ -28,7 +28,7 @@ FILES = {
     'ios': ('ios/project.yml', r'MARKETING_VERSION: "([^"]+)"', r'CURRENT_PROJECT_VERSION: "(\d+)"'),
     'desktop': ('desktop/package.json', r'^  "version": "([^"]+)"', None),
 }
-# Release tag of each product: <product>-X.Y.Z. Older tags were <product>-vX.Y.Z; they count as released versions too.
+# Release tag of each product: <product>-X.Y.Z. <product>-vX.Y.Z (renamed 2026-11-06) is still read.
 PREFIX = {p: f'{p}-' for p in FILES}
 LEGACY = {p: [f'{p}-v'] for p in FILES}
 # What to update with a bump: the store release notes (sent with each upload) and the server changelog for admins.

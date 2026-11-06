@@ -128,8 +128,8 @@ what changed since their last sync.
 
 Each product has its own version and is released by pushing its tag: `server-X.Y.Z` (container image),
 `android-X.Y.Z` (Google Play), `ios-X.Y.Z` (App Store) and `desktop-X.Y.Z` (GitHub release titled `vX.Y.Z`). Only the
-desktop app gets GitHub releases; server changes are in [CHANGELOG.md](../CHANGELOG.md). Older tags are
-`<product>-vX.Y.Z`, and `v1.0.0`–`v1.10.0` are server + Android releases from before the split.
+desktop app gets GitHub releases; server changes are in [CHANGELOG.md](../CHANGELOG.md). Releases from before the
+products were split (1.1.0–1.10.0, server and Android together) carry both a `server-` and an `android-` tag.
 
 - **Server:** `ghcr.io/fahed-alhammadi/cloudy:X.Y.Z` and `:latest`. `docker compose pull && docker compose up -d`
   updates it. `/status` reports the running version. The database and `/data` live in volumes, and the schema is
@@ -137,7 +137,7 @@ desktop app gets GitHub releases; server changes are in [CHANGELOG.md](../CHANGE
 - **Android and iPhone:** updated by Google Play and the App Store (TestFlight during the beta). The apps have no
   updater of their own.
 - **Desktop:** each version is a GitHub release with every package and electron-updater's `latest*.yml` files. The
-  app asks the GitHub API for the newest release (`desktop-*`, or `desktop-v*` for the older ones),
+  app asks the GitHub API for the newest release (`desktop-X.Y.Z`; the first one after 1.2.0 is `desktop-vX.Y.Z` for older apps),
   points electron-updater at that release, downloads in the background (SHA-512 checked) and installs on restart or
   quit. macOS builds are signed with a Developer ID and notarized.
 
