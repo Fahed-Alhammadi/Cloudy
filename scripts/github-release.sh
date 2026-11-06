@@ -42,7 +42,7 @@ if [ "$2" = desktop ]; then
       git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}HEAD -- desktop
       [ -n "$prev" ] && echo && echo "Since $prev."
     } > release-notes.md
-    gh release create "$release_tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "Cloudy Desktop $version" \
+    gh release create "$release_tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "$release_tag" \
       --notes-file release-notes.md --latest
     echo "Released $release_tag"
   fi
