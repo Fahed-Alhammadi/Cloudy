@@ -1,5 +1,5 @@
-// Updates from GitHub releases. Only the desktop app has releases (tagged vX.Y.Z; up to the first one after 1.2.0
-// desktop-vX.Y.Z, which older apps look for). The newest one is looked up first and electron-updater reads its
+// Updates from GitHub releases. Only the desktop app has releases, tagged vX.Y.Z (the first one after 1.2.0 is
+// desktop-vX.Y.Z: apps up to 1.2.0 only look for that prefix). The newest one is looked up first and electron-updater reads its
 // latest*.yml from that release (generic provider).
 // macOS (zip), Windows (NSIS installer) and Linux (AppImage, .deb) download in the background, check the SHA-512 and
 // install on restart or quit. Development builds only report.

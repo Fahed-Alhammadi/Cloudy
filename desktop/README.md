@@ -82,6 +82,6 @@ New texts: wrap them in `t('…')` and add them to all four `i18n/*.json` files 
 ## Updates
 
 New versions are published as GitHub releases tagged `vX.Y.Z` (the desktop app is the only product with GitHub
-releases), with all packages and the `latest*.yml` update files. Versions up to 1.2.0 were tagged `desktop-vX.Y.Z`,
-and those installs only look for that prefix, so the first release after 1.2.0 keeps it; the updater accepts both. It updates itself on macOS (from the `.zip`), on Windows, from an AppImage and from a
+releases), with all packages and the `latest*.yml` update files. Installed versions up to 1.2.0 only look for
+releases tagged `desktop-vX.Y.Z`, so the first release after 1.2.0 keeps that prefix; the updater accepts both. It updates itself on macOS (from the `.zip`), on Windows, from an AppImage and from a
 `.deb`. The macOS packages are signed with a Developer ID and notarized; the Windows installer is not signed yet.

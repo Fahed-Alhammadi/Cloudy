@@ -27,7 +27,13 @@ if [ "$2" = desktop ]; then
   release_tag=$tag
   # Desktop 1.2.0 and older only look for releases tagged desktop-v…: the first release after it keeps that prefix
   # (it brings the updater that also reads v… tags), so those installs still find it. Later releases are plain v….
-  case "$prev" in desktop-v1.2.0 | "desktop-v$version") release_tag="desktop-v$version" ;; esac
+  # (Older releases were renamed to v… on 2026-11-06, so this goes by the newest release's version, not its name.)
+  prev_version=${prev#desktop-}
+  prev_version=${prev_version#v}
+  if [ -n "$prev_version" ] && [ "$(printf '%s\n' "$prev_version" 1.2.0 | sort -V | tail -1)" = 1.2.0 ]; then
+    release_tag="desktop-v$version"
+  fi
+  [ "$prev" = "desktop-v$version" ] && release_tag=$prev # a re-run after the bridge release was made
   if [ "$prev" = "$release_tag" ]; then
     echo "Release $release_tag already exists"
   else

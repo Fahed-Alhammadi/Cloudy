@@ -128,7 +128,7 @@ what changed since their last sync.
 
 All products share one version line. A release is one tag `vX.Y.Z` and contains the products bumped for it (the
 others keep the version they last shipped with). Only the desktop app gets GitHub releases; server changes are in
-[CHANGELOG.md](../CHANGELOG.md). Tags from before 2026-11-06 are `server-v…`, `android-v…`, `ios-v…` and `desktop-v…`.
+[CHANGELOG.md](../CHANGELOG.md). Tags from 2026-10-25 to 2026-11-04 are `server-v…`, `android-v…` and `ios-v…`; the desktop releases from then were renamed to `v…`.
 
 - **Server:** `ghcr.io/fahed-alhammadi/cloudy:X.Y.Z` and `:latest`. `docker compose pull && docker compose up -d`
   updates it. `/status` reports the running version. The database and `/data` live in volumes, and the schema is
