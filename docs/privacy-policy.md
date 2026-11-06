@@ -1,5 +1,7 @@
 ---
+layout: default
 title: Privacy Policy
+description: How the Cloudy apps for Android, iPhone and desktop handle your information.
 ---
 
 # Privacy Policy

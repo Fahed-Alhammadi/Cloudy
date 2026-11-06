@@ -1,30 +1,55 @@
-<p align="center">
-  <img src="docs/logo.svg" alt="Cloudy logo" width="128" height="128">
-</p>
+<p align="center"><img src="docs/logo.svg" alt="" width="88"></p>
 
 <h1 align="center">Cloudy</h1>
 
+<p align="center">A cloud you host yourself.<br>Files, sharing, calendars and contacts on your own server, with apps for your phone and your computer.</p>
+
 <p align="center">
-  Your own cloud for files, sharing, calendars and contacts, on a server you run yourself.<br>
-  <a href="https://fahed-alhammadi.github.io/Cloudy/"><b>Website, screenshots and downloads</b></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/tag/Fahed-Alhammadi/Cloudy?sort=semver&label=version&color=0A55C4" alt="Latest version"></a>
+  <a href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest"><img src="https://img.shields.io/github/v/release/Fahed-Alhammadi/Cloudy?label=desktop&color=0A55C4" alt="Latest desktop app release"></a>
+  <a href="https://play.google.com/store/apps/details?id=io.cloudy.app"><img src="https://img.shields.io/badge/Google%20Play-Android-0A55C4" alt="Get it on Google Play"></a>
+  <a href="https://testflight.apple.com/join/X1M6sYZm"><img src="https://img.shields.io/badge/TestFlight-iPhone%20beta-0A55C4" alt="Join the iPhone beta on TestFlight"></a>
+  <a href="https://github.com/Fahed-Alhammadi/Cloudy/actions/workflows/server.yml"><img src="https://github.com/Fahed-Alhammadi/Cloudy/actions/workflows/server.yml/badge.svg?branch=main" alt="Server tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-062B66" alt="MIT License"></a>
 </p>
 
-Cloudy is **one container** (server and database inside) plus apps for every device. The server is free and open
-source, and the apps talk only to your server: no ads, no analytics, no tracking.
+<p align="center">
+  <a href="https://fahed-alhammadi.github.io/Cloudy/">Website</a> ·
+  <a href="#install">Install</a> ·
+  <a href="CHANGELOG.md">What's new</a> ·
+  <a href="docs/ARCHITECTURE.md">How it works</a> ·
+  <a href="https://fahed-alhammadi.github.io/Cloudy/support.html">Support</a>
+</p>
+
+<p align="center"><img src="docs/screenshots/overview.png" alt="The Cloudy desktop app, the Android app and the iPhone app showing the same files." width="860"></p>
+
+## Why Cloudy
+
+- **Your server, your data.** One container with the database, the web app and office previews inside. Your files
+  never pass through anyone else's servers.
+- **Every device.** Web app, Android, iPhone, and a sync app for Mac, Windows and Linux. Changes show up everywhere
+  within seconds.
+- **More than files.** Calendars, contacts, photo backup, document scanning and sharing links, in one place.
+- **Works with the apps you have.** WebDAV, CalDAV and CardDAV for Finder, Windows Explorer, rclone, Thunderbird,
+  DAVx⁵ and Apple Calendar and Contacts.
+- **No ads, no analytics, no tracking.** Free and open source under the MIT License.
 
 ## Apps
 
-| App | Get it | What it does |
+| App | What it does | Get it |
 |---|---|---|
-| **Web** | built into the server | Files, sharing, calendar, contacts, administration |
-| **Android** | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) | Files, offline files, photo backup, document scanner, calendar, contacts |
-| **iPhone** | [TestFlight beta](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock |
-| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) (GitHub releases) | Keeps a folder on your computer in sync with your files |
-| **Other apps** | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar/Contacts |
+| Web | Files, sharing, calendar, contacts, administration | Built into every server |
+| Android | Files, offline files, photo backup, document scanner, calendar, contacts | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) |
+| iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
+| Mac, Windows, Linux | Keeps a folder on your computer in sync with your files | [Releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) |
+| Other apps | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar and Contacts |
 
-Desktop downloads: `.dmg` (macOS, Apple silicon or Intel) or `.pkg` (all Macs), `.exe` (Windows), `.AppImage` or
-`.deb` (Linux). The Mac app is signed and notarized by Apple. The Windows installer isn't signed yet, so Windows may
-show "Unknown publisher" the first time. The desktop app updates itself.
+### Desktop app
+
+Download from the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest): `.dmg` (Apple silicon
+`arm64` or Intel `x64`) or `.pkg` (all Macs), `.exe` (Windows), `.AppImage` or `.deb` (Linux). The Mac app is signed
+and notarized by Apple, so it opens without warnings. The Windows installer isn't signed yet: Windows may show
+"Unknown publisher" the first time; choose "More info" → "Run anyway". The app updates itself.
 
 More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · [Desktop](desktop/README.md).
 
@@ -174,8 +199,9 @@ The database schema migrates itself at startup. Your data stays in the volumes. 
 version, and anything you need to do before updating, is in [CHANGELOG.md](CHANGELOG.md).
 
 **Apps.** Android and iPhone update through Google Play and the App Store (TestFlight for the beta). The desktop app
-checks GitHub once a day for a new version, downloads it in the background and installs it when you restart or quit
-(*Settings → Check for updates* checks right away).
+checks GitHub once a day for a new version and downloads it in the background. On a Mac it's installed when you
+restart or quit Cloudy; on Windows and Linux choose *Restart to update* in the menu (*Settings → Check for updates*
+checks right away).
 
 ## Two-factor authentication
 
@@ -280,6 +306,15 @@ scripts/             versions and release helpers
 .github/workflows/   one workflow per product (test, build, publish), release.yml (tags vX.Y.Z), translations.yml
 ```
 
+## Support
+
+Questions and bug reports: [GitHub Issues](https://github.com/Fahed-Alhammadi/Cloudy/issues). Please don't include
+passwords, server addresses or personal files. More help: [support page](https://fahed-alhammadi.github.io/Cloudy/support.html).
+
 ## License
 
-[MIT](LICENSE) © 2026 Fahed Alhammadi
+Cloudy is released under the [MIT License](LICENSE). © 2026 Fahed Alhammadi
+
+The website uses the [IBM Plex](https://github.com/IBM/plex) fonts, licensed under the
+[SIL Open Font License 1.1](https://openfontlicense.org). Dependencies keep their own licenses (see the
+`package-lock.json` files and the apps' build files).

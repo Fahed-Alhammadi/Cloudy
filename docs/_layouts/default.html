@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title }} — Cloudy</title>
+{% if page.description %}<meta name="description" content="{{ page.description }}">{% endif %}
+<meta name="theme-color" content="#062b66">
+<link rel="icon" type="image/svg+xml" href="{{ '/logo.svg' | relative_url }}">
+<link rel="preload" href="{{ '/assets/fonts/ibm-plex-sans-latin-400-normal.woff2' | relative_url }}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ '/assets/fonts/ibm-plex-sans-latin-600-normal.woff2' | relative_url }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/logo.svg' | relative_url }}" alt="" width="30" height="30"><span>Cloudy</span></a>
+    <nav aria-label="Main">
+      <a class="opt" href="{{ '/#features' | relative_url }}">Features</a>
+      <a class="opt" href="{{ '/#security' | relative_url }}">Privacy</a>
+      <a href="{{ '/#install' | relative_url }}">Self-host</a>
+      <a href="{{ '/#apps' | relative_url }}">Apps</a>
+      <a href="https://github.com/Fahed-Alhammadi/Cloudy">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main id="main" class="doc">
+  <div class="wrap">
+{{ content }}
+  </div>
+</main>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/logo.svg' | relative_url }}" alt="" width="25" height="25"><span>Cloudy</span></a>
+    <span class="grow">© Fahed Alhammadi. Open source under the MIT License.</span>
+    <nav aria-label="Footer">
+      <a href="{{ '/privacy-policy.html' | relative_url }}"{% if page.url == '/privacy-policy.html' %} aria-current="page"{% endif %}>Privacy policy</a>
+      <a href="{{ '/support.html' | relative_url }}"{% if page.url == '/support.html' %} aria-current="page"{% endif %}>Support</a>
+      <a href="https://github.com/Fahed-Alhammadi/Cloudy">GitHub</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,167 +1,202 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cloudy — your own cloud</title>
-  <meta name="description" content="Cloudy is a self-hosted cloud for files, sharing, calendars and contacts, with Android and iPhone apps and a desktop sync app for macOS, Windows and Linux.">
-  <link rel="icon" href="logo.svg" type="image/svg+xml">
-  <style>
-    :root {
-      --bg: #f7f9fc; --surface: #ffffff; --text: #1b2330; --muted: #5a6678;
-      --border: #e2e7ef; --accent: #2f7cf6; --accent-text: #ffffff;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #11151c; --surface: #1a2029; --text: #e7ecf3; --muted: #9aa6b8;
-        --border: #2a323e; --accent: #5b9bff; --accent-text: #0b1220;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; background: var(--bg); color: var(--text);
-      font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    }
-    a { color: var(--accent); }
-    .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
-    header { text-align: center; padding: 56px 0 32px; }
-    header img { width: 96px; height: 96px; }
-    h1 { font-size: 2.4rem; margin: 12px 0 4px; }
-    .tagline { color: var(--muted); font-size: 1.15rem; margin: 0 auto 24px; max-width: 560px; }
-    .buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
-    .btn {
-      display: inline-block; padding: 10px 20px; border-radius: 999px; text-decoration: none;
-      font-weight: 600; border: 1px solid var(--border); color: var(--text); background: var(--surface);
-    }
-    .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-    section { padding: 32px 0; }
-    h2 { font-size: 1.5rem; margin: 0 0 16px; }
-    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; }
-    .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
-    .card p { margin: 0; color: var(--muted); }
-    .tag { font-size: .75rem; font-weight: 600; color: var(--muted); border: 1px solid var(--border); border-radius: 999px;
-           padding: 1px 8px; margin-inline-start: 6px; vertical-align: middle; }
-    .note { color: var(--muted); font-size: .9rem; margin: 12px 0 0; }
-    .shots { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x mandatory; }
-    .shots figure { margin: 0; flex: 0 0 220px; scroll-snap-align: start; text-align: center; }
-    .shots img {
-      width: 220px; height: auto; border-radius: 18px; border: 1px solid var(--border);
-      background: var(--surface); display: block;
-    }
-    .shots.desktop figure { flex-basis: 360px; }
-    .shots.desktop img { width: 360px; border-radius: 10px; }
-    section > h3 { margin: 18px 0 10px; }
-    .shots figcaption { color: var(--muted); font-size: .9rem; margin-top: 6px; }
-    ul.plain { padding-left: 20px; margin: 0; }
-    footer {
-      border-top: 1px solid var(--border); margin-top: 32px; padding: 24px 0 40px;
-      color: var(--muted); font-size: .95rem; text-align: center;
-    }
-    footer nav { display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-bottom: 8px; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloudy — your own cloud</title>
+<meta name="description" content="Cloudy is a cloud you host yourself: files, sharing, calendars and contacts on your own server, with apps for Android, iPhone, Mac, Windows and Linux.">
+<meta property="og:title" content="Cloudy — your own cloud">
+<meta property="og:description" content="Files, sharing, calendars and contacts on a server you run, with apps for every device.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://fahed-alhammadi.github.io/Cloudy/">
+<meta property="og:image" content="https://fahed-alhammadi.github.io/Cloudy/play/feature-graphic.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://fahed-alhammadi.github.io/Cloudy/">
+<meta name="theme-color" content="#062b66">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="preload" href="assets/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/ibm-plex-sans-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/site.css">
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
   <div class="wrap">
-    <header>
-      <img src="logo.svg" alt="Cloudy logo">
-      <h1>Cloudy</h1>
-      <p class="tagline">Your own cloud for files, sharing, calendars and contacts — on a server you run yourself.</p>
-      <div class="buttons">
-        <a class="btn primary" href="https://play.google.com/store/apps/details?id=io.cloudy.app">Get it on Google Play</a>
-        <a class="btn primary" href="https://testflight.apple.com/join/X1M6sYZm">Join the iPhone beta (TestFlight)</a>
-        <a class="btn primary" href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest">Download for Mac, Windows and Linux</a>
-        <a class="btn" href="https://github.com/Fahed-Alhammadi/Cloudy">Source code</a>
-        <a class="btn" href="privacy-policy.html">Privacy policy</a>
-      </div>
-      <p class="note">The iPhone app is in public beta on TestFlight until it reaches the App Store.</p>
-    </header>
-
-    <section>
-      <h2>About the app</h2>
-      <p>
-        Cloudy has apps for Android, iPhone and the desktop (macOS, Windows and Linux) for a self-hosted <strong>Cloudy
-        server</strong>. You sign in to a server that you, your company or someone you trust runs, and the apps talk only
-        to that server. The developer never receives your files, photos, calendars or contacts. The apps have no ads, no
-        analytics and no tracking.
-      </p>
-      <p>
-        The desktop app keeps a folder on your computer in sync with your Cloudy files. The server is
-        free and open source and runs as a single Docker container. It also includes a web app and WebDAV, CalDAV and
-        CardDAV support for other apps.
-      </p>
-    </section>
-
-    <section>
-      <h2>Screenshots</h2>
-      <h3>Android</h3>
-      <div class="shots">
-        <figure><img src="screenshots/files.png" alt="File browser" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Files</figcaption></figure>
-        <figure><img src="screenshots/preview.png" alt="Text editor" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Text editor</figcaption></figure>
-        <figure><img src="screenshots/sharing.png" alt="Sharing a file" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Sharing</figcaption></figure>
-        <figure><img src="screenshots/photos.png" alt="Photo backup settings" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Photo backup</figcaption></figure>
-        <figure><img src="screenshots/calendar.png" alt="Calendar" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Calendar</figcaption></figure>
-        <figure><img src="screenshots/contacts.png" alt="Contacts" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Contacts</figcaption></figure>
-        <figure><img src="screenshots/more.png" alt="More screen: favorites, shared files, trash and settings" loading="lazy" onerror="this.parentElement.remove()"><figcaption>More</figcaption></figure>
-      </div>
-          <h3>iPhone</h3>
-      <div class="shots">
-        <figure><img src="screenshots/iphone/files.jpg" alt="File browser" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Files</figcaption></figure>
-        <figure><img src="screenshots/iphone/photos.jpg" alt="Photos folder in a grid with thumbnails" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Grid view</figcaption></figure>
-        <figure><img src="screenshots/iphone/share.jpg" alt="Sharing a file" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Sharing</figcaption></figure>
-        <figure><img src="screenshots/iphone/editor.jpg" alt="Text editor" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Text editor</figcaption></figure>
-        <figure><img src="screenshots/iphone/calendar.jpg" alt="Calendar" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Calendar</figcaption></figure>
-        <figure><img src="screenshots/iphone/contacts.jpg" alt="Contacts" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Contacts</figcaption></figure>
-        <figure><img src="screenshots/iphone/more.jpg" alt="More tab: favorites, shared files, trash and settings" loading="lazy" onerror="this.parentElement.remove()"><figcaption>More</figcaption></figure>
-      </div>
-      <h3>Mac, Windows and Linux</h3>
-      <div class="shots desktop">
-        <figure><img src="screenshots/desktop.png" alt="Desktop app: sync status, folders to sync and recent activity" loading="lazy" onerror="this.parentElement.remove()"><figcaption>Desktop sync</figcaption></figure>
-      </div>
-    </section>
-
-    <section>
-      <h2>Features</h2>
-      <div class="features">
-        <div class="card"><h3>Files</h3><p>Browse, upload, download, rename, move and delete files and folders, in a list or a grid with thumbnails. Long-press to select several files and act on them at once. Favorites, recent files, search with type filters, and trash.</p></div>
-        <div class="card"><h3>Previews</h3><p>Images, video, audio, PDF and read-only Word, Excel and PowerPoint documents. Text files can be edited.</p></div>
-        <div class="card"><h3>Sharing</h3><p>Share with users and groups, or create public links with a password and an expiry date.</p></div>
-        <div class="card"><h3>Document scanner</h3><p>Scan paper documents to a PDF and upload it straight into a folder.</p></div>
-        <div class="card"><h3>Share to Cloudy</h3><p>Cloudy is in every app's share sheet: send photos, videos and files from any app straight into a folder on your server.</p></div>
-        <div class="card"><h3>Offline files<span class="tag">Android</span></h3><p>Mark files as available offline and open them without a connection.</p></div>
-        <div class="card"><h3>Photo backup<span class="tag">Android</span></h3><p>Upload new photos and videos to your server automatically, on Wi-Fi only if you like.</p></div>
-        <div class="card"><h3>Calendar and contacts</h3><p>View and edit events and contacts. Import contacts from .vcf or .csv files and export them as .vcf.</p></div>
-        <div class="card"><h3>Desktop sync<span class="tag">Mac · Windows · Linux</span></h3><p>A Cloudy folder on your computer that stays in sync both ways. Choose which folders to sync. Renames and moves aren't transferred again, edits in two places keep both copies, and deleted files go to the trash. It updates itself.</p></div>
-        <div class="card"><h3>Live updates</h3><p>File lists refresh by themselves when something changes on another device.</p></div>
-        <div class="card"><h3>Security</h3><p>Optional app lock with Face ID, fingerprint or screen lock, two-factor authentication, a list of signed-in devices you can revoke, and HTTPS connections to your server.</p></div>
-        <div class="card"><h3>Your language</h3><p>English, العربية, Deutsch, Français and Español, chosen in the app and shared with the web interface.</p></div>
-      </div>
-    </section>
-
-    <section>
-      <h2>Getting started</h2>
-      <ul class="plain">
-        <li>Run a Cloudy server (see the <a href="https://github.com/Fahed-Alhammadi/Cloudy#install">install guide</a>), or get an account from someone who runs one.</li>
-        <li><strong>Android:</strong> install Cloudy from <a href="https://play.google.com/store/apps/details?id=io.cloudy.app">Google Play</a>.</li>
-        <li><strong>iPhone:</strong> install Apple's <a href="https://apps.apple.com/app/testflight/id899247664">TestFlight</a> app, then open
-          <a href="https://testflight.apple.com/join/X1M6sYZm">the Cloudy beta invitation</a> on your iPhone and tap <em>Accept</em> and <em>Install</em>.</li>
-        <li><strong>Mac, Windows, Linux:</strong> download Cloudy from the <a href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest">releases page</a>: the
-          <code>.dmg</code> (Apple silicon <code>arm64</code> or Intel <code>x64</code>) or <code>.pkg</code> for a Mac, the
-          <code>.exe</code> for Windows, the <code>.AppImage</code> or <code>.deb</code> for Linux. It appears in the menu bar or
-          system tray.</li>
-        <li>Open the app and enter your server address, username and password. On the desktop, then choose the folder to sync.</li>
-        <li>Optional on Android: turn on photo backup and choose folders to keep offline.</li>
-      </ul>
-    </section>
-
-    <footer>
-      <nav>
-        <a href="privacy-policy.html">Privacy policy</a>
-        <a href="https://github.com/Fahed-Alhammadi/Cloudy">GitHub</a>
-        <a href="mailto:alhammadi.team@gmail.com">Contact</a>
-      </nav>
-      <div>© 2026 Fahed Alhammadi</div>
-    </footer>
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="30" height="30"><span>Cloudy</span></a>
+    <nav aria-label="Main">
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#security">Privacy</a>
+      <a href="#install">Self-host</a>
+      <a href="#apps">Apps</a>
+      <a href="https://github.com/Fahed-Alhammadi/Cloudy">GitHub</a>
+    </nav>
   </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <h1>Your files, calendars and contacts, on your own server.</h1>
+        <p>Cloudy is a cloud you run yourself: one container on your own machine, with apps for your phone and your computer. Your data stays on your server.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="#install">Install the server</a>
+          <a class="btn btn-line" href="#apps">Get the apps</a>
+        </div>
+        <p class="fine">Free and open source under the MIT License. No ads, no analytics, no tracking.</p>
+      </div>
+
+      <figure class="devices">
+        <div class="stage">
+          <img class="desk" src="screenshots/desktop.png" width="560" height="648" alt="The Cloudy desktop app: sync status, the folders being synced and recent changes.">
+          <img class="android" src="screenshots/files.png" width="1080" height="2400" alt="The Cloudy Android app showing a list of folders and files.">
+          <img class="iphone" src="screenshots/iphone/files.jpg" width="460" height="1000" alt="The Cloudy iPhone app showing the same files.">
+        </div>
+        <figcaption>The same files on your computer, your Android phone and your iPhone, updated within seconds when something changes.</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Everything you keep in a cloud</h2>
+      <p class="lead">Store and share files, back up your photos, and keep your calendar and contacts in sync, from the browser, the Cloudy apps or the apps you already use.</p>
+      <ul class="features">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></svg><h3>Files</h3><p>Upload whole folders by drag and drop, preview photos, video, PDF and office documents, edit text files, and get old versions back.</p></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="M8.7 10.8l6.6-3.6M8.7 13.2l6.6 3.6"/></svg><h3>Sharing</h3><p>Share with people and groups, read-only or editable, or send a link with a password and an expiry date. Links can also collect uploads.</p></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M8.5 20h7M12 16.5V20"/><path d="M9.5 10.5a2.5 2.5 0 0 1 4.3-1.7M14.5 10.5a2.5 2.5 0 0 1-4.3 1.7"/></svg><h3>Desktop sync</h3><p>A Cloudy folder on your Mac, Windows or Linux computer that stays in sync both ways. Edits in two places keep both copies.</p></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><circle cx="12" cy="12" r="3.2"/><path d="M8 5.5l1.2-2h5.6l1.2 2"/></svg><h3>Photo backup <span class="only">Android only</span></h3><p>New photos and videos go to your server in the background, on Wi-Fi only if you like. Keep files offline for when you have no signal.</p></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M8 7.5L12 3.5l4 4"/><path d="M5.5 12.5v6a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-6"/></svg><h3>Share to Cloudy</h3><p>Send photos and files from any app's share menu straight into a folder, and scan paper documents to PDF.</p></li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><circle cx="16" cy="15" r="2.2"/></svg><h3>Calendar and contacts</h3><p>Use them on the web and in the apps, or sync with your phone's calendar and contacts, Thunderbird and DAVx⁵ over CalDAV and CardDAV.</p></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" id="security">
+    <div class="wrap">
+      <h2>Your data stays on your server</h2>
+      <p class="lead">The apps talk to the server you sign in to and nothing else. The developer never receives your files, photos, calendars or contacts.</p>
+      <div class="ledger">
+        <div class="col stays">
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="7" rx="1.5"/><rect x="3.5" y="13" width="17" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>Kept on your server</h3>
+          <ul>
+            <li>Your files, photos, versions and trash</li>
+            <li>Calendars and contacts</li>
+            <li>Your account, with the password stored as a scrypt hash</li>
+            <li>The list of signed-in devices, which you can revoke</li>
+            <li>Emails, sent through your own mail server if you set one up</li>
+          </ul>
+        </div>
+        <div class="col leaves">
+          <h3><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.3 3.5 5.2 3.5 8.5s-1.1 6.2-3.5 8.5c-2.4-2.3-3.5-5.2-3.5-8.5s1.1-6.2 3.5-8.5z"/></svg>Other services the apps use</h3>
+          <ul>
+            <li>Google Play and the App Store, which install and update the phone apps</li>
+            <li>GitHub, where the desktop app checks for updates (no account or file information)</li>
+            <li>Google Play services, only when you scan a document on Android</li>
+          </ul>
+        </div>
+      </div>
+      <dl class="facts">
+        <div><dt>Sign-in</dt><dd>Passkeys, or a password with two-factor codes from an authenticator app. Each device gets its own app password that you can revoke.</dd></div>
+        <div><dt>Protection</dt><dd>Repeated wrong passwords are slowed down per address and per account. Uploaded files can't run code inside Cloudy: web pages are downloaded, not opened.</dd></div>
+        <div><dt>Your choice</dt><dd>Delete your account and everything in it from the web or the apps, at any time.</dd></div>
+      </dl>
+      <p class="more"><a href="privacy-policy.html">Read the privacy policy</a></p>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap split">
+      <div>
+        <h2>Run your own server</h2>
+        <p class="lead">Cloudy is one container with its database, the web app and office previews inside. It runs on any machine with Docker.</p>
+        <ol class="steps">
+          <li><b>Download the compose file</b> on a machine with Docker.</li>
+          <li><b>Choose the admin password</b> and where your files should live, or keep the defaults.</li>
+          <li><b>Start Cloudy</b> and open <code>http://&lt;server&gt;:8080</code> in your browser.</li>
+          <li><b>Put it behind HTTPS</b> with your reverse proxy to use it from anywhere.</li>
+        </ol>
+        <p class="more"><a href="https://github.com/Fahed-Alhammadi/Cloudy#install">Read the install guide</a> · <a href="https://github.com/Fahed-Alhammadi/Cloudy/blob/main/CHANGELOG.md">What's new</a></p>
+      </div>
+      <pre class="terminal" tabindex="0" role="region" aria-label="Install commands"><code><span class="c"># 1. get the compose file</span>
+mkdir cloudy &amp;&amp; cd cloudy
+curl -fsSLO \
+  https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/docker-compose.yml
+
+<span class="c"># 2. optional: your admin password after ADMIN_PASSWORD: ${ADMIN_PASSWORD:-</span>
+<span class="c">#    (left empty, one is generated and shown in docker logs cloudy)</span>
+nano docker-compose.yml
+
+<span class="c"># 3. start, then open http://localhost:8080</span>
+docker compose up -d</code></pre>
+    </div>
+  </section>
+
+  <section class="band" id="apps">
+    <div class="wrap">
+      <h2>On your phone and your computer</h2>
+      <p class="lead">Every server includes the web app. Sign in to the apps with your server's address, your username and your password.</p>
+      <div class="apps">
+        <figure class="app">
+          <div class="frame"><img src="screenshots/files.png" width="1080" height="2400" loading="lazy" alt="The Cloudy Android app showing folders and files."></div>
+          <figcaption><h3>Android</h3><p>Files, offline files, photo backup, document scanner, calendar and contacts.</p>
+            <ul class="get"><li><a href="https://play.google.com/store/apps/details?id=io.cloudy.app">Get it on Google Play</a></li></ul></figcaption>
+        </figure>
+        <figure class="app">
+          <div class="frame"><img src="screenshots/iphone/files.jpg" width="460" height="1000" loading="lazy" alt="The Cloudy iPhone app showing folders and files."></div>
+          <figcaption><h3>iPhone</h3><p>Files with Quick Look, Share to Cloudy, document scanner, calendar, contacts and Face ID lock.</p>
+            <ul class="get"><li><a href="https://testflight.apple.com/join/X1M6sYZm">Join the beta on TestFlight</a></li></ul>
+            <span class="state">In the App Store soon. Install Apple's <a href="https://apps.apple.com/app/testflight/id899247664">TestFlight</a> app first, then open the beta link on your iPhone.</span></figcaption>
+        </figure>
+        <figure class="app app-desk">
+          <div class="frame"><img src="screenshots/desktop.png" width="560" height="648" loading="lazy" alt="The Cloudy desktop app showing sync status and the folders being synced."></div>
+          <figcaption><h3>Mac, Windows and Linux</h3><p>Keeps a folder in sync, from the menu bar or system tray. Updates itself.</p>
+            <ul class="get"><li><a href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest">Download from the releases page</a></li></ul>
+            <span class="state">.dmg or .pkg for Mac (signed and notarized), .exe for Windows, .AppImage or .deb for Linux.</span></figcaption>
+        </figure>
+      </div>
+      <p class="also">Prefer the apps you already have? Cloudy also speaks WebDAV, CalDAV and CardDAV, so Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵ and Apple Calendar and Contacts can connect too.</p>
+    </div>
+  </section>
+
+  <section id="screenshots">
+    <div class="wrap shots-group">
+      <h2>A closer look</h2>
+      <p class="lead">The main screens of the Android and iPhone apps.</p>
+      <h3>Android</h3>
+      <ul class="shots" tabindex="0" aria-label="Android screenshots">
+        <li><img src="screenshots/files.png" width="1080" height="2400" loading="lazy" alt="File browser"><span>Files</span></li>
+        <li><img src="screenshots/preview.png" width="1080" height="2400" loading="lazy" alt="Text editor"><span>Text editor</span></li>
+        <li><img src="screenshots/sharing.png" width="1080" height="2400" loading="lazy" alt="Sharing a file"><span>Sharing</span></li>
+        <li><img src="screenshots/photos.png" width="1080" height="2400" loading="lazy" alt="Photo backup settings"><span>Photo backup</span></li>
+        <li><img src="screenshots/calendar.png" width="1080" height="2400" loading="lazy" alt="Calendar"><span>Calendar</span></li>
+        <li><img src="screenshots/contacts.png" width="1080" height="2400" loading="lazy" alt="Contacts"><span>Contacts</span></li>
+        <li><img src="screenshots/more.png" width="1080" height="2400" loading="lazy" alt="More screen: favorites, shared files, trash and settings"><span>More</span></li>
+      </ul>
+      <h3>iPhone</h3>
+      <ul class="shots" tabindex="0" aria-label="iPhone screenshots">
+        <li><img src="screenshots/iphone/files.jpg" width="460" height="1000" loading="lazy" alt="File browser"><span>Files</span></li>
+        <li><img src="screenshots/iphone/photos.jpg" width="460" height="1000" loading="lazy" alt="Photos folder in a grid with thumbnails"><span>Grid view</span></li>
+        <li><img src="screenshots/iphone/share.jpg" width="460" height="1000" loading="lazy" alt="Sharing a file"><span>Sharing</span></li>
+        <li><img src="screenshots/iphone/editor.jpg" width="460" height="1000" loading="lazy" alt="Text editor"><span>Text editor</span></li>
+        <li><img src="screenshots/iphone/calendar.jpg" width="460" height="1000" loading="lazy" alt="Calendar"><span>Calendar</span></li>
+        <li><img src="screenshots/iphone/contacts.jpg" width="460" height="1000" loading="lazy" alt="Contacts"><span>Contacts</span></li>
+        <li><img src="screenshots/iphone/more.jpg" width="460" height="1000" loading="lazy" alt="More tab: favorites, shared files, trash and settings"><span>More</span></li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="25" height="25"><span>Cloudy</span></a>
+    <span class="grow">© Fahed Alhammadi. Open source under the MIT License.</span>
+    <nav aria-label="Footer">
+      <a href="privacy-policy.html">Privacy policy</a>
+      <a href="support.html">Support</a>
+      <a href="https://github.com/Fahed-Alhammadi/Cloudy">GitHub</a>
+    </nav>
+  </div>
+</footer>
 </body>
 </html>
