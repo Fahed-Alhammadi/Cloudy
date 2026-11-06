@@ -58,7 +58,7 @@ src/main/main.ts      tray, window, IPC handlers, login item
 src/main/sync.ts      sync engine
 src/main/api.ts       Cloudy API client (chunked upload, download, SSE)
 src/main/store.ts     settings.json / sync-state.json (userData), token encryption
-src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z; the bridge release after 1.2.0 also desktop-vX.Y.Z) (electron-updater, generic feed)
+src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z) (electron-updater, generic feed)
 src/main/i18n.ts      t() + LANGUAGES; translations in i18n/<lang>.json (English keys, as on the web)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
 src/ui/               settings window (plain HTML/JS/CSS, no framework)
@@ -84,6 +84,6 @@ New texts: wrap them in `t('…')` and add them to all four `i18n/*.json` files 
 A new version is released by pushing the tag `desktop-X.Y.Z` (`scripts/version.py bump X.Y.Z desktop`, commit,
 `git tag desktop-X.Y.Z && git push origin desktop-X.Y.Z`). The workflow builds and signs the packages and publishes a GitHub
 release titled `vX.Y.Z` (the desktop app is the only product with GitHub releases) with all packages and the `latest*.yml`
-update files. Installed versions up to 1.2.0 only look for releases tagged `desktop-vX.Y.Z`, so the first release after
-1.2.0 is also tagged that way (automatic); the updater accepts both. It updates itself on macOS (from the `.zip`), on Windows, from an AppImage and from a
+update files. Installed versions up to 1.2.0 don't find these releases (they looked for an older tag form): install the
+new version by hand once. It updates itself on macOS (from the `.zip`), on Windows, from an AppImage and from a
 `.deb`. The macOS packages are signed with a Developer ID and notarized; the Windows installer is not signed yet.

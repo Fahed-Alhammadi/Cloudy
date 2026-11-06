@@ -137,7 +137,7 @@ products were split (1.1.0–1.10.0, server and Android together) carry both a `
 - **Android and iPhone:** updated by Google Play and the App Store (TestFlight during the beta). The apps have no
   updater of their own.
 - **Desktop:** each version is a GitHub release with every package and electron-updater's `latest*.yml` files. The
-  app asks the GitHub API for the newest release (`desktop-X.Y.Z`; the first one after 1.2.0 is `desktop-vX.Y.Z` for older apps),
+  app asks the GitHub API for the newest release (`desktop-X.Y.Z`; apps up to 1.2.0 can't see these and are updated by hand once),
   points electron-updater at that release, downloads in the background (SHA-512 checked) and installs on restart or
   quit. macOS builds are signed with a Developer ID and notarized.
 
