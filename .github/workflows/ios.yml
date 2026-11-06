@@ -1,14 +1,14 @@
 # iOS app (App Store). Runs when ios/ changes.
 #   - every push / pull request: unsigned simulator build
-#   - called by release.yml (publish: true) when a release includes iOS: signed build uploaded to App Store Connect →
-#     TestFlight (submit it for App Review by hand). release.yml tags vX.Y.Z afterwards; no GitHub release.
+#   - tag ios-X.Y.Z (must match MARKETING_VERSION, scripts/version.py check): signed build uploaded to App Store Connect →
+#     TestFlight (submit it for App Review by hand). No GitHub release. A build already in App Store Connect is skipped.
 # Secrets: APPLE_TEAM_ID, APP_STORE_CONNECT_API_KEY_ID, APP_STORE_CONNECT_API_ISSUER_ID, APP_STORE_CONNECT_API_KEY_P8
 #   (contents of AuthKey_<id>.p8; exposed to the steps as ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY; App Store Connect →
 #   Users and Access → Integrations → App Store Connect API, role Admin for cloud signing).
 #   Optional IOS_CERTIFICATE_P12 (base64 of an "Apple Development" certificate + key exported from Keychain Access) and
 #   IOS_CERTIFICATE_PASSWORD: with them Xcode signs the archive with that certificate instead of creating a new one on
 #   every runner (Apple limits those: "Your account has reached the maximum number of certificates").
-# Without them the publish job fails, so nothing is tagged.
+# Without them the publish job fails.
 # Release notes: ios/whatsnew/en-US.txt (update it with each version bump) → TestFlight "What to Test" and, from the second
 #   App Store version on, "What's New" if that version already exists in App Store Connect (scripts/appstore-whatsnew.mjs).
 # macos-26 runner: App Store Connect only accepts builds made with the iOS 26 SDK (Xcode 26) or newer.
@@ -17,6 +17,7 @@ name: iOS
 on:
   push:
     branches: [main]
+    tags: ['ios-[0-9]*'] # a release (path filters don't apply to tags)
     paths: &paths
       - 'ios/**'
       - 'scripts/version.py'
@@ -26,11 +27,6 @@ on:
   pull_request:
     paths: *paths
   workflow_dispatch:
-  workflow_call: # from release.yml
-    inputs:
-      publish:
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-ios-${{ github.ref }}
@@ -40,6 +36,9 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
+      - name: Release tag matches the version in the files
+        if: github.ref_type == 'tag'
+        run: python3 scripts/version.py check "$GITHUB_REF_NAME"
       - name: Build for the simulator (unsigned)
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen
@@ -47,7 +46,7 @@ jobs:
 
   publish:
     needs: build
-    if: inputs.publish
+    if: github.ref_type == 'tag'
     runs-on: macos-26
     permissions:
       contents: read

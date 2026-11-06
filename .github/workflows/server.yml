@@ -1,12 +1,14 @@
 # Server (container image). Runs when server files change.
 #   - every push / pull request: type-check + end-to-end tests against the built container
-#   - called by release.yml (publish: true) when a release includes the server: image ghcr.io/<owner>/cloudy:X.Y.Z and
-#     :latest. No GitHub release: what changed for admins is in CHANGELOG.md.
+#   - tag server-X.Y.Z (scripts/version.py bump X.Y.Z server, CHANGELOG.md section, commit, tag, push): the tests, then
+#     image ghcr.io/<owner>/cloudy:X.Y.Z and :latest. No GitHub release: what changed for admins is in CHANGELOG.md.
+#     The tag must match server/package.json (scripts/version.py check). An image that is already there is not rebuilt.
 name: Server
 
 on:
   push:
     branches: [main]
+    tags: ['server-[0-9]*'] # a release (path filters don't apply to tags)
     paths: &paths
       - 'server/**'
       - 'deploy/**'
@@ -18,11 +20,6 @@ on:
   pull_request:
     paths: *paths
   workflow_dispatch:
-  workflow_call: # from release.yml
-    inputs:
-      publish:
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-server-${{ github.ref }}
@@ -32,6 +29,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Release tag matches the version in the files
+        if: github.ref_type == 'tag'
+        run: python3 scripts/version.py check "$GITHUB_REF_NAME"
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -55,7 +55,7 @@ jobs:
 
   publish:
     needs: test
-    if: inputs.publish
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

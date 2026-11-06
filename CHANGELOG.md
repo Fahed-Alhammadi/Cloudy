@@ -13,8 +13,7 @@ Newer apps work with older servers and the other way round.
 
 ## 1.15.0 (2026-11-06)
 
-- No changes to the server. From this version on, every Cloudy product shares one version number, so the server
-  goes from 1.13.0 to 1.15.0.
+- No changes to the server (release process test). There is no 1.14.0.
 
 ## 1.13.0 (2026-11-04)
 

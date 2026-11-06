@@ -1,8 +1,8 @@
 # Desktop sync app (Electron: macOS, Windows, Linux). Runs when desktop/ changes.
 #   - every push / pull request: type-check, sync tests against a Cloudy server run from server/, packages for all three
-#   - called by release.yml (publish: true) when a release includes the desktop app: macOS signed with the Developer ID
-#     certificates and notarized. release.yml then tags vX.Y.Z and makes the GitHub release with every package (the
-#     desktop-* artifacts) and the latest*.yml files the installed apps update from (desktop/src/main/updater.ts).
+#   - tag desktop-X.Y.Z (must match desktop/package.json, scripts/version.py check): macOS signed with the Developer ID
+#     certificates and notarized, then the GitHub release titled vX.Y.Z with every package and the latest*.yml files the
+#     installed apps update from (scripts/github-release.sh, desktop/src/main/updater.ts).
 # Secrets (macOS signing): MACOS_CERTIFICATE_P12 (Developer ID Application, base64 .p12), MACOS_INSTALLER_CERTIFICATE_P12
 #   (Developer ID Installer, for the .pkg), MACOS_CERTIFICATE_PASSWORD (both .p12 files), and the App Store Connect API key
 #   APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _KEY_P8 (role Developer or higher) for notarization.
@@ -12,18 +12,15 @@ name: Desktop
 on:
   push:
     branches: [main]
+    tags: ['desktop-[0-9]*'] # a release (path filters don't apply to tags)
     paths: &paths
       - 'desktop/**'
       - 'scripts/version.py'
+      - 'scripts/github-release.sh'
       - '.github/workflows/desktop.yml'
   pull_request:
     paths: *paths
   workflow_dispatch:
-  workflow_call: # from release.yml
-    inputs:
-      publish:
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-desktop-${{ github.ref }}
@@ -43,6 +40,9 @@ jobs:
           --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v7
+      - name: Release tag matches the version in the files
+        if: github.ref_type == 'tag'
+        run: python3 scripts/version.py check "$GITHUB_REF_NAME"
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -93,7 +93,7 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - id: v
-        run: echo "release=${{ inputs.publish && 'true' || 'false' }}" >> "$GITHUB_OUTPUT"
+        run: echo "release=${{ github.ref_type == 'tag' }}" >> "$GITHUB_OUTPUT"
       - run: npm ci
         working-directory: desktop
 
@@ -189,3 +189,25 @@ jobs:
             desktop/dist/latest*.yml
           if-no-files-found: error
 
+  release:
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags + history for the release notes
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: assets
+          merge-multiple: true
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSETS: assets
+        run: |
+          ls -l assets
+          scripts/github-release.sh "$GITHUB_REF_NAME"

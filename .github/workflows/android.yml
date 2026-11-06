@@ -1,17 +1,18 @@
 # Android app (Google Play). Runs when android/ changes.
 #   - every push / pull request: debug build
-#   - called by release.yml (publish: true) when a release includes Android: signed bundle → Play closed-testing track
-#     (promote to production by hand in Play Console). release.yml tags vX.Y.Z afterwards; no GitHub release.
+#   - tag android-X.Y.Z (must match versionName, scripts/version.py check): signed bundle → Play closed-testing track
+#     (promote to production by hand in Play Console). No GitHub release. A versionCode already on Play is skipped.
 # Secrets: ANDROID_KEYSTORE_BASE64 (base64 of android/cloudy-release.keystore), ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON (Play Developer API service account key).
 # Release notes: android/whatsnew/whatsnew-en-US (one file per Play listing language; update it with each version bump).
 # Variables (optional): PLAY_TRACK (default "alpha" = closed testing), PLAY_RELEASE_STATUS (default "completed").
-# Without the secrets the publish job fails (the bundle, if built, is in the workflow artifacts), so nothing is tagged.
+# Without the secrets the publish job fails (the bundle, if built, is in the workflow artifacts), so the run fails.
 name: Android
 
 on:
   push:
     branches: [main]
+    tags: ['android-[0-9]*'] # a release (path filters don't apply to tags)
     paths: &paths
       - 'android/**'
       - 'scripts/version.py'
@@ -20,11 +21,6 @@ on:
   pull_request:
     paths: *paths
   workflow_dispatch:
-  workflow_call: # from release.yml
-    inputs:
-      publish:
-        type: boolean
-        default: false
 
 concurrency:
   group: ${{ github.workflow }}-android-${{ github.ref }}
@@ -34,6 +30,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Release tag matches the version in the files
+        if: github.ref_type == 'tag'
+        run: python3 scripts/version.py check "$GITHUB_REF_NAME"
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -47,7 +46,7 @@ jobs:
 
   publish:
     needs: build
-    if: inputs.publish
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

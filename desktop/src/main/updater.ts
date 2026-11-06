@@ -1,6 +1,6 @@
-// Updates from GitHub releases. Only the desktop app has releases, tagged vX.Y.Z (the first one after 1.2.0 is
-// desktop-vX.Y.Z: apps up to 1.2.0 only look for that prefix). The newest one is looked up first and electron-updater reads its
-// latest*.yml from that release (generic provider).
+// Updates from GitHub releases. Only the desktop app has releases, tagged desktop-X.Y.Z (titled vX.Y.Z). Releases up to
+// the first one after 1.2.0 are tagged desktop-vX.Y.Z: apps up to 1.2.0 only look for that form. The newest one is looked
+// up first and electron-updater reads its latest*.yml from that release (generic provider).
 // macOS (zip), Windows (NSIS installer) and Linux (AppImage, .deb) download in the background, check the SHA-512 and
 // install on restart or quit. Development builds only report.
 import { existsSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { app, net } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 export const REPO = 'Fahed-Alhammadi/Cloudy';
-const TAG = /^(?:desktop-)?v(\d+\.\d+\.\d+)$/;
+const TAG = /^desktop-v?(\d+\.\d+\.\d+)$/;
 const DAY = 24 * 3600 * 1000;
 
 export type UpdateState =

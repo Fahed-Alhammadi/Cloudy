@@ -1,50 +1,51 @@
 #!/bin/sh
-# Marks release vX.Y.Z as out. Run by .github/workflows/release.yml after every product in it was published
-# (needs GH_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA):
-#   scripts/github-release.sh X.Y.Z            tag vX.Y.Z only (server → GHCR, Android → Play, iOS → App Store)
-#   scripts/github-release.sh X.Y.Z desktop    GitHub release of the desktop app (marked Latest), then tag vX.Y.Z
-# Only the desktop app has GitHub releases: its packages (every file in ASSETS=<dir>, attached in the same step so
-# the release never exists without them) and the latest*.yml files installed apps update from. The notes list the
-# commits that touched desktop/ since the previous desktop release. Server changes are in CHANGELOG.md.
-# The tag vX.Y.Z is what marks the release as done, so it comes last; every step can be re-run.
+# GitHub release of the desktop app. Run by .github/workflows/desktop.yml when a desktop-X.Y.Z tag is pushed
+# (needs GH_TOKEN, GITHUB_REPOSITORY; ASSETS=<dir> with the packages):
+#   scripts/github-release.sh desktop-X.Y.Z
+# The release is titled vX.Y.Z and marked Latest. It carries every package and the latest*.yml files installed apps
+# update from (desktop/src/main/updater.ts). The notes list the commits that touched desktop/ since the previous
+# desktop release. A re-run replaces the files of the release it already made.
+# Bridge: desktop 1.2.0 and older only see releases tagged desktop-vX.Y.Z. While the newest release is 1.2.0 or older,
+# the release goes on an extra tag desktop-vX.Y.Z at the same commit, so those installs find it (and with it the updater
+# that reads desktop-X.Y.Z). Later releases are on the pushed tag itself.
+# Only the desktop app has GitHub releases: the server's changes are in CHANGELOG.md, the phone apps' in the stores.
 set -e
-version=$1
-echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "usage: $0 X.Y.Z [desktop]" >&2; exit 2; }
-tag="v$version"
+tag=$1
+version=${tag#desktop-}
+echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' && [ "$tag" = "desktop-$version" ] ||
+  { echo "usage: $0 desktop-X.Y.Z" >&2; exit 2; }
+[ -n "$ASSETS" ] && ls "$ASSETS"/* >/dev/null || { echo "::error::no packages in ASSETS" >&2; exit 1; }
 
-# Creates refs/tags/$1 at GITHUB_SHA; fine if it already points there (a re-run), an error if it points elsewhere.
-make_tag() {
-  if sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" -q .object.sha 2>/dev/null); then
-    [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::$1 already exists at $sha" >&2; exit 1; }
-  else
-    gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$1" -f sha="$GITHUB_SHA" >/dev/null
+for t in "$tag" "desktop-v$version"; do # a re-run
+  if gh release view "$t" >/dev/null 2>&1; then
+    gh release upload "$t" "$ASSETS"/* --clobber
+    echo "Replaced the files of release $t"
+    exit 0
   fi
-  echo "Tagged $1"
-}
+done
 
-if [ "$2" = desktop ]; then
-  prev=$(gh release view --json tagName -q .tagName 2>/dev/null || true) # the Latest release = newest desktop release
-  release_tag=$tag
-  # Desktop 1.2.0 and older only look for releases tagged desktop-v…: the first release after it keeps that prefix
-  # (it brings the updater that also reads v… tags), so those installs still find it. Later releases are plain v….
-  # (Older releases were renamed to v… on 2026-11-06, so this goes by the newest release's version, not its name.)
-  prev_version=${prev#desktop-}
-  prev_version=${prev_version#v}
-  if [ -n "$prev_version" ] && [ "$(printf '%s\n' "$prev_version" 1.2.0 | sort -V | tail -1)" = 1.2.0 ]; then
-    release_tag="desktop-v$version"
-  fi
-  [ "$prev" = "desktop-v$version" ] && release_tag=$prev # a re-run after the bridge release was made
-  if [ "$prev" = "$release_tag" ]; then
-    echo "Release $release_tag already exists"
-  else
-    {
-      echo "## What's changed"
-      git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}HEAD -- desktop
-      [ -n "$prev" ] && echo && echo "Since $prev."
-    } > release-notes.md
-    gh release create "$release_tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "$release_tag" \
-      --notes-file release-notes.md --latest
-    echo "Released $release_tag"
-  fi
+ver_of() { echo "${1#desktop-}" | sed 's/^v//'; }
+latest=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+release_tag=$tag
+if [ -n "$latest" ] && [ "$(printf '%s\n' "$(ver_of "$latest")" 1.2.0 | sort -V | tail -1)" = 1.2.0 ]; then
+  release_tag="desktop-v$version"
+  sha=$(git rev-parse "$tag^{commit}")
+  gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$release_tag" -f sha="$sha" >/dev/null 2>&1 ||
+    [ "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" -q .object.sha)" = "$sha" ] # made by a failed run
+  echo "Bridge release for desktop 1.2.0 and older: tagged $release_tag too"
 fi
-make_tag "$tag"
+
+# Previous desktop release = the highest desktop tag (either form) below this version.
+prev_version=$(git tag -l 'desktop-*' | sed 's/^desktop-v\{0,1\}//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' |
+  { cat; echo "$version"; } | sort -uV | grep -B1 -x "$version" | head -1)
+prev=
+if [ "$prev_version" != "$version" ]; then
+  prev=$(git tag -l "desktop-$prev_version" "desktop-v$prev_version" | head -1)
+fi
+{
+  echo "## What's changed"
+  git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}"$tag" -- desktop
+  [ -n "$prev" ] && echo && echo "Since v$prev_version."
+} > release-notes.md
+gh release create "$release_tag" "$ASSETS"/* --verify-tag --title "v$version" --notes-file release-notes.md --latest
+echo "Released $release_tag as v$version"

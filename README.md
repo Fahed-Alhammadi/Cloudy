@@ -5,7 +5,7 @@
 <p align="center">A cloud you host yourself.<br>Files, sharing, calendars and contacts on your own server, with apps for your phone and your computer.</p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/tag/Fahed-Alhammadi/Cloudy?sort=semver&label=version&color=0A55C4" alt="Latest version"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/package-json/v/Fahed-Alhammadi/Cloudy?filename=server%2Fpackage.json&label=server&color=0A55C4" alt="Server version"></a>
   <a href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest"><img src="https://img.shields.io/github/v/release/Fahed-Alhammadi/Cloudy?label=desktop&color=0A55C4" alt="Latest desktop app release"></a>
   <a href="https://play.google.com/store/apps/details?id=io.cloudy.app"><img src="https://img.shields.io/badge/Google%20Play-Android-0A55C4" alt="Get it on Google Play"></a>
   <a href="https://testflight.apple.com/join/X1M6sYZm"><img src="https://img.shields.io/badge/TestFlight-iPhone%20beta-0A55C4" alt="Join the iPhone beta on TestFlight"></a>
@@ -303,7 +303,7 @@ deploy/              docker-compose.yml that builds the image from source
 docs/                website (screenshots), privacy policy, architecture notes
 tests/               end-to-end API/WebDAV/CalDAV/CardDAV tests, translation check
 scripts/             versions and release helpers
-.github/workflows/   one workflow per product (test, build, publish), release.yml (tags vX.Y.Z), translations.yml
+.github/workflows/   one workflow per product (test and build; a tag such as ios-X.Y.Z publishes), translations.yml
 ```
 
 ## Support
