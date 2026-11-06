@@ -1,29 +1,44 @@
 #!/bin/sh
-# Marks the current commit as released: tag <product>-v<version>. Used by the workflows after a successful publish;
-# the tag is what scripts/version.py checks to know a version is already out.
-#   scripts/github-release.sh <product> --tag-only                           android / ios (needs GH_TOKEN)
-#   scripts/github-release.sh <product> <title> <latest:true|false> <path>... desktop, server: tag + GitHub release
-# Desktop: release with its packages + latest*.yml (installed apps update from it), marked Latest. Server: release with
-# notes only (admins read what changed before `docker compose pull`), never Latest. The phone apps ship through the
-# stores, so they get only the tag.
-# With a release, the notes list the commits that touched <path>... since the product's previous tag, and
-# ASSETS=<dir> attaches every file in that folder in the same step, so the release never exists without them.
+# Marks release vX.Y.Z as out. Run by .github/workflows/release.yml after every product in it was published
+# (needs GH_TOKEN, GITHUB_REPOSITORY, GITHUB_SHA):
+#   scripts/github-release.sh X.Y.Z            tag vX.Y.Z only (server → GHCR, Android → Play, iOS → App Store)
+#   scripts/github-release.sh X.Y.Z desktop    GitHub release of the desktop app (marked Latest), then tag vX.Y.Z
+# Only the desktop app has GitHub releases: its packages (every file in ASSETS=<dir>, attached in the same step so
+# the release never exists without them) and the latest*.yml files installed apps update from. The notes list the
+# commits that touched desktop/ since the previous desktop release. Server changes are in CHANGELOG.md.
+# The tag vX.Y.Z is what marks the release as done, so it comes last; every step can be re-run.
 set -e
-product=$1
-version=$(scripts/version.py get "$product")
-tag="$product-v$version"
-if [ "$2" = --tag-only ]; then
-  gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" >/dev/null
-  echo "Tagged $tag (no GitHub release)"
-  exit 0
+version=$1
+echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "usage: $0 X.Y.Z [desktop]" >&2; exit 2; }
+tag="v$version"
+
+# Creates refs/tags/$1 at GITHUB_SHA; fine if it already points there (a re-run), an error if it points elsewhere.
+make_tag() {
+  if sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" -q .object.sha 2>/dev/null); then
+    [ "$sha" = "$GITHUB_SHA" ] || { echo "::error::$1 already exists at $sha" >&2; exit 1; }
+  else
+    gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$1" -f sha="$GITHUB_SHA" >/dev/null
+  fi
+  echo "Tagged $1"
+}
+
+if [ "$2" = desktop ]; then
+  prev=$(gh release view --json tagName -q .tagName 2>/dev/null || true) # the Latest release = newest desktop release
+  release_tag=$tag
+  # Desktop 1.2.0 and older only look for releases tagged desktop-v…: the first release after it keeps that prefix
+  # (it brings the updater that also reads v… tags), so those installs still find it. Later releases are plain v….
+  case "$prev" in desktop-v1.2.0 | "desktop-v$version") release_tag="desktop-v$version" ;; esac
+  if [ "$prev" = "$release_tag" ]; then
+    echo "Release $release_tag already exists"
+  else
+    {
+      echo "## What's changed"
+      git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}HEAD -- desktop
+      [ -n "$prev" ] && echo && echo "Since $prev."
+    } > release-notes.md
+    gh release create "$release_tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "Cloudy Desktop $version" \
+      --notes-file release-notes.md --latest
+    echo "Released $release_tag"
+  fi
 fi
-title=$2 latest=$3
-shift 3
-prev=$(git tag --list "$product-v*" --sort=-v:refname | head -1)
-{
-  echo "## What's changed"
-  git log --no-merges --format='- %s (%h)' ${prev:+"$prev"..}HEAD -- "$@"
-  [ -n "$prev" ] && echo && echo "Since $prev."
-} > release-notes.md
-gh release create "$tag" ${ASSETS:+"$ASSETS"/*} --target "$GITHUB_SHA" --title "$title v$version" --notes-file release-notes.md --latest="$latest"
-echo "Released $tag"
+make_tag "$tag"

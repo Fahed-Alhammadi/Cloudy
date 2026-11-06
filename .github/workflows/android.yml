@@ -1,12 +1,12 @@
 # Android app (Google Play). Runs when android/ changes.
 #   - every push / pull request: debug build
-#   - push to main with an unreleased versionName (scripts/version.py bump android X.Y.Z): signed bundle → Play
-#     closed-testing track (promote to production by hand in Play Console), then tag android-vX.Y.Z. No GitHub release (only the desktop app has those).
+#   - called by release.yml (publish: true) when a release includes Android: signed bundle → Play closed-testing track
+#     (promote to production by hand in Play Console). release.yml tags vX.Y.Z afterwards; no GitHub release.
 # Secrets: ANDROID_KEYSTORE_BASE64 (base64 of android/cloudy-release.keystore), ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON (Play Developer API service account key).
 # Release notes: android/whatsnew/whatsnew-en-US (one file per Play listing language; update it with each version bump).
 # Variables (optional): PLAY_TRACK (default "alpha" = closed testing), PLAY_RELEASE_STATUS (default "completed").
-# Without the secrets the release job only builds what it can and doesn't tag, so the version stays unreleased.
+# Without the secrets the publish job fails (the bundle, if built, is in the workflow artifacts), so nothing is tagged.
 name: Android
 
 on:
@@ -15,14 +15,19 @@ on:
     paths: &paths
       - 'android/**'
       - 'scripts/version.py'
-      - 'scripts/github-release.sh'
+      - 'scripts/published.mjs'
       - '.github/workflows/android.yml'
   pull_request:
     paths: *paths
   workflow_dispatch:
+  workflow_call: # from release.yml
+    inputs:
+      publish:
+        type: boolean
+        default: false
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: ${{ github.workflow }}-android-${{ github.ref }}
 
 jobs:
   build:
@@ -40,41 +45,40 @@ jobs:
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
 
-  release:
+  publish:
     needs: build
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: inputs.publish
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     env:
       PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }} # secrets can't be tested in `if` directly
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - id: v
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           echo "version=$(scripts/version.py get android)" >> "$GITHUB_OUTPUT"
-          if scripts/version.py released android; then
-            echo "::notice::Android $(scripts/version.py get android) is already released. Run scripts/version.py bump android X.Y.Z to publish a new one."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ -z "$KEYSTORE" ]; then
-            echo "::warning::No signing secrets: Android $(scripts/version.py get android) not published."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
+          [ -n "$KEYSTORE" ] || { echo "::error::No signing secrets: Android $(scripts/version.py get android) can't be published."; exit 1; }
+      - name: Already published? (a re-run after a partly failed release)
+        id: done
+        if: env.PLAY_JSON != ''
+        run: |
+          rc=0; node scripts/published.mjs android "$(scripts/version.py build android)" || rc=$?
+          [ $rc != 2 ] || exit 1
+          [ $rc != 0 ] || echo "skip=true" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-java@v6
-        if: steps.v.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true'
         with:
           distribution: temurin
           java-version: 21
       - uses: android-actions/setup-android@v4
-        if: steps.v.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true'
         with:
           packages: platform-tools platforms;android-36 build-tools;36.0.0
       - name: Build signed Play bundle
-        if: steps.v.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true'
         working-directory: android
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -87,14 +91,14 @@ jobs:
           ./gradlew --no-daemon bundleRelease
           cp app/build/outputs/bundle/release/app-release.aab "Cloudy-${{ steps.v.outputs.version }}.aab"
       - uses: actions/upload-artifact@v5
-        if: steps.v.outputs.skip != 'true'
+        if: steps.done.outputs.skip != 'true'
         with:
           name: play-bundle
           path: |
             android/Cloudy-*.aab
             android/app/build/outputs/mapping/release/mapping.txt
       - name: Upload to Google Play
-        if: steps.v.outputs.skip != 'true' && env.PLAY_JSON != ''
+        if: steps.done.outputs.skip != 'true' && (env.PLAY_JSON != '')
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -104,11 +108,8 @@ jobs:
           whatsNewDirectory: android/whatsnew # "What's new" per language: whatsnew-<locale>, max 500 characters
           tracks: ${{ vars.PLAY_TRACK || 'alpha' }}
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
-      - name: Tag (no GitHub release)
-        if: steps.v.outputs.skip != 'true' && env.PLAY_JSON != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/github-release.sh android --tag-only
       - name: Not uploaded
-        if: steps.v.outputs.skip != 'true' && env.PLAY_JSON == ''
-        run: echo "::warning::PLAY_SERVICE_ACCOUNT_JSON not set. The bundle is in the workflow artifacts; upload it in Play Console. Not tagged."
+        if: steps.done.outputs.skip != 'true' && (env.PLAY_JSON == '')
+        run: |
+          echo "::error::PLAY_SERVICE_ACCOUNT_JSON not set. The bundle is in the workflow artifacts; upload it in Play Console."
+          exit 1

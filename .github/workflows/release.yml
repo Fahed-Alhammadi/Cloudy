@@ -1,0 +1,105 @@
+# Release vX.Y.Z. Runs on every push to main and does nothing unless the files hold an unreleased version:
+#   scripts/version.py bump X.Y.Z <product>... → commit → push. The products at the newest version (scripts/version.py
+#   plan) are published by their own workflows (server.yml, android.yml, ios.yml, desktop.yml, called with publish: true:
+#   tests first, then the image / store upload / signed packages). When all of them succeeded, the commit is tagged
+#   vX.Y.Z, and if the desktop app is in it, it gets the GitHub release (marked Latest) with its packages.
+# Server: image ghcr.io/<owner>/cloudy:X.Y.Z + :latest, changes for admins in CHANGELOG.md (the plan fails without a
+#   "## X.Y.Z" section). Android → Play closed testing, iOS → TestFlight; their "What's new" files go with the upload.
+# A failed product leaves the release untagged. Re-run the failed jobs, or push a fix (no new bump needed): every run
+#   skips what is already out (scripts/published.mjs asks GHCR, Play and App Store Connect) and publishes the rest.
+#   Missing secrets → that product's job fails, so nothing is tagged half-published.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      products: ${{ steps.plan.outputs.products }}
+      pending: ${{ steps.plan.outputs.pending }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags
+      - id: plan
+        run: |
+          scripts/version.py plan > plan.txt # fails the run if e.g. CHANGELOG.md has no section for a server release
+          cat plan.txt; cat plan.txt >> "$GITHUB_OUTPUT"
+          if ! grep -q '^pending=true' plan.txt; then
+            echo "::notice::v$(sed -n 's/^version=//p' plan.txt) is already released. Run scripts/version.py bump X.Y.Z <product>... to publish a new one."
+          fi
+
+  server:
+    needs: plan
+    if: needs.plan.outputs.pending == 'true' && contains(needs.plan.outputs.products, 'server')
+    uses: ./.github/workflows/server.yml
+    with:
+      publish: true
+    secrets: inherit
+    permissions:
+      contents: read
+      packages: write
+
+  android:
+    needs: plan
+    if: needs.plan.outputs.pending == 'true' && contains(needs.plan.outputs.products, 'android')
+    uses: ./.github/workflows/android.yml
+    with:
+      publish: true
+    secrets: inherit
+
+  ios:
+    needs: plan
+    if: needs.plan.outputs.pending == 'true' && contains(needs.plan.outputs.products, 'ios')
+    uses: ./.github/workflows/ios.yml
+    with:
+      publish: true
+    secrets: inherit
+
+  desktop:
+    needs: plan
+    if: needs.plan.outputs.pending == 'true' && contains(needs.plan.outputs.products, 'desktop')
+    uses: ./.github/workflows/desktop.yml
+    with:
+      publish: true
+    secrets: inherit
+
+  tag:
+    needs: [plan, server, android, ios, desktop]
+    # Skipped products (not in this release) are fine; any failed or cancelled one stops the tag.
+    if: >-
+      always() && needs.plan.outputs.pending == 'true' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags + history for the desktop release notes
+      - uses: actions/download-artifact@v8
+        if: contains(needs.plan.outputs.products, 'desktop')
+        with:
+          pattern: desktop-*
+          path: assets
+          merge-multiple: true
+      - name: Tag v${{ needs.plan.outputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          DESKTOP: ${{ contains(needs.plan.outputs.products, 'desktop') && 'desktop' || '' }}
+        run: |
+          [ -z "$DESKTOP" ] || { ls -l assets; export ASSETS=assets; }
+          scripts/github-release.sh "$VERSION" $DESKTOP

@@ -1,5 +1,6 @@
-// Updates from GitHub releases. The repository also holds server/Android/iOS releases, so the newest `desktop-v*`
-// release is looked up first and electron-updater reads its latest*.yml from that release (generic provider).
+// Updates from GitHub releases. Only the desktop app has releases (tagged vX.Y.Z; up to the first one after 1.2.0
+// desktop-vX.Y.Z, which older apps look for). The newest one is looked up first and electron-updater reads its
+// latest*.yml from that release (generic provider).
 // macOS (zip), Windows (NSIS installer) and Linux (AppImage, .deb) download in the background, check the SHA-512 and
 // install on restart or quit. Development builds only report.
 import { existsSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { app, net } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 export const REPO = 'Fahed-Alhammadi/Cloudy';
-const TAG = 'desktop-v';
+const TAG = /^(?:desktop-)?v(\d+\.\d+\.\d+)$/;
 const DAY = 24 * 3600 * 1000;
 
 export type UpdateState =
@@ -34,8 +35,8 @@ export async function latestRelease(): Promise<{ tag: string; version: string; u
   if (!res.ok) throw new Error(`GitHub: HTTP ${res.status}`);
   const list = (await res.json()) as { tag_name: string; draft: boolean; prerelease: boolean; html_url: string }[];
   const versions = list
-    .filter((r) => !r.draft && !r.prerelease && r.tag_name.startsWith(TAG))
-    .map((r) => ({ tag: r.tag_name, version: r.tag_name.slice(TAG.length), url: r.html_url }))
+    .filter((r) => !r.draft && !r.prerelease && TAG.test(r.tag_name))
+    .map((r) => ({ tag: r.tag_name, version: TAG.exec(r.tag_name)![1], url: r.html_url }))
     .sort((a, b) => (newer(a.version, b.version) ? -1 : 1));
   return versions[0] ?? null;
 }

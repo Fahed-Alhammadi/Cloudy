@@ -19,7 +19,7 @@ source, and the apps talk only to your server: no ads, no analytics, no tracking
 | **Web** | built into the server | Files, sharing, calendar, contacts, administration |
 | **Android** | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) | Files, offline files, photo backup, document scanner, calendar, contacts |
 | **iPhone** | [TestFlight beta](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock |
-| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/Cloudy/releases/tag/desktop-v1.2.0) (GitHub releases) | Keeps a folder on your computer in sync with your files |
+| **macOS, Windows, Linux** | [Download](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) (GitHub releases) | Keeps a folder on your computer in sync with your files |
 | **Other apps** | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar/Contacts |
 
 Desktop downloads: `.dmg` (macOS, Apple silicon or Intel) or `.pkg` (all Macs), `.exe` (Windows), `.AppImage` or
@@ -170,7 +170,8 @@ release, run this in the folder with your `docker-compose.yml`:
 docker compose pull && docker compose up -d
 ```
 
-The database schema migrates itself at startup. Your data stays in the volumes.
+The database schema migrates itself at startup. Your data stays in the volumes. What changed in each server
+version, and anything you need to do before updating, is in [CHANGELOG.md](CHANGELOG.md).
 
 **Apps.** Android and iPhone update through Google Play and the App Store (TestFlight for the beta). The desktop app
 checks GitHub once a day for a new version, downloads it in the background and installs it when you restart or quit
@@ -268,15 +269,15 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Cloudy works inside.
 ## Project layout
 
 ```
-server/              server (Node.js/TypeScript) + HTML5 web app (server/public) → Docker image   tag server-vX.Y.Z
-android/             native Android app (Kotlin, Jetpack Compose) → Google Play           tag android-vX.Y.Z
-ios/                 native iPhone app (Swift, SwiftUI) → App Store                      tag ios-vX.Y.Z
-desktop/             desktop sync app (Electron, TypeScript) → GitHub releases           tag desktop-vX.Y.Z
+server/              server (Node.js/TypeScript) + HTML5 web app (server/public) → Docker image (CHANGELOG.md)
+android/             native Android app (Kotlin, Jetpack Compose) → Google Play
+ios/                 native iPhone app (Swift, SwiftUI) → App Store
+desktop/             desktop sync app (Electron, TypeScript) → GitHub releases
 deploy/              docker-compose.yml that builds the image from source
 docs/                website (screenshots), privacy policy, architecture notes
 tests/               end-to-end API/WebDAV/CalDAV/CardDAV tests, translation check
 scripts/             versions and release helpers
-.github/workflows/   one workflow per product (test, build, publish), translations.yml
+.github/workflows/   one workflow per product (test, build, publish), release.yml (tags vX.Y.Z), translations.yml
 ```
 
 ## License
