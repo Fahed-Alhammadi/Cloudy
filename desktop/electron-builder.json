@@ -17,13 +17,15 @@
     }
   ],
   "mac": {
-    "icon": "assets/icon.png",
+    "icon": "assets/icon.icns",
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,
     "notarize": false,
     "extendInfo": {
-      "LSUIElement": true
+      "LSUIElement": true,
+      "CFBundleIconName": "Icon"
     },
+    "extraResources": [{ "from": "assets/Assets.car", "to": "Assets.car" }],
     "target": [
       { "target": "dmg", "arch": ["arm64", "x64"] },
       { "target": "zip", "arch": ["arm64", "x64"] },
