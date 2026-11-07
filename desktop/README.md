@@ -62,7 +62,7 @@ src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z)
 src/main/i18n.ts      t() + LANGUAGES; translations in i18n/<lang>.json (English keys, as on the web)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
 src/ui/               settings window (plain HTML/JS/CSS, no framework)
-assets/               app icon (icon.png 1024 px), tray icons (trayTemplate = macOS menu bar)
+assets/               app icon (icon.png 1024 px), tray icons (blue tile; trayMac = 18 pt macOS menu bar)
 test/sync.test.ts     sync tests: two engines against a real server
 ```
 

@@ -154,11 +154,10 @@ function statusText(): string {
 
 // ---------------------------------------------------------------- tray
 
+// The blue app tile everywhere, like the phone apps; macOS gets an 18 pt version sized for the menu bar.
 function trayIcon() {
-  const name = process.platform === 'darwin' ? 'trayTemplate.png' : 'tray.png';
-  const img = nativeImage.createFromPath(path.join(OUT, 'icons', name));
-  if (process.platform === 'darwin') img.setTemplateImage(true);
-  return img;
+  const name = process.platform === 'darwin' ? 'trayMac.png' : 'tray.png';
+  return nativeImage.createFromPath(path.join(OUT, 'icons', name));
 }
 
 let menuTimer: NodeJS.Timeout | null = null;
