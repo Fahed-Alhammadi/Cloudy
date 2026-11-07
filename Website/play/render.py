@@ -1,5 +1,5 @@
 """Renders the Google Play graphics in this folder with headless Chrome (macOS path below).
-Usage: python3 -I docs/play/render.py   — sources: ../screenshots/*.png (raw 1080x2400 emulator captures)."""
+Usage: python3 -I Website/play/render.py   — sources: ../screenshots/*.png (raw 1080x2400 emulator captures)."""
 import os, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -21,5 +21,5 @@ await build({ ...common, entryPoints: ['src/preload/preload.ts'], outfile: 'out/
 cpSync('src/ui', 'out/ui', { recursive: true });
 cpSync('i18n', 'out/i18n', { recursive: true });
 cpSync('assets/icons', 'out/icons', { recursive: true });
-cpSync('../docs/logo.svg', 'out/ui/logo.svg');
+cpSync('../Website/logo.svg', 'out/ui/logo.svg');
 console.log('Built to out/');

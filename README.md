@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/logo.svg" alt="" width="88"></p>
+<p align="center"><img src="Website/logo.svg" alt="" width="88"></p>
 
 <h1 align="center">Cloudy</h1>
 
@@ -17,11 +17,11 @@
   <a href="https://fahed-alhammadi.github.io/Cloudy/">Website</a> ·
   <a href="#install">Install</a> ·
   <a href="CHANGELOG.md">What's new</a> ·
-  <a href="docs/ARCHITECTURE.md">How it works</a> ·
+  <a href="Website/ARCHITECTURE.md">How it works</a> ·
   <a href="https://fahed-alhammadi.github.io/Cloudy/support.html">Support</a>
 </p>
 
-<p align="center"><img src="docs/screenshots/overview.png" alt="The Cloudy desktop app, the Android app and the iPhone app showing the same files." width="860"></p>
+<p align="center"><img src="Website/screenshots/overview.png" alt="The Cloudy desktop app, the Android app and the iPhone app showing the same files." width="860"></p>
 
 ## Why Cloudy
 
@@ -290,7 +290,7 @@ Set these in `docker-compose.yml` (the value after `:-`) or in a `.env` file nex
 | Desktop app | `cd desktop && npm install && npm start` (tests and packages: [desktop/README.md](desktop/README.md)) |
 | Translations complete | `python3 tests/i18n_check.py` |
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how Cloudy works inside.
+See [Website/ARCHITECTURE.md](Website/ARCHITECTURE.md) for how Cloudy works inside.
 
 ## Project layout
 
@@ -300,7 +300,7 @@ android/             native Android app (Kotlin, Jetpack Compose) → Google Pla
 ios/                 native iPhone app (Swift, SwiftUI) → App Store
 desktop/             desktop sync app (Electron, TypeScript) → GitHub releases
 deploy/              docker-compose.yml that builds the image from source
-docs/                website (screenshots), privacy policy, architecture notes
+Website/             website (screenshots), privacy policy, architecture notes
 tests/               end-to-end API/WebDAV/CalDAV/CardDAV tests, translation check
 scripts/             versions and release helpers
 .github/workflows/   one workflow per product (test and build; a tag such as ios-X.Y.Z publishes), translations.yml
