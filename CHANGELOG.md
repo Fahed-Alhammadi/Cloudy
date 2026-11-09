@@ -11,6 +11,12 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.15.1 (2026-11-09)
+
+- Removed `GET /api/diagnostics`. Only the Android app's Connection check used it, and that check is gone from
+  Android 1.15. On older Android versions, the check now shows "Server too old for the full check"; everything
+  else works as before.
+
 ## 1.15.0 (2026-11-06)
 
 - No changes to the server (release process test). There is no 1.14.0.

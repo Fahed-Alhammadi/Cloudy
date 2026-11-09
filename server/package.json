@@ -1,6 +1,6 @@
 {
   "name": "cloudy",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "private": true,
   "type": "module",
   "description": "Self-hosted file cloud with sharing, WebDAV, CalDAV and CardDAV — Node.js server with an HTML5 web app.",
