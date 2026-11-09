@@ -251,3 +251,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS language text;
 -- User shares point at users by name (no foreign key): ones left by accounts deleted with older versions would be inherited
 -- by a new account with the same name. deleteUser removes them now; this clears the old ones.
 DELETE FROM shares s WHERE s.type = 'user' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = s.share_with);
+
+-- SHA-256 of each blob's content (hex), for clients that compare files by content (desktop sync). Blobs are immutable
+-- and every node/version has its own, so the hash belongs to the blob: copies get a row for their new blob, versions
+-- and restores keep theirs, a content change brings a new blob. A table of its own (not a nodes column) so filling it
+-- in later never fires the nodes_notify trigger (no live-update event) and never touches a node's etag. Missing rows
+-- are computed in the background (files.ts hash queue + hourly backfill); rows of deleted blobs are cleared hourly.
+CREATE TABLE IF NOT EXISTS blob_hashes (
+  blob text PRIMARY KEY,
+  sha256 text NOT NULL
+);

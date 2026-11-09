@@ -11,6 +11,18 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.16.0 (2026-11-09)
+
+Faster syncing for the desktop app.
+
+- Files now carry a SHA-256 of their content (`sha256` in the file JSON of folder listings, `GET /api/nodes/:id` and
+  the other file lists; folders have none). It is computed while a file is uploaded, so uploads are not slower. Files
+  stored by older versions are hashed in the background after the update, one at a time, so for a while after the
+  first start some files show no hash yet (`null`); on large servers this can take a while and reads every file once.
+- The answer to the last chunk of an upload now contains the whole file entry (etag, modified time, hash…), the same
+  as a folder listing, so apps no longer need to ask for it again. Upload links still answer with name and size only.
+- Older apps keep working: both are additions.
+
 ## 1.15.1 (2026-11-09)
 
 - Removed `GET /api/diagnostics`. Only the Android app's Connection check used it, and that check is gone from

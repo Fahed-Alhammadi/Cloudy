@@ -191,8 +191,8 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
       // A partial PUT would be stored as the whole file (the rest of it lost). RFC 9110 §9.3.4: answer 400.
       if (req.headers['content-range']) throw new HttpError(400, 'Partial PUT (Content-Range) is not supported');
       const name = checkName(segs.at(-1)!); // before the body: a rejected name must not leave the upload in tmp/
-      const { file, size } = await F.streamToTemp(req, await F.remainingQuota(parent.owner));
-      const { node: saved, created } = await F.writeFile(parent, name, file, size);
+      const { file, size, sha256 } = await F.streamToTemp(req, await F.remainingQuota(parent.owner));
+      const { node: saved, created } = await F.writeFile(parent, name, file, size, { sha256 });
       res.writeHead(created ? 201 : 204, { ETag: `"${saved.etag}"`, 'Content-Length': 0 });
       return void res.end();
     }

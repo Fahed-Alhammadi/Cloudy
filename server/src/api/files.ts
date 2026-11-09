@@ -1,6 +1,7 @@
 import { createWriteStream } from 'node:fs';
 import { writeFile as fsWriteFile, truncate, rm } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import type { Hash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Router, Ctx } from '../http.ts';
@@ -42,7 +43,8 @@ export function registerFiles(r: Router, authed: Wrap) {
     const file = F.tmpPath(randomUUID());
     const content = Buffer.from(String(b.content ?? ''), 'utf8');
     await fsWriteFile(file, content);
-    const { node: created } = await F.writeFile(node, name, file, content.length);
+    const sha256 = createHash('sha256').update(content).digest('hex');
+    const { node: created } = await F.writeFile(node, name, file, content.length, { sha256 });
     json(res, (await F.toJson([created], user.id))[0], 201);
   }));
 
@@ -51,8 +53,8 @@ export function registerFiles(r: Router, authed: Wrap) {
     const { node } = await F.requireAccess(user.id, params.id, 'edit');
     if (node.is_dir) throw new HttpError(400, 'Not a file');
     const parent = await F.mustNode(node.parent_id!);
-    const { file, size } = await F.streamToTemp(req, await F.remainingQuota(node.owner));
-    const { node: saved } = await F.writeFile(parent, node.name, file, size);
+    const { file, size, sha256 } = await F.streamToTemp(req, await F.remainingQuota(node.owner));
+    const { node: saved } = await F.writeFile(parent, node.name, file, size, { sha256 });
     json(res, (await F.toJson([saved], user.id))[0]);
   }));
 
@@ -212,6 +214,12 @@ async function stillAllowed(u: { parent_id: number; user_id: string | null; shar
 }
 
 /**
+ * Running SHA-256 of each chunked upload, as of `at` bytes (= its saved `received`). Kept in memory only: after a
+ * restart (or with several processes) the hash is unknown, and the finished file is hashed in the background instead.
+ */
+const uploadHashes = new Map<string, { at: number; hash: Hash }>();
+
+/**
  * Upload ids are 192-bit random capabilities issued only after an access
  * check, so the chunk endpoints need no further authentication. This also
  * lets public "upload into link" shares reuse them.
@@ -236,11 +244,16 @@ export function registerUploadChunks(r: Router) {
     busy.add(u.id);
     const file = F.uploadPath(u.id);
     let received = u.received;
+    // Continue from the hash of the bytes saved so far; a copy, so a failed chunk leaves the saved state untouched.
+    const prev = uploadHashes.get(u.id);
+    const hash = prev?.at === u.received ? prev.hash.copy() : u.received === 0 ? createHash('sha256') : null;
     try {
       const limit = new Transform({
         transform(chunk, _e, cb) {
           received += chunk.length;
-          cb(received > u.size ? new HttpError(400, 'More data than declared') : null, chunk);
+          if (received > u.size) return cb(new HttpError(400, 'More data than declared'));
+          hash?.update(chunk);
+          cb(null, chunk);
         },
       });
       // Bytes past `received` (a chunk cut off by a crash or restart) go first. 'r+', not 'a': the file must already
@@ -252,6 +265,8 @@ export function registerUploadChunks(r: Router) {
       // Still ours? DELETE /api/uploads/:id (cancel) may have run while the chunk streamed in.
       const row = await one(`UPDATE uploads SET received = $2, updated_at = now() WHERE id = $1 RETURNING id`, [u.id, received]);
       if (!row) throw new HttpError(404, 'Upload not found');
+      if (hash) uploadHashes.set(u.id, { at: received, hash });
+      else uploadHashes.delete(u.id);
     } catch (e) {
       await truncate(file, u.received).catch(() => {});
       throw e instanceof HttpError ? e : new HttpError(400, 'Upload interrupted');
@@ -264,6 +279,9 @@ export function registerUploadChunks(r: Router) {
     const parent = await F.getNode(u.parent_id);
     // Claim it: of two requests finishing the same upload (a retry of the last chunk), only one stores the file.
     if (!(await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [u.id]))) throw new HttpError(404, 'Upload not found');
+    const done = uploadHashes.get(u.id);
+    uploadHashes.delete(u.id);
+    const sha256 = done?.at === received ? done.hash.digest('hex') : undefined;
     if (!parent || parent.deleted_at) {
       await rm(file, { force: true });
       throw new HttpError(409, 'Target folder no longer exists');
@@ -272,14 +290,18 @@ export function registerUploadChunks(r: Router) {
       await rm(file, { force: true });
       throw new HttpError(403, 'No longer allowed to upload here');
     }
-    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id });
-    json(res, { received, done: true, node: { id: node.id, name: node.name, size: node.size } });
+    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id, sha256 });
+    // A signed-in uploader gets the node exactly as GET /api/nodes/:id lists it (etag, mtime, sha256…), so it needs no
+    // extra request; a public-link visitor only what it had before (no owner name, favorites…).
+    const full = u.user_id ? (await F.toJson([node], u.user_id))[0] : { id: node.id, name: node.name, size: node.size };
+    json(res, { received, done: true, node: full });
   });
 
   r.delete('/api/uploads/:id', async ({ res, params }) => {
     const id = uploadId(params.id);
     const row = await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [id]);
     if (row) await rm(F.uploadPath(id), { force: true });
+    uploadHashes.delete(id);
     noContent(res);
   });
 }
@@ -288,4 +310,9 @@ export async function expireUploads(): Promise<void> {
   // Keyed on the last chunk, not the start: a big upload resumed over days keeps its session while it makes progress.
   const old = await q<{ id: string }>(`DELETE FROM uploads WHERE updated_at < now() - interval '1 day' RETURNING id`);
   await Promise.all(old.map((u) => rm(F.uploadPath(u.id), { force: true })));
+  // Running hashes of uploads that are gone (expired, cancelled elsewhere, deleted with their user).
+  const ids = [...uploadHashes.keys()];
+  if (!ids.length) return;
+  const live = new Set((await q<{ id: string }>(`SELECT id FROM uploads WHERE id = ANY($1)`, [ids])).map((r) => r.id));
+  for (const id of ids) if (!live.has(id)) uploadHashes.delete(id);
 }

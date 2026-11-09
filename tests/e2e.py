@@ -1,5 +1,5 @@
 """End-to-end smoke test for Cloudy. Usage: python3 -I e2e.py http://localhost:8088 admin <password>"""
-import base64, email, email.header, http.cookiejar, io, json, os, socketserver, sys, threading, time, urllib.request, urllib.error, zipfile, re, uuid
+import base64, hashlib, email, email.header, http.cookiejar, io, json, os, socketserver, sys, threading, time, urllib.request, urllib.error, zipfile, re, uuid
 
 BASE, ADMIN, ADMIN_PW = sys.argv[1], sys.argv[2], sys.argv[3]
 passed = failed = 0
@@ -133,6 +133,25 @@ check('wrong offset is 409 with received', s == 409 and r['received'] == cs, r)
 s, r = admin.req('PUT', f"/api/uploads/{up['id']}", payload[cs:], headers={'Upload-Offset': str(cs), 'Content-Type': 'application/octet-stream'})
 check('final chunk completes', s == 200 and r['done'], r)
 big = r['node']['id']
+fin = r['node']
+s, got = admin.req('GET', f'/api/nodes/{big}')
+check('final chunk returns the full node (as GET /api/nodes/:id)',
+      all(k in fin for k in ('etag', 'mtime', 'isDir', 'parentId', 'mime')) and fin['isDir'] is False
+      and fin['parentId'] == fid and {k: v for k, v in fin.items() if k != 'sha256'} == {k: v for k, v in got['node'].items() if k != 'sha256'},
+      (fin, got.get('node')))
+big_sha = hashlib.sha256(payload).hexdigest()
+def sha_of(node_id):
+    return admin.req('GET', f'/api/nodes/{node_id}')[1]['node'].get('sha256')
+check('final chunk returns sha256 of the content', fin.get('sha256') == big_sha, fin.get('sha256'))
+check('sha256 in GET /api/nodes/:id', wait_for(lambda: sha_of(big) == big_sha), sha_of(big))
+s, data = admin.req('GET', f'/api/nodes/{fid}')
+ch = next(c for c in data['children'] if c['id'] == big)
+check('sha256 in folder listing', ch.get('sha256') == big_sha, ch.get('sha256'))
+check('folders have no sha256', 'sha256' not in data['node'], data['node'])
+check('etag unchanged once the hash is known', got['node']['etag'] == fin['etag'])
+s, cpy = admin.req('POST', f'/api/nodes/{big}/copy', {'parentId': fid, 'name': 'big-copy.bin'})
+check('copy keeps sha256', s == 201 and wait_for(lambda: sha_of(cpy['id']) == big_sha), cpy)
+admin.req('DELETE', f"/api/nodes/{cpy['id']}")
 s, body, hd = admin.req('GET', f'/api/nodes/{big}/download', raw=True)
 check('download matches upload', s == 200 and body == payload, len(body))
 s, body, hd = admin.req('GET', f'/api/nodes/{big}/download', headers={'Range': 'bytes=100-199'}, raw=True)
@@ -146,11 +165,14 @@ s, note = admin.req('POST', f'/api/nodes/{fid}/files', {'name': 'note.md', 'cont
 check('create text file', s == 201)
 s, _ = admin.req('PUT', f"/api/nodes/{note['id']}/content", b'version two')
 check('save new content', s == 200)
+check('text file sha256', wait_for(lambda: sha_of(note['id']) == hashlib.sha256(b'version two').hexdigest()), sha_of(note['id']))
+check('overwrite changes sha256', note.get('sha256') == hashlib.sha256(b'v1').hexdigest() and sha_of(note['id']) != note['sha256'], note)
 s, vers = admin.req('GET', f"/api/nodes/{note['id']}/versions")
 check('previous version kept', s == 200 and len(vers) == 1 and vers[0]['size'] == 2, vers)
 s, _ = admin.req('POST', f"/api/nodes/{note['id']}/versions/{vers[0]['id']}/restore")
 s, body, _h = admin.req('GET', f"/api/nodes/{note['id']}/download", raw=True)
 check('restore version', body == b'v1', body)
+check('restored version brings its sha256 back', sha_of(note['id']) == hashlib.sha256(b'v1').hexdigest(), sha_of(note['id']))
 s, sub = admin.req('POST', f'/api/nodes/{fid}/folders', {'name': 'sub'})
 s, r = admin.req('PATCH', f"/api/nodes/{note['id']}", {'name': 'renamed.md', 'parentId': sub['id']})
 check('rename + move', s == 200 and r['name'] == 'renamed.md' and r['parentId'] == sub['id'], r)
@@ -231,6 +253,7 @@ admin.req('PATCH', f"/api/shares/{link['id']}", {'canEdit': True})
 s, up = anon.req('POST', f'/api/public/{tok}/uploads', {'parentId': fid, 'name': 'dropped.txt', 'size': 5})
 s, r = anon.req('PUT', f"/api/uploads/{up['id']}", b'hello', headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
 check('upload into editable link', s == 200 and r['done'], r)
+check('link upload answer stays minimal (no owner)', 'owner' not in r['node'] and r['node']['size'] == 5, r)
 s, page, _h = anon.req('GET', f'/s/{tok}', raw=True)
 check('public page served', s == 200 and b'public.js' in page)
 admin.req('PATCH', f"/api/shares/{link['id']}", {'expiresAt': '2000-01-01T00:00:00Z'})

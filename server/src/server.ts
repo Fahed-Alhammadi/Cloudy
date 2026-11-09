@@ -9,7 +9,7 @@ import type { Ctx } from './http.ts';
 import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
 import { ensureAdmin } from './users.ts';
-import { ensureDirs, expireTrash, cleanStorage } from './files.ts';
+import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes } from './files.ts';
 import { handleDav } from './dav/server.ts';
 import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
@@ -133,6 +133,8 @@ async function jobs(): Promise<void> {
     await expirePasswordResets();
     const n = await expireTrash();
     if (n) console.log(`purged ${n} expired trash item(s)`);
+    await gcHashes();
+    backfillHashes(); // runs on in the background, one blob at a time
   } catch (e) {
     console.error('background job failed', e);
   }

@@ -1,6 +1,6 @@
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, createReadStream } from 'node:fs';
 import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile, readdir, stat } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -76,18 +76,26 @@ async function duplicateBlob(blob: string): Promise<string> {
 }
 
 export async function dropBlobs(blobs: (string | null)[]): Promise<void> {
-  await Promise.all(blobs.filter((b): b is string => !!b).map((b) => rm(blobPath(b), { force: true })));
+  const ids = blobs.filter((b): b is string => !!b);
+  if (!ids.length) return;
+  await Promise.all(ids.map((b) => rm(blobPath(b), { force: true })));
+  await q(`DELETE FROM blob_hashes WHERE blob = ANY($1)`, [ids]).catch(() => {}); // leftovers go with gcHashes()
 }
 
-/** Streams a request body into a temp file. */
-/** Spools a request body to DATA_DIR/tmp; `max` (bytes, e.g. the owner's remaining quota) stops it before the disk fills. */
-export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ file: string; size: number }> {
+/**
+ * Spools a request body to DATA_DIR/tmp; `max` (bytes, e.g. the owner's remaining quota) stops it before the disk fills.
+ * Also hashes it on the way (SHA-256, hex), so the stored file needs no second read.
+ */
+export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ file: string; size: number; sha256: string }> {
   const file = tmpPath(randomUUID());
   let size = 0;
+  const hash = createHash('sha256');
   const counter = new Transform({
     transform(chunk, _enc, cb) {
       size += chunk.length;
-      cb(size > max ? new HttpError(507, 'Storage quota exceeded') : null, chunk);
+      if (size > max) return cb(new HttpError(507, 'Storage quota exceeded'));
+      hash.update(chunk);
+      cb(null, chunk);
     },
   });
   try {
@@ -96,7 +104,87 @@ export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ 
     await rm(file, { force: true });
     throw e;
   }
-  return { file, size };
+  return { file, size, sha256: hash.digest('hex') };
+}
+
+// ---------------------------------------------------------------- content hashes (blob_hashes)
+// Uploads usually bring their hash along (computed while streaming). Blobs stored without one (a chunked upload resumed
+// after a restart, copies of unhashed files, blobs from before 1.16) are hashed here, one at a time, after the request
+// has been answered: queued blobs first, then a backfill of every blob still missing a hash.
+
+const hashQueue: string[] = [];
+const queued = new Set<string>();
+let hashing = false;
+let backfill: { from: string; page: string[] } | null = null;
+
+/** Computes the hash of `blob` in the background (no-op when it is known already). */
+export function queueHash(blob: string): void {
+  if (queued.has(blob)) return;
+  queued.add(blob);
+  hashQueue.push(blob);
+  void runHashes();
+}
+
+/** Starts (or continues) hashing every stored blob that has no hash yet. Called at startup and hourly. */
+export function backfillHashes(): void {
+  backfill ??= { from: '', page: [] };
+  void runHashes();
+}
+
+/** Removes hashes whose blob no longer exists (rows a crash or a race with a delete left behind). */
+export async function gcHashes(): Promise<void> {
+  await q(`DELETE FROM blob_hashes h WHERE NOT EXISTS (SELECT 1 FROM nodes n WHERE n.blob = h.blob)
+             AND NOT EXISTS (SELECT 1 FROM versions v WHERE v.blob = h.blob)`);
+}
+
+async function nextBlob(): Promise<string | undefined> {
+  const b = hashQueue.shift();
+  if (b !== undefined) return b;
+  if (!backfill) return undefined;
+  if (!backfill.page.length) {
+    const rows = await q<{ blob: string }>(
+      `SELECT blob FROM (
+         SELECT blob FROM nodes WHERE blob IS NOT NULL UNION SELECT blob FROM versions
+       ) x WHERE blob > $1 AND NOT EXISTS (SELECT 1 FROM blob_hashes h WHERE h.blob = x.blob)
+       ORDER BY blob LIMIT 200`,
+      [backfill.from],
+    );
+    if (!rows.length) {
+      backfill = null;
+      return undefined;
+    }
+    backfill.page = rows.map((r) => r.blob);
+    backfill.from = backfill.page.at(-1)!;
+  }
+  return backfill.page.shift();
+}
+
+async function runHashes(): Promise<void> {
+  if (hashing) return;
+  hashing = true;
+  try {
+    for (let blob = await nextBlob(); blob !== undefined; blob = await nextBlob()) {
+      try {
+        await hashBlob(blob);
+      } catch (e: any) {
+        if (e?.code !== 'ENOENT') console.error(`hashing blob ${blob} failed:`, e?.message ?? e);
+      } finally {
+        queued.delete(blob);
+      }
+    }
+  } catch (e: any) {
+    backfill = null; // database gone: the next hourly run starts over
+    console.error('content hashing stopped:', e?.message ?? e);
+  } finally {
+    hashing = false;
+  }
+}
+
+async function hashBlob(blob: string): Promise<void> {
+  if (await one(`SELECT 1 FROM blob_hashes WHERE blob = $1`, [blob])) return;
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(blobPath(blob), { highWaterMark: 1 << 20 })) hash.update(chunk);
+  await q(`INSERT INTO blob_hashes (blob, sha256) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [blob, hash.digest('hex')]);
 }
 
 const MIME: Record<string, string> = {
@@ -375,7 +463,7 @@ export async function writeFile(
   name: string,
   file: string,
   size: number,
-  opts: { noOverwrite?: boolean } = {},
+  opts: { noOverwrite?: boolean; sha256?: string } = {},
 ): Promise<{ node: Node; created: boolean }> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   const blob = await adoptBlob(file);
@@ -404,6 +492,7 @@ export async function writeFile(
         ))!;
         await propagate(db, parent.id, size - existing.size);
         pruned = await pruneVersions(db, existing.id);
+        await saveHash(db, blob, opts.sha256);
         return { node, created: false };
       }
       const node = (await one<Node>(
@@ -413,14 +502,21 @@ export async function writeFile(
         db,
       ))!;
       await propagate(db, parent.id, size);
+      await saveHash(db, blob, opts.sha256);
       return { node, created: true };
     });
     await dropBlobs(pruned);
+    if (!opts.sha256) queueHash(blob);
     return out;
   } catch (e) {
     await dropBlobs([blob]);
     throw e;
   }
+}
+
+/** Stores a known hash in the same transaction as the node that uses the blob (so gcHashes never sees it orphaned). */
+async function saveHash(db: Db, blob: string, sha256: string | undefined): Promise<void> {
+  if (sha256) await q(`INSERT INTO blob_hashes (blob, sha256) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [blob, sha256], db);
 }
 
 async function pruneVersions(db: Db, nodeId: number): Promise<string[]> {
@@ -472,7 +568,7 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
   }
   const created: string[] = [];
   try {
-    return await tx(async (db) => {
+    const out = await tx(async (db) => {
       await lockChain(db, dest.id, node.id);
       await assertLive(db, dest.id, node.id);
       const src = await current(db, node.id); // its content now (blob, size), not the caller's copy
@@ -480,7 +576,11 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
       await checkQuota(db, dest.owner, size);
       const copyRec = async (src: Node, parentId: number, name: string): Promise<Node> => {
         const blob = src.blob ? await duplicateBlob(src.blob) : null;
-        if (blob) created.push(blob);
+        if (blob) {
+          created.push(blob);
+          // Same bytes, same hash (if the source's is known yet; otherwise the queue below computes it).
+          await q(`INSERT INTO blob_hashes (blob, sha256) SELECT $2, sha256 FROM blob_hashes WHERE blob = $1`, [src.blob, blob], db);
+        }
         const n = (await one<Node>(
           `INSERT INTO nodes (owner, parent_id, name, is_dir, size, mime, blob)
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLS}`,
@@ -494,6 +594,8 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
       await propagate(db, dest.id, size);
       return copy;
     });
+    for (const b of created) queueHash(b); // skipped at once when the hash came along
+    return out;
   } catch (e) {
     await dropBlobs(created);
     throw e;
@@ -691,6 +793,13 @@ export async function toJson(nodes: Node[], userId: string) {
   const shared = new Set(
     (await q<{ node_id: number }>(`SELECT DISTINCT node_id FROM shares WHERE node_id = ANY($1)`, [ids])).map((r) => r.node_id),
   );
+  const blobs = nodes.map((n) => n.blob).filter((b): b is string => !!b);
+  const hashes = new Map(
+    blobs.length
+      ? (await q<{ blob: string; sha256: string }>(`SELECT blob, sha256 FROM blob_hashes WHERE blob = ANY($1)`, [blobs]))
+        .map((r) => [r.blob, r.sha256])
+      : [],
+  );
   return nodes.map((n) => ({
     id: n.id,
     name: n.name,
@@ -703,5 +812,7 @@ export async function toJson(nodes: Node[], userId: string) {
     parentId: n.parent_id,
     favorite: favs.has(n.id),
     shared: shared.has(n.id),
+    // Files only: hex SHA-256 of the content, null while it is still being computed in the background.
+    sha256: n.is_dir ? undefined : (n.blob && hashes.get(n.blob)) || null,
   }));
 }
