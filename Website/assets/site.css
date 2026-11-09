@@ -86,6 +86,28 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .devices figcaption { margin: 22px 0 0; max-width: 34ch; font-size: var(--t-sm); color: var(--on-night-2); line-height: 1.5; }
 .devices figcaption::before { content: ""; display: block; width: 28px; border-top: 2px solid var(--sky); margin-bottom: 10px; }
 
+/* Google's official "Get it on Google Play" badge, unmodified. The PNG carries Google's required clear space
+   (about 6.3% of its width); the negative margin lines the black badge itself up with the text column. */
+.play-badge { display: inline-block; border-radius: 10px; line-height: 0; }
+.play-badge img { width: 216px; margin: -13.6px; max-width: none; }
+.play-badge.small img { width: 180px; margin: -11.3px; }
+.play-badge:focus-visible { outline-offset: 4px; }
+.store { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 28px; }
+.store span { color: var(--on-night-2); font-size: var(--t-sm); }
+.app .play-badge { margin-top: 14px; }
+
+/* Cloudy for Android: the Play Store screenshots on the night sky */
+.android { background: radial-gradient(60% 70% at 85% 0%, #0b4aa6, transparent 70%), var(--night); color: var(--on-night); overflow: hidden; }
+.android .wrap { display: grid; grid-template-columns: minmax(0, 0.62fr) minmax(0, 1.38fr); gap: 56px; align-items: center; }
+.android .lead { color: var(--on-night-2); margin-bottom: 36px; }
+.android .fine { margin: 22px 0 0; color: var(--on-night-2); font-size: var(--t-sm); }
+.android a:focus-visible { outline-color: var(--sky); }
+.play-strip { list-style: none; margin: 0 calc(50% - 50vw) 0 0; padding: 8px 40px 20px 4px; display: flex; gap: 18px; overflow-x: auto;
+  scroll-snap-type: x mandatory; scrollbar-width: thin; scrollbar-color: var(--night-line) transparent; }
+.play-strip li { flex: 0 0 236px; scroll-snap-align: start; }
+.play-strip img { width: 236px; border-radius: 20px; box-shadow: 0 20px 50px rgb(0 10 40 / 0.45); }
+.play-strip:focus-visible { outline: 3px solid var(--sky); outline-offset: 4px; border-radius: var(--r-sm); }
+
 /* sections */
 section { padding: 96px 0; }
 section h2 { font-size: var(--t-xl); line-height: 1.15; letter-spacing: -0.015em; margin: 0 0 14px; font-weight: 600; max-width: 26ch; text-wrap: balance; }
@@ -148,6 +170,8 @@ section .lead { color: var(--ink-2); font-size: var(--t-lg); line-height: 1.55; 
 .shots { mask-image: linear-gradient(90deg, #000 92%, transparent); display: flex; gap: 18px; overflow-x: auto; padding: 4px 4px 16px; margin: 0 -4px; scroll-snap-type: x mandatory; list-style: none; }
 .shots li { flex: 0 0 200px; scroll-snap-align: start; }
 .shots img { width: 200px; border-radius: 18px; border: 1px solid var(--line); background: var(--surface); }
+.shots.tablet li { flex-basis: 280px; }
+.shots.tablet img { width: 280px; }
 .shots span { display: block; margin-top: 8px; color: var(--ink-3); font-size: var(--t-sm); }
 .shots:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; border-radius: var(--r-sm); }
 
@@ -185,7 +209,10 @@ footer a:hover, footer a[aria-current] { color: #fff; text-decoration: underline
   .facts div:last-child { grid-column: 1 / -1; max-width: calc(50% - 24px); }
 }
 @media (max-width: 920px) {
-  .hero .wrap, .split { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+  .hero .wrap, .split, .android .wrap { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+  .play-strip { margin-inline: -20px; padding-inline: 20px; scroll-padding-inline: 20px; }
+  .play-strip li { flex-basis: 200px; }
+  .play-strip img { width: 200px; }
   .hero .wrap { padding: 56px 0 72px; }
   .devices { justify-self: start; }
   .features, .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -7,10 +7,13 @@
 <p align="center">
   <a href="CHANGELOG.md"><img src="https://img.shields.io/github/package-json/v/Fahed-Alhammadi/Cloudy?filename=server%2Fpackage.json&label=server&color=0A55C4" alt="Server version"></a>
   <a href="https://github.com/Fahed-Alhammadi/Cloudy/releases/latest"><img src="https://img.shields.io/github/v/release/Fahed-Alhammadi/Cloudy?label=desktop&color=0A55C4" alt="Latest desktop app release"></a>
-  <a href="https://play.google.com/store/apps/details?id=io.cloudy.app"><img src="https://img.shields.io/badge/Google%20Play-Android-0A55C4" alt="Get it on Google Play"></a>
   <a href="https://testflight.apple.com/join/X1M6sYZm"><img src="https://img.shields.io/badge/TestFlight-iPhone%20beta-0A55C4" alt="Join the iPhone beta on TestFlight"></a>
   <a href="https://github.com/Fahed-Alhammadi/Cloudy/actions/workflows/server.yml"><img src="https://github.com/Fahed-Alhammadi/Cloudy/actions/workflows/server.yml/badge.svg?branch=main" alt="Server tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-062B66" alt="MIT License"></a>
+</p>
+
+<p align="center">
+  <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="80"></a>
 </p>
 
 <p align="center">
@@ -39,10 +42,24 @@
 | App | What it does | Get it |
 |---|---|---|
 | Web | Files, sharing, calendar, contacts, administration | Built into every server |
-| Android | Files, offline files, photo backup, document scanner, calendar, contacts | [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app) |
+| Android (phones and tablets) | Files, offline files, photo backup, document scanner, calendar, contacts | <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="54"></a> |
 | iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
 | Mac, Windows, Linux | Keeps a folder on your computer in sync with your files | [Releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) |
 | Other apps | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar and Contacts |
+
+### Android app
+
+<p align="center">
+  <img src="Website/play/web/01-files.jpg" alt="Files on your own server" width="190">
+  <img src="Website/play/web/03-photos.jpg" alt="Automatic photo backup" width="190">
+  <img src="Website/play/web/04-sharing.jpg" alt="Sharing with people or a link" width="190">
+  <img src="Website/play/web/05-calendar.jpg" alt="Calendar" width="190">
+</p>
+
+<p align="center"><a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="70"></a></p>
+
+Install Cloudy from [Google Play](https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en), then sign in
+with your server's address, your username and your password. It runs on Android 8 or newer, on phones and tablets.
 
 ### Desktop app
 
@@ -318,3 +335,7 @@ Cloudy is released under the [MIT License](LICENSE). © 2026 Fahed Alhammadi
 The website uses the [IBM Plex](https://github.com/IBM/plex) fonts, licensed under the
 [SIL Open Font License 1.1](https://openfontlicense.org). Dependencies keep their own licenses (see the
 `package-lock.json` files and the apps' build files).
+
+Google Play and the Google Play logo are trademarks of Google LLC.
+
+© 2026 Fahed Alhammadi. All rights reserved.
