@@ -171,9 +171,10 @@ function statusText(): string {
 
 // ---------------------------------------------------------------- tray
 
-// The blue app tile everywhere, like the phone apps; macOS gets an 18 pt version sized for the menu bar.
+// Just the cloud, monochrome like the system's own icons. macOS: an 18 pt template image (the "Template" suffix
+// makes it one), which the menu bar tints white or black to match itself. Windows/Linux: a white cloud.
 function trayIcon() {
-  const name = process.platform === 'darwin' ? 'trayMac.png' : 'tray.png';
+  const name = process.platform === 'darwin' ? 'trayMacTemplate.png' : 'tray.png';
   return nativeImage.createFromPath(path.join(OUT, 'icons', name));
 }
 
