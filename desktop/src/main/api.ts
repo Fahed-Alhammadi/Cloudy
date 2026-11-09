@@ -12,6 +12,8 @@ export interface RemoteNode {
   etag: string;
   mtime: string;
   parentId: number | null;
+  /** SHA-256 of the content (servers from 1.16; null while the server is still computing it, absent for folders). */
+  sha256?: string | null;
 }
 
 /** `id` is the username. */
@@ -88,8 +90,9 @@ function deadline(signal: AbortSignal | undefined, ms: number) {
 
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal?.aborted) return reject(signal.reason);
-  const t = setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason); }, { once: true });
+  const onAbort = () => { clearTimeout(t); reject(signal!.reason); };
+  const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+  signal?.addEventListener('abort', onAbort, { once: true }); // removed when the timer fires: the engine's signal lives long
 });
 
 export class Api {
@@ -171,17 +174,17 @@ export class Api {
    * Chunked upload; replaces a file with the same name, keeping the old one as a version. A chunk that fails on the
    * way (dropped connection, server restart) is retried a few times from the offset the server actually stored.
    */
-  async upload(parentId: number, name: string, file: string, size: number, signal?: AbortSignal): Promise<{ id: number }> {
+  async upload(parentId: number, name: string, file: string, size: number, signal?: AbortSignal): Promise<{ id: number } & Partial<RemoteNode>> {
     const up = await this.json<{ id: string; chunkSize: number }>('POST', '/api/uploads', { parentId, name, size }, signal);
     const fh = await open(file, 'r');
     try {
       let offset = 0;
       let failures = 0;
-      const buf = Buffer.alloc(Math.min(up.chunkSize, Math.max(size, 1)));
+      const buf = Buffer.allocUnsafe(Math.min(up.chunkSize, Math.max(size, 1))); // every byte sent is read from the file first
       for (;;) {
         const { bytesRead } = await fh.read(buf, 0, Math.min(buf.length, size - offset), offset);
         if (bytesRead === 0 && offset < size) throw new Error('File got shorter while uploading');
-        let r: { received: number; done: boolean; node?: { id: number } };
+        let r: { received: number; done: boolean; node?: { id: number } & Partial<RemoteNode> };
         try {
           r = await this.call('PUT', `/api/uploads/${up.id}`, buf.subarray(0, bytesRead),
             { 'Upload-Offset': String(offset), 'Content-Type': 'application/octet-stream' }, signal, CHUNK_TIMEOUT);

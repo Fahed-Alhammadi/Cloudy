@@ -4,9 +4,18 @@
 // successful sync). A side "changed" if it differs from base; one-sided changes are copied to the other side, changes on
 // both sides keep both copies ("conflicted copy"). Deletions go to the server's trash or the computer's trash, never
 // straight to oblivion. Renames are detected by inode (local) and node id (server) so moving a folder doesn't re-transfer it.
-// The server listing is cached per folder and only re-read when the folder's etag changed (etags change up the tree).
+//
+// Keeping it cheap on large folders:
+// - The server listing is cached per folder and only re-read when the folder's etag changed (etags change up the tree);
+//   changed folders are read in parallel.
+// - The local listing is cached per folder too. While the folder watcher works, a cycle only re-reads the folders it
+//   reported (and the ones this engine wrote to); a full scan still runs at start, every few minutes and whenever the
+//   watcher is not trusted. Without a watcher every cycle is a full scan.
+// - Events caused by this engine's own writes (downloads, new folders, deletions) do not start another cycle.
+// - Work over the whole tree is done once per cycle (sets of changed folders, file counts), never once per item.
+// - The state file is only written when something in it changed.
 import { readdir, lstat, mkdir, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises';
-import { createReadStream, watch, type FSWatcher } from 'node:fs';
+import { createReadStream, watch, lstat as lstatCb, type FSWatcher, type Stats } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import path from 'node:path';
@@ -19,8 +28,9 @@ import { ApiError, isNetworkError, type Api, type RemoteNode } from './api.ts';
 export interface Entry { dir: boolean; id?: number; etag?: string; rmtime?: string; size: number; mtime: number; ino?: number; lname?: string }
 /** `name`: the name as it is on disk (the map key uses the server's spelling when the filesystem treats both as one). */
 interface Local { dir: boolean; size: number; mtime: number; ino: number; name: string }
-interface Remote { dir: boolean; id: number; etag: string; size: number; mtime: string }
-type Child = Pick<RemoteNode, 'id' | 'name' | 'isDir' | 'size' | 'etag' | 'mtime'>;
+/** `sha256`: content hash from servers that have it (1.16+); lets a first sync compare files without downloading them. */
+interface Remote { dir: boolean; id: number; etag: string; size: number; mtime: string; sha256?: string }
+type Child = Pick<RemoteNode, 'id' | 'name' | 'isDir' | 'size' | 'etag' | 'mtime'> & { sha256?: string };
 
 export interface SyncState {
   rootId: number;
@@ -107,23 +117,168 @@ export async function stateFitsServer(api: Pick<Api, 'node'>, state: SyncState |
   return same > 0 && same * 2 >= cached.children.filter((c) => now.has(c.id)).length;
 }
 
+/**
+ * The state as stored on disk (version 2): base entries and server listings as arrays instead of objects with the same
+ * keys repeated for every file, about half the size. `unpackState` also reads the older object form.
+ */
+type PackedEntry = [dir: 0 | 1, id: number | null, etag: string | null, rmtime: string | null, size: number, mtime: number, ino: number | null, lname?: string];
+type PackedChild = [id: number, name: string, isDir: 0 | 1, size: number, etag: string, mtime: string, sha256?: string];
+export interface PackedState { v: 2; rootId: number; root?: string; base: Record<string, PackedEntry>; folders: Record<string, [id: number, etag: string, children: PackedChild[]]> }
+
+export function packState(s: SyncState): PackedState {
+  const base: Record<string, PackedEntry> = {};
+  for (const [k, e] of Object.entries(s.base)) {
+    const row: PackedEntry = [e.dir ? 1 : 0, e.id ?? null, e.etag ?? null, e.rmtime ?? null, e.size, e.mtime, e.ino ?? null];
+    if (e.lname) row.push(e.lname);
+    base[k] = row;
+  }
+  const folders: PackedState['folders'] = {};
+  for (const [k, f] of Object.entries(s.folders)) {
+    folders[k] = [f.id, f.etag, f.children.map((c) => {
+      const row: PackedChild = [c.id, c.name, c.isDir ? 1 : 0, c.size, c.etag, c.mtime];
+      if (c.sha256) row.push(c.sha256);
+      return row;
+    })];
+  }
+  return { v: 2, rootId: s.rootId, root: s.root, base, folders };
+}
+
+export function unpackState(raw: any): SyncState | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.v !== 2) return raw as SyncState; // version 1: stored as it is in memory
+  const isObj = (o: unknown) => !!o && typeof o === 'object' && !Array.isArray(o);
+  if (!isObj(raw.base) || !isObj(raw.folders)) return null;
+  try {
+    const base: Record<string, Entry> = {};
+    for (const [k, r] of Object.entries(raw.base as Record<string, PackedEntry>)) {
+      const e: Entry = { dir: r[0] === 1, size: r[4], mtime: r[5] };
+      if (r[1] !== null) e.id = r[1];
+      if (r[2] !== null) e.etag = r[2];
+      if (r[3] !== null) e.rmtime = r[3];
+      if (r[6] !== null) e.ino = r[6];
+      if (r[7]) e.lname = r[7];
+      base[k] = e;
+    }
+    const folders: SyncState['folders'] = {};
+    for (const [k, [id, etag, children]] of Object.entries(raw.folders as PackedState['folders'])) {
+      folders[k] = { id, etag, children: children.map((c) => {
+        const child: Child = { id: c[0], name: c[1], isDir: c[2] === 1, size: c[3], etag: c[4], mtime: c[5] };
+        if (c[6]) child.sha256 = c[6];
+        return child;
+      }) };
+    }
+    return { rootId: raw.rootId, root: raw.root, base, folders };
+  } catch {
+    return null; // damaged: start over (always safe, nothing is deleted)
+  }
+}
+
 const IGNORED = /^(\.DS_Store|\._.*|Thumbs\.db|desktop\.ini|\.directory|Icon\r|~\$.*|\.~lock\..*#|.*\.swp|\.cloudy-tmp-.*)$/i;
 const WINDOWS_BAD = /[<>:"|?*\x00-\x1f]|[. ]$|^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
 const MASS_DELETE = 100;
-const PARALLEL = 4;
+/** Downloads/uploads at once. */
+const TRANSFERS = 6;
+/** Server requests at once for listings, new folders and deletions (small, latency-bound requests). */
+const REQUESTS = 8;
+/** Local folders read at once (each folder's entries are lstat'ed in parallel). */
+const SCAN_DIRS = 16;
+/** During a long cycle the state is saved at most this often (and always at the end of a cycle, when it changed). */
+const SAVE_EVERY = 10_000;
+/** How long after its own write an event for that path is checked against what was written (see isEcho). */
+const ECHO_MS = 5000;
 
 export const isIgnored = (name: string) => IGNORED.test(name);
 const parentOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const nameOf = (p: string) => p.slice(p.lastIndexOf('/') + 1);
-const under = (p: string, dir: string) => p.startsWith(dir + '/');
+const under = (p: string, dir: string) => p.length > dir.length && p.startsWith(dir) && p[dir.length] === '/';
 const depth = (p: string) => p.split('/').length;
 const sameFile = (l: Local | Entry, b: Local | Entry) => l.size === b.size && l.mtime === b.mtime;
+/** Is one of `p`'s folders (not `p` itself) in `set`? O(depth). */
+const ancestorIn = (set: Set<string>, p: string) => {
+  if (!set.size) return false;
+  for (let d = parentOf(p); d; d = parentOf(d)) if (set.has(d)) return true;
+  return false;
+};
+/** Adds every folder above `p` to `set` (stops at the first one already there: its parents are there too). */
+const addAncestors = (set: Set<string>, p: string) => {
+  for (let d = parentOf(p); d && !set.has(d); d = parentOf(d)) set.add(d);
+};
 
 /**
  * Signed out, or the server is failing: stops every worker of the cycle instead of failing file by file. "Storage
  * full" (507) is about one upload: downloads, moves and deletes still go on.
  */
 const isFatal = (e: any) => (e instanceof ApiError && (e.status === 401 || (e.status >= 500 && e.status !== 507))) || isNetworkError(e);
+
+/**
+ * A folder's entries as last read from disk: `null` = vanished while reading, 'other' = symlink or special file.
+ * `ino`: the folder's own inode. A path can name another folder later (two folders swapped by renames, a folder deleted
+ * and created again) without anything inside reporting a change: a listing is reused only for the same inode.
+ */
+interface Listing { full: string; ino: number; names: string[]; stats: (Local | 'other' | null)[] }
+/** What a path looked like right after this engine wrote it: null = not there. */
+type Snap = { dir: boolean; size: number; mtime: number } | null;
+interface SelfWrite { busy: number; until: number; snap?: Snap }
+
+const snapOf = (st: Stats | null): Snap => (st ? { dir: st.isDirectory(), size: st.isDirectory() ? 0 : st.size, mtime: st.isDirectory() ? 0 : Math.floor(st.mtimeMs) } : null);
+const sameSnap = (a: Snap, b: Snap | undefined) => (a === null || b === null || b === undefined ? a === b : a.dir === b.dir && a.size === b.size && a.mtime === b.mtime);
+
+/**
+ * lstat of the names in `dir`, up to 1024 at a time (callbacks: far less overhead per entry than fs/promises; the
+ * bound keeps a folder with 100k entries from queueing them all at once).
+ */
+function lstatAll(dir: string, names: string[]): Promise<(Local | 'other' | null)[]> {
+  return new Promise((resolve) => {
+    const out: (Local | 'other' | null)[] = new Array(names.length).fill(null);
+    let next = 0;
+    let left = names.length;
+    if (!left) return resolve(out);
+    const start = () => {
+      const i = next++;
+      const name = names[i];
+      lstatCb(path.join(dir, name), (err, st) => {
+        if (!err) {
+          out[i] = st.isFile() || st.isDirectory()
+            ? { dir: st.isDirectory(), size: st.isFile() ? st.size : 0, mtime: Math.floor(st.mtimeMs), ino: st.ino, name }
+            : 'other';
+        }
+        if (--left === 0) resolve(out);
+        else if (next < names.length) start();
+      });
+    };
+    for (let k = 0; k < 1024 && next < names.length; k++) start();
+  });
+}
+
+/**
+ * Runs `work` over `items` with at most `limit` at once; `work` may add more items. On the first error nothing new
+ * starts, and it rejects once the running ones have ended (so none of them touches the next cycle's data).
+ */
+function drain<T>(items: T[], limit: number, work: (item: T, push: (t: T) => void) => Promise<void>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let active = 0;
+    let error: { e: unknown } | null = null;
+    const pump = () => {
+      while (!error && active < limit && items.length) {
+        const item = items.pop()!;
+        active++;
+        work(item, push).then(() => { active--; pump(); }, (e) => { error ??= { e }; active--; pump(); });
+      }
+      if (!active && (error || !items.length)) {
+        if (error) reject(error.e);
+        else resolve();
+      }
+    };
+    const push = (t: T) => { items.push(t); };
+    pump();
+  });
+}
+
+/** Runs `work` over `items` in order with at most `limit` at once (errors are handled by `work`). */
+async function pool<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) await work(items[i++]); }));
+}
 
 export class SyncEngine extends EventEmitter {
   api: Api;
@@ -134,6 +289,8 @@ export class SyncEngine extends EventEmitter {
   status: Status = { phase: 'idle', done: 0, total: 0 };
   activity: Activity[] = [];
   problems: Problem[] = [];
+  /** The last local scan: whether it read every folder, how many folders it read from disk and how many it went through. */
+  lastScan = { full: true, read: 0, dirs: 0 };
   private o: EngineOptions;
   private platform: string;
   private caseInsensitive: boolean;
@@ -146,11 +303,16 @@ export class SyncEngine extends EventEmitter {
   /**
    * Paths of this cycle that could not be read or are not allowed (unreadable folders, symlinks, bad names, case
    * duplicates). They are left alone on both sides: "missing from the scan" must never turn into "deleted".
+   * Stored folded (see foldPath).
    */
   private unknown = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private interval: NodeJS.Timeout | null = null;
   private watcher: FSWatcher | null = null;
+  /** Linux: one watcher per folder (Node's recursive watch walks the whole tree synchronously and fails badly at the inotify limit). */
+  private dirWatchers = new Map<string, { w: FSWatcher; ino: number }>();
+  /** The watcher works: cycles started by its events may re-read only the folders it reported. */
+  private watching = false;
   private live: AbortController | null = null;
   /** Aborted by stop() and pause(): running downloads and uploads end at once instead of finishing first. */
   private abort = new AbortController();
@@ -161,7 +323,25 @@ export class SyncEngine extends EventEmitter {
   /** Server names per folder path, by folded name: lets the local scan use the server's spelling for the same file. */
   private remoteNames = new Map<string, Map<string, string>>();
   private lastSave = 0;
+  /** Something in `state` changed since the last save. */
+  private stateDirty: boolean;
   private rootReal: string | null = null;
+  /** Local listings by folded path (see foldPath), from the last scan. */
+  private dirCache = new Map<string, Listing>();
+  /** Folders (folded paths) whose listing must be read again; filled by the watcher and by this engine's own writes. */
+  private dirtyDirs = new Set<string>();
+  /** The next scan reads every folder. */
+  private fullScan = true;
+  /** Paths (folded) this engine is writing or just wrote: their watcher events are its own (see isEcho). */
+  private selfWrites = new Map<string, SelfWrite>();
+  /** Folders forgotten this cycle whose entries below are removed from base in one pass (see flushForget). */
+  private pendingForget = new Set<string>();
+  /** Base by inode and by folded path, built once per cycle for localTreeUnchanged. */
+  private baseIndex: { byIno: Map<number, string>; byPath: Map<string, string> } | null = null;
+  /** Names in local folders by folded name, for diskName (one readdir per folder per cycle). */
+  private dirNames = new Map<string, Map<string, string>>();
+  /** `excluded` as of the start of the running cycle (see isExcluded). */
+  private cycleExcluded: string[] | null = null;
 
   constructor(o: EngineOptions) {
     super();
@@ -178,6 +358,7 @@ export class SyncEngine extends EventEmitter {
     const usable = st && st.rootId === o.rootId && (!st.root || st.root === o.root)
       && st.base && typeof st.base === 'object' && st.folders && typeof st.folders === 'object';
     this.state = usable ? st : { rootId: o.rootId, root: o.root, base: {}, folders: {} };
+    this.stateDirty = !usable || st.root !== o.root;
     this.state.root = o.root;
   }
 
@@ -188,18 +369,102 @@ export class SyncEngine extends EventEmitter {
     this.stopped = false;
     this.signedOut = false;
     if (this.abort.signal.aborted) this.abort = new AbortController();
-    try {
-      this.watcher = watch(this.root, { recursive: true }, (_ev, file) => {
-        const name = file ? path.basename(String(file)) : '';
-        if (!name || !isIgnored(name)) this.schedule(1500);
-      });
-      this.watcher.on('error', () => { this.watcher?.close(); this.watcher = null; });
-    } catch {
-      this.watcher = null; // the periodic check still runs
-    }
-    this.interval = setInterval(() => this.schedule(0), (this.o.intervalSec ?? (this.watcher ? 300 : 60)) * 1000);
+    this.fullScan = true;
+    this.watching = this.startWatching();
+    this.resetInterval();
     if (this.o.live !== false) void this.listen();
     this.schedule(0);
+  }
+
+  /** Full checks on a timer: every 5 minutes as a safety net while the watcher works, every minute without it. */
+  private resetInterval(): void {
+    if (this.interval) clearInterval(this.interval);
+    this.interval = setInterval(() => { this.fullScan = true; this.schedule(0); }, (this.o.intervalSec ?? (this.watching ? 300 : 60)) * 1000);
+  }
+
+  private get perFolderWatch() { return process.platform === 'linux'; }
+
+  private startWatching(): boolean {
+    if (this.perFolderWatch) return true; // added by the scan, before each folder is read (watchDir)
+    try {
+      this.watcher = watch(this.root, { recursive: true }, (_ev, file) => this.onFsEvent(file == null ? null : String(file)));
+      this.watcher.on('error', () => this.watcherFailed());
+      return true;
+    } catch {
+      this.watcher = null; // the periodic check still runs
+      return false;
+    }
+  }
+
+  private closeWatchers(): void {
+    this.watcher?.close();
+    this.watcher = null;
+    for (const { w } of this.dirWatchers.values()) w.close();
+    this.dirWatchers.clear();
+  }
+
+  /**
+   * The folder watcher stopped working (an error, or Linux's inotify limit, ENOSPC): from now on every cycle reads the
+   * whole folder and the timer checks every minute. Also called by the app for watcher errors that Node throws
+   * outside of the watcher's 'error' event.
+   */
+  watcherFailed(): void {
+    if (!this.watching) return;
+    this.closeWatchers();
+    this.watching = false;
+    this.fullScan = true;
+    if (this.stopped) return;
+    this.resetInterval();
+    this.schedule(0);
+  }
+
+  /** `rel`: the changed path on disk, relative to the root (null: unknown, read everything). */
+  private onFsEvent(rel: string | null): void {
+    if (this.stopped) return;
+    if (rel === null) { this.fullScan = true; this.schedule(1500); return; }
+    if (path.sep !== '/') rel = rel.split(path.sep).join('/');
+    if (!rel || isIgnored(nameOf(rel))) return;
+    const f = this.foldPath(rel);
+    this.dirtyDirs.add(parentOf(f));
+    this.dirtyDirs.add(f); // a folder of its own: read it too (it is new, or something in it changed)
+    this.isEcho(rel, f).then((echo) => { if (!echo) this.schedule(1500); }, () => this.schedule(1500));
+  }
+
+  /**
+   * True if this event is about a write of this engine: the path is being written, or it still looks exactly like
+   * right after the write. Anything else (the user edited the file meanwhile) starts a cycle as usual.
+   */
+  private async isEcho(rel: string, folded: string): Promise<boolean> {
+    const w = this.selfWrites.get(folded);
+    if (!w) return false;
+    if (w.busy) return true;
+    if (Date.now() > w.until) { this.selfWrites.delete(folded); return false; }
+    return sameSnap(snapOf(await lstat(this.full(rel)).catch(() => null)), w.snap);
+  }
+
+  /** Marks local paths this engine is about to write (and their folders). */
+  private beginWrite(paths: string[]): string[] {
+    const keys = [...new Set(paths.flatMap((p) => [p, parentOf(p)]).map((p) => this.foldPath(p)))];
+    for (const k of keys) {
+      const w = this.selfWrites.get(k);
+      if (w) { w.busy++; w.until = Infinity; } else this.selfWrites.set(k, { busy: 1, until: Infinity });
+    }
+    return keys;
+  }
+
+  /** After a write: its folders are read again by the next scan, and their state is remembered for isEcho. */
+  private async endWrite(keys: string[]): Promise<void> {
+    for (const k of keys) this.dirtyDirs.add(k);
+    await Promise.all(keys.map(async (k) => {
+      const w = this.selfWrites.get(k);
+      if (!w || --w.busy > 0) return;
+      const st = await lstat(this.full(k)).catch(() => null);
+      w.snap = snapOf(st);
+      if (!w.busy) w.until = Date.now() + ECHO_MS;
+      // Linux: a folder this engine just created needs its own watcher now, not after the next scan (the user may
+      // edit in it before then, and its own writes start no cycle).
+      if (st?.isDirectory() && this.perFolderWatch && this.watching) this.watchDir(this.full(k), k, st.ino);
+    }));
   }
 
   /**
@@ -208,14 +473,17 @@ export class SyncEngine extends EventEmitter {
    */
   async stop(opts: { save?: boolean } = {}): Promise<void> {
     this.stopped = true;
-    this.watcher?.close();
-    this.watcher = null;
+    this.closeWatchers();
+    this.watching = false;
     if (this.interval) clearInterval(this.interval);
     if (this.timer) clearTimeout(this.timer);
     this.live?.abort();
     this.abort.abort();
     await this.inflight?.catch(() => {});
-    if (opts.save) await this.o.saveState(this.state).catch(() => {});
+    if (opts.save && this.stateDirty) {
+      this.flushForget();
+      await this.o.saveState(this.state).catch(() => {});
+    }
   }
 
   /** Pauses syncing; a running download or upload is aborted (it starts over on resume). */
@@ -228,12 +496,19 @@ export class SyncEngine extends EventEmitter {
   resume(): void {
     this.paused = false;
     this.signedOut = false;
+    this.fullScan = true;
     if (this.abort.signal.aborted) this.abort = new AbortController();
     this.setStatus({ phase: 'idle' });
     this.schedule(0);
   }
 
   get isPaused() { return this.paused; }
+
+  /** Syncs soon, reading every local folder (waking from sleep, "Sync now"): nothing that the watcher missed stays unseen. */
+  rescan(ms = 0): void {
+    this.fullScan = true;
+    this.schedule(ms);
+  }
 
   schedule(ms = 1000): void {
     if (this.stopped || this.signedOut) return; // signed out: nothing works until a new sign-in restarts the engine
@@ -273,6 +548,7 @@ export class SyncEngine extends EventEmitter {
       } while (this.again && !this.paused && !this.stopped);
       if (!this.paused && !this.stopped) this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined, code: undefined });
     } catch (e: any) {
+      this.fullScan = true; // whatever this cycle had read is not trusted
       await this.save(true).catch(() => {});
       if (this.stopped || this.paused) return; // aborted on purpose
       const msg = e?.message ?? String(e);
@@ -309,15 +585,69 @@ export class SyncEngine extends EventEmitter {
 
   private async save(force = false): Promise<void> {
     if (this.stopped) return; // a replacement engine (new folder, new account) owns the state file now
-    if (!force && Date.now() - this.lastSave < 5000) return;
+    if (!this.stateDirty) return;
+    if (!force && Date.now() - this.lastSave < SAVE_EVERY) return;
+    this.flushForget();
+    this.stateDirty = false;
     this.lastSave = Date.now();
-    await this.o.saveState(this.state);
+    try {
+      await this.o.saveState(this.state);
+    } catch (e) {
+      this.stateDirty = true;
+      throw e;
+    }
+  }
+
+  // ------------------------------------------------------------ base changes (all of them mark the state dirty)
+
+  private setBase(p: string, e: Entry): void {
+    this.state.base[p] = e;
+    this.stateDirty = true;
+  }
+
+  /** Renames base entries `from` (and below) to `to`. */
+  private rebase(from: string, to: string): void {
+    const base = this.state.base;
+    this.stateDirty = true;
+    const e = base[from];
+    if (e && !e.dir) { delete base[from]; base[to] = e; return; } // a file: nothing below it (many files moved at once)
+    for (const k of Object.keys(base)) {
+      if (k === from || under(k, from)) {
+        const v = base[k];
+        delete base[k];
+        base[to + k.slice(from.length)] = v;
+      }
+    }
+  }
+
+  /** Removes `p` from base; the entries below a folder go in one pass over base later (flushForget), not one per folder. */
+  private forget(p: string): void {
+    const base = this.state.base;
+    const wasFile = base[p]?.dir === false;
+    if (p in base) { delete base[p]; this.stateDirty = true; }
+    if (!wasFile) this.pendingForget.add(p);
+  }
+
+  private flushForget(): void {
+    if (!this.pendingForget.size) return;
+    const base = this.state.base;
+    for (const k of Object.keys(base)) if (ancestorIn(this.pendingForget, k)) { delete base[k]; this.stateDirty = true; }
+    this.pendingForget.clear();
   }
 
   // ------------------------------------------------------------ selective sync
 
+  /**
+   * Excluded as of the start of this cycle: the server walk and the local scan must agree (a folder unticked between
+   * them would otherwise be on the server but "deleted here", and go to the server trash).
+   */
   isExcluded(p: string): boolean {
-    return this.excluded.some((e) => p === e || under(p, e));
+    return (this.cycleExcluded ?? this.excluded).some((e) => p === e || under(p, e));
+  }
+
+  /** Excluded since this cycle started: left alone until the next one (removeExcluded). */
+  private excludedMeanwhile(p: string): boolean {
+    return this.cycleExcluded !== null && this.excluded !== this.cycleExcluded && this.excluded.some((e) => p === e || under(p, e));
   }
 
   /**
@@ -329,15 +659,19 @@ export class SyncEngine extends EventEmitter {
     const added = list.filter((e) => !this.excluded.includes(e));
     this.excluded = [...list];
     this.pendingRemove = [...this.pendingRemove.filter((e) => list.includes(e)), ...added];
+    this.fullScan = true; // folders that are synced again must be read
     this.schedule(0);
   }
 
   private async removeExcluded(): Promise<void> {
     for (const e of this.pendingRemove.splice(0)) {
       if (!this.excluded.includes(e) || !Object.keys(this.state.base).some((k) => k === e || under(k, e))) continue;
-      if (await this.localTreeUnchanged(e)) await this.o.trash(this.full(e)).catch(() => {});
-      else this.emit('kept', e);
+      if (await this.localTreeUnchanged(e)) {
+        const w = this.beginWrite([e]);
+        try { await this.o.trash(this.full(e)).catch(() => {}); } finally { await this.endWrite(w); }
+      } else this.emit('kept', e);
       this.forget(e);
+      this.baseIndex = null;
     }
   }
 
@@ -346,18 +680,24 @@ export class SyncEngine extends EventEmitter {
    * not matter): removing it then loses nothing that is not on the server. New, edited or unreadable items → false.
    */
   private async localTreeUnchanged(rel: string): Promise<boolean> {
-    const byIno = new Map<number, Entry>();
-    const byPath = new Map<string, Entry>(); // filesystems without stable inode numbers (some network and FAT disks)
-    for (const [k, b] of Object.entries(this.state.base)) {
-      if (k !== rel && !under(k, rel)) continue;
-      if (b.ino) byIno.set(b.ino, b);
-      byPath.set(this.foldPath(k), b);
+    const base = this.state.base;
+    if (!this.baseIndex) {
+      // filesystems without stable inode numbers (some network and FAT disks) are matched by path
+      const byIno = new Map<number, string>();
+      const byPath = new Map<string, string>();
+      for (const [k, b] of Object.entries(base)) {
+        if (b.ino) byIno.set(b.ino, k);
+        byPath.set(this.foldPath(k), k);
+      }
+      this.baseIndex = { byIno, byPath };
     }
+    const { byIno, byPath } = this.baseIndex;
+    const inside = (k: string | undefined) => (k !== undefined && (k === rel || under(k, rel)) ? base[k] : undefined);
     const check = async (file: string, key: string): Promise<boolean> => {
       const st = await lstat(file).catch(() => null);
       if (!st) return true; // already gone
       if (!st.isFile() && !st.isDirectory()) return false;
-      const b = byIno.get(st.ino) ?? byPath.get(this.foldPath(key));
+      const b = inside(byIno.get(st.ino)) ?? inside(byPath.get(this.foldPath(key)));
       if (!b || b.dir !== st.isDirectory()) return false;
       if (!b.dir) return b.size === st.size && b.mtime === Math.floor(st.mtimeMs);
       let names: string[];
@@ -377,15 +717,32 @@ export class SyncEngine extends EventEmitter {
   /** One pass; true when it moved things around and the trees should be read again. */
   async cycle(): Promise<boolean> {
     if (this.paused || this.stopped) return false;
+    try {
+      return await this.cycleInner();
+    } finally {
+      this.cycleExcluded = null;
+    }
+  }
+
+  private async cycleInner(): Promise<boolean> {
     const rootStat = await lstat(this.root).catch(() => null);
     if (!rootStat?.isDirectory()) throw new SyncError('missing-folder', `Folder not found: ${this.root}`);
     this.setStatus({ phase: 'syncing', done: 0, total: 0, current: undefined });
     this.unknown = new Set();
     this.rootReal = null;
+    this.baseIndex = null;
+    this.dirNames.clear();
+    this.cycleExcluded = this.excluded; // setExcluded replaces the array, so this one stays as it is
+    const now = Date.now();
+    for (const [k, w] of this.selfWrites) if (!w.busy && w.until < now) this.selfWrites.delete(k);
     await this.probeFs();
     await this.removeExcluded();
+    this.flushForget();
     const remote = await this.scanRemote();
-    const local = await this.scanLocal();
+    const full = this.fullScan || !this.watching;
+    this.fullScan = false; // a request arriving during the scan is for the next one
+    const local = await this.scanLocal(full);
+    this.syncDirWatchers();
     if (await this.applyMoves(local, remote)) { await this.save(true); return true; }
     const again = await this.reconcile(local, remote);
     this.noteSpellings(local);
@@ -403,13 +760,13 @@ export class SyncEngine extends EventEmitter {
     const usual = { caseFold: this.platform === 'darwin' || this.platform === 'win32', normFold: this.platform === 'darwin' };
     if (this.o.platform) { this.fold = usual; this.caseInsensitive = usual.caseFold || usual.normFold; return; } // tests pretend a platform
     const id = randomBytes(4).toString('hex');
-    const probe = path.join(this.root, `.cloudy-tmp-${id}-\u00e9`);
+    const probe = path.join(this.root, `.cloudy-tmp-${id}-é`);
     try {
       await writeFile(probe, '');
       const exists = async (name: string) => !!(await lstat(path.join(this.root, name)).catch(() => null));
       this.fold = {
-        caseFold: await exists(`.CLOUDY-TMP-${id.toUpperCase()}-\u00c9`),
-        normFold: await exists(`.cloudy-tmp-${id}-e\u0301`),
+        caseFold: await exists(`.CLOUDY-TMP-${id.toUpperCase()}-É`),
+        normFold: await exists(`.cloudy-tmp-${id}-é`),
       };
     } catch {
       this.fold = usual;
@@ -435,9 +792,9 @@ export class SyncEngine extends EventEmitter {
    * server's "photos", which on macOS/Windows is the same path on disk (and would be written through the link).
    */
   private isUnknown(p: string): boolean {
+    if (!this.unknown.size) return false;
     const f = this.foldPath(p);
-    for (const u of this.unknown) if (f === u || under(f, u)) return true;
-    return false;
+    return this.unknown.has(f) || ancestorIn(this.unknown, f);
   }
 
   private markUnknown(p: string): void {
@@ -464,9 +821,15 @@ export class SyncEngine extends EventEmitter {
       if (e instanceof ApiError && e.status === 404) throw new SyncError('remote-missing', 'The server folder no longer exists');
       throw e;
     }
-    const strip = (c: RemoteNode): Child => ({ id: c.id, name: c.name, isDir: c.isDir, size: c.size, etag: c.etag, mtime: c.mtime });
+    const strip = (c: RemoteNode): Child => {
+      const out: Child = { id: c.id, name: c.name, isDir: c.isDir, size: c.size, etag: c.etag, mtime: c.mtime };
+      if (c.sha256) out.sha256 = c.sha256;
+      return out;
+    };
+    let fetched = old['']?.etag !== root.node.etag;
 
-    const walk = async (rel: string, id: number, etag: string, prefetched?: RemoteNode[]) => {
+    type Job = { rel: string; id: number; etag: string; prefetched?: RemoteNode[] };
+    await drain<Job>([{ rel: '', id: this.rootId, etag: root.node.etag, prefetched: root.children ?? [] }], REQUESTS, async ({ rel, id, etag, prefetched }, push) => {
       const cached = old[rel];
       let children: Child[];
       if (prefetched) children = prefetched.map(strip);
@@ -474,6 +837,7 @@ export class SyncEngine extends EventEmitter {
       else {
         try {
           children = ((await this.api.node(id)).children ?? []).map(strip);
+          fetched = true;
         } catch (e) {
           // Removed or hidden while walking: its contents are unknown this cycle (not "deleted"); the next one sees it.
           if (e instanceof ApiError && (e.status === 404 || e.status === 403)) { this.markUnknown(rel); return; }
@@ -493,12 +857,15 @@ export class SyncEngine extends EventEmitter {
           if (seen.has(k)) { this.problem(p, this.msg('case')); this.markUnknown(p); continue; }
           seen.set(k, c.name);
         }
-        remote.set(p, { dir: c.isDir, id: c.id, etag: c.etag, size: c.size, mtime: c.mtime });
-        if (c.isDir) await walk(p, c.id, c.etag);
+        const r: Remote = { dir: c.isDir, id: c.id, etag: c.etag, size: c.size, mtime: c.mtime };
+        if (c.sha256) r.sha256 = c.sha256;
+        remote.set(p, r);
+        if (c.isDir) push({ rel: p, id: c.id, etag: c.etag });
       }
       if (this.caseInsensitive) this.remoteNames.set(rel, seen);
-    };
-    await walk('', this.rootId, root.node.etag, root.children ?? []);
+    });
+    // Folders that are no longer walked (deleted, excluded) leave the state too.
+    if (fetched || Object.keys(folders).length !== Object.keys(old).length) this.stateDirty = true;
     this.state.folders = folders;
     return remote;
   }
@@ -510,54 +877,134 @@ export class SyncEngine extends EventEmitter {
    * - base knows this item under its local spelling: the server renamed it (applyMoves renames it here);
    * - base knows it under the server spelling and its local spelling then was not this one: the user renamed it
    *   here (case only), and applyMoves renames it on the server.
+   *
+   * `full` false: folders whose listing is cached and that were not reported changed (dirtyDirs) are not read again;
+   * only valid while the watcher works. Names are keyed again every time (server spellings and base change).
    */
-  async scanLocal(): Promise<Map<string, Local>> {
+  async scanLocal(full = true): Promise<Map<string, Local>> {
     const local = new Map<string, Local>();
     const base = this.state.base;
-    const walk = async (dir: string, rel: string) => {
-      let names: string[];
-      try {
-        names = await readdir(dir);
-      } catch (e: any) {
-        if (!rel) throw e;
-        this.problem(rel, e.message);
-        this.markUnknown(rel); // unreadable, not empty: nothing below it may be deleted on the server
-        return;
-      }
-      const seen = new Set<string>();
-      const serverNames = this.caseInsensitive ? this.remoteNames.get(rel) : undefined;
-      for (const name of names) {
+    const dirty = this.dirtyDirs;
+    this.dirtyDirs = new Set();
+    const old = this.dirCache;
+    const cache = new Map<string, Listing>();
+    const stats = { full, read: 0, dirs: 0 };
+    const read = async (dir: string, diskRel: string, ino: number): Promise<Listing> => {
+      stats.read++;
+      // Linux: watch before reading, so nothing written in between is missed.
+      if (this.perFolderWatch && this.watching) this.watchDir(dir, diskRel, ino);
+      const all = await readdir(dir);
+      const names: string[] = [];
+      for (const name of all) {
         if (/^\.cloudy-tmp-/i.test(name)) { await rm(path.join(dir, name), { force: true }).catch(() => {}); continue; } // left by a crash
-        if (isIgnored(name)) continue;
-        const st = await lstat(path.join(dir, name)).catch(() => null);
-        let key = name;
-        if (this.caseInsensitive) {
-          const f = this.folded(name);
-          const own = rel ? `${rel}/${name}` : name;
-          if (seen.has(f)) { this.problem(own, this.msg('case')); this.markUnknown(own); continue; } // e.g. a case-sensitive volume
-          seen.add(f);
-          const server = serverNames?.get(f);
-          if (server && server !== name) {
-            const sp = rel ? `${rel}/${server}` : server;
-            const bLocal = base[own];
-            const bServer = base[sp];
-            const onlyForm = name.normalize('NFC') === server.normalize('NFC');
-            const serverRenamed = !!st && bLocal?.ino === st.ino;
-            const localRenamed = !!st && !onlyForm && bServer?.ino === st.ino && bServer.lname !== name;
-            if (!serverRenamed && !localRenamed) key = server;
+        if (!isIgnored(name)) names.push(name);
+      }
+      return { full: dir, ino, names, stats: await lstatAll(dir, names) };
+    };
+    try {
+      const rootIno = (await lstat(this.root)).ino;
+      await drain<[string, string, string, number]>([[this.root, '', '', rootIno]], SCAN_DIRS, async ([dir, rel, diskRel, ino], push) => {
+        const ck = this.foldPath(diskRel);
+        let listing = full || dirty.has(ck) ? undefined : old.get(ck);
+        // Same path but another folder (spelled differently, or swapped/recreated): read it. Checked from the top down,
+        // so every level below a changed folder is checked against fresh inodes.
+        if (!listing || listing.full !== dir || listing.ino !== ino) {
+          try {
+            listing = await read(dir, diskRel, ino);
+          } catch (e: any) {
+            if (!rel) throw e;
+            this.problem(rel, e.message);
+            this.markUnknown(rel); // unreadable, not empty: nothing below it may be deleted on the server
+            return;
           }
         }
-        const p = rel ? `${rel}/${key}` : key;
-        if (this.isExcluded(p)) continue;
-        if (!st || !(st.isFile() || st.isDirectory())) { this.markUnknown(p); continue; } // symlinks and special files are left alone
-        const bad = this.checkName(name);
-        if (bad) { this.problem(p, bad); this.markUnknown(p); continue; }
-        local.set(p, { dir: st.isDirectory(), size: st.isFile() ? st.size : 0, mtime: Math.floor(st.mtimeMs), ino: st.ino, name });
-        if (st.isDirectory()) await walk(path.join(dir, name), p);
-      }
-    };
-    await walk(this.root, '');
+        cache.set(ck, listing);
+        stats.dirs++;
+        const seen = new Set<string>();
+        const serverNames = this.caseInsensitive ? this.remoteNames.get(rel) : undefined;
+        const { names } = listing;
+        for (let i = 0; i < names.length; i++) {
+          const name = names[i];
+          const st = listing.stats[i];
+          const ino = st && st !== 'other' ? st.ino : undefined;
+          let key = name;
+          if (this.caseInsensitive) {
+            const f = this.folded(name);
+            const own = rel ? `${rel}/${name}` : name;
+            if (seen.has(f)) { this.problem(own, this.msg('case')); this.markUnknown(own); continue; } // e.g. a case-sensitive volume
+            seen.add(f);
+            const server = serverNames?.get(f);
+            if (server && server !== name) {
+              const sp = rel ? `${rel}/${server}` : server;
+              const bLocal = base[own];
+              const bServer = base[sp];
+              const onlyForm = name.normalize('NFC') === server.normalize('NFC');
+              const serverRenamed = ino !== undefined && bLocal?.ino === ino;
+              const localRenamed = ino !== undefined && !onlyForm && bServer?.ino === ino && bServer.lname !== name;
+              if (!serverRenamed && !localRenamed) key = server;
+            }
+          }
+          const p = rel ? `${rel}/${key}` : key;
+          if (this.isExcluded(p)) continue;
+          if (!st || st === 'other') { this.markUnknown(p); continue; } // symlinks and special files are left alone
+          const bad = this.checkName(name);
+          if (bad) { this.problem(p, bad); this.markUnknown(p); continue; }
+          local.set(p, st);
+          if (st.dir) push([path.join(dir, name), p, diskRel ? `${diskRel}/${name}` : name, st.ino]);
+        }
+      });
+    } catch (e) {
+      for (const d of dirty) this.dirtyDirs.add(d);
+      this.fullScan = true;
+      throw e;
+    }
+    this.dirCache = cache;
+    this.lastScan = stats;
     return local;
+  }
+
+  /**
+   * Linux: keeps one (non-recursive) watcher per local folder, in step with the last scan. Hitting the inotify limit
+   * (ENOSPC) or the open-files limit drops all of them: the timer then checks the whole folder every minute.
+   */
+  private syncDirWatchers(): void {
+    if (!this.perFolderWatch || !this.watching || this.stopped) return;
+    // inotify watches the folder itself, not its path: a watcher whose path now names another folder (renamed,
+    // swapped, deleted and created again) reports under the wrong path, so it is replaced.
+    for (const [full, { w, ino }] of this.dirWatchers) {
+      const l = this.dirCache.get(this.foldPath(path.relative(this.root, full).split(path.sep).join('/')));
+      if (!l || l.full !== full || l.ino !== ino) { w.close(); this.dirWatchers.delete(full); }
+    }
+    // Folders read from the cache whose watcher was lost (an error): watch them and read them once more.
+    let added = false;
+    for (const l of this.dirCache.values()) {
+      if (this.dirWatchers.has(l.full)) continue;
+      const rel = path.relative(this.root, l.full).split(path.sep).join('/');
+      if (this.watchDir(l.full, rel, l.ino)) { this.dirtyDirs.add(this.foldPath(rel)); added = true; }
+      if (!this.watching) return;
+    }
+    if (added) this.schedule(1500);
+  }
+
+  /**
+   * One folder's watcher (Linux), replacing one for another folder at that path. False if the folder is gone; the
+   * inotify or open-files limit stops all watching.
+   */
+  private watchDir(full: string, rel: string, ino: number): boolean {
+    const had = this.dirWatchers.get(full);
+    if (had?.ino === ino) return true;
+    had?.w.close();
+    this.dirWatchers.delete(full);
+    try {
+      const w = watch(full, (_ev, file) => this.onFsEvent(file == null ? null : rel ? `${rel}/${file}` : String(file)));
+      // A watched folder that is removed ends its watcher; its parent's watcher reports the removal.
+      w.on('error', () => { w.close(); if (this.dirWatchers.get(full)?.w === w) this.dirWatchers.delete(full); });
+      this.dirWatchers.set(full, { w, ino });
+      return true;
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT' && e?.code !== 'ENOTDIR') this.watcherFailed(); // ENOSPC, EMFILE…
+      return false;
+    }
   }
 
   /**
@@ -568,26 +1015,42 @@ export class SyncEngine extends EventEmitter {
   private spell(p: string, disk: string): void {
     const b = this.state.base[p];
     if (!b) return;
-    if (this.caseInsensitive && disk !== nameOf(p)) b.lname = disk;
+    const lname = this.caseInsensitive && disk !== nameOf(p) ? disk : undefined;
+    if (b.lname === lname) return;
+    if (lname) b.lname = lname;
     else delete b.lname;
+    this.stateDirty = true;
   }
 
   /** The name `p` has on disk (on filesystems that fold names it can differ from `p`'s spelling). */
   private async diskName(p: string): Promise<string> {
     const want = nameOf(p);
     if (!this.caseInsensitive) return want;
-    const names = await readdir(path.dirname(this.full(p))).catch(() => [] as string[]);
-    if (names.includes(want)) return want;
-    return names.find((n) => this.folded(n) === this.folded(want)) ?? want;
+    const dir = path.dirname(this.full(p));
+    let names = this.dirNames.get(dir);
+    if (!names) {
+      names = new Map();
+      for (const n of await readdir(dir).catch(() => [] as string[])) names.set(this.folded(n), n);
+      this.dirNames.set(dir, names);
+    }
+    const f = this.folded(want);
+    const found = names.get(f);
+    if (found) return found;
+    names.set(f, want); // created by this cycle after the folder was read: spelled as written
+    return want;
   }
 
   /** Backstop for `spell`: remembers local spellings seen by this cycle's scan, for the items synced. */
   private noteSpellings(local: Map<string, Local>): void {
+    const base = this.state.base;
     for (const [k, l] of local) {
-      const b = this.state.base[k];
+      const b = base[k];
       if (!b || b.ino !== l.ino) continue;
-      if (l.name !== nameOf(k)) b.lname = l.name;
+      const lname = l.name !== nameOf(k) ? l.name : undefined;
+      if (b.lname === lname) continue;
+      if (lname) b.lname = lname;
       else delete b.lname;
+      this.stateDirty = true;
     }
   }
 
@@ -616,26 +1079,6 @@ export class SyncEngine extends EventEmitter {
     return !b || r.dir !== b.dir || r.id !== b.id || (!r.dir && r.etag !== b.etag);
   }
 
-  /** Renames base entries `from` (and below) to `to`. */
-  private rebase(from: string, to: string): void {
-    const base = this.state.base;
-    for (const k of Object.keys(base)) {
-      if (k === from || under(k, from)) {
-        const e = base[k];
-        delete base[k];
-        base[to + k.slice(from.length)] = e;
-      }
-    }
-  }
-
-  private forget(p: string): void {
-    const base = this.state.base;
-    const wasFile = base[p]?.dir === false;
-    delete base[p];
-    if (wasFile) return; // nothing below a file: no need to look through the whole base (large trees)
-    for (const k of Object.keys(base)) if (under(k, p)) delete base[k];
-  }
-
   /**
    * Server folder id for `rel`, from this cycle's listing only. (The base's id would be a folder that was deleted or
    * moved on the server: uploads into it fail for ever, or land in the folder's new place.)
@@ -655,7 +1098,7 @@ export class SyncEngine extends EventEmitter {
     if (parentId === undefined) return undefined;
     const d = await this.mkdirRemote(parentId, nameOf(rel));
     remote.set(rel, { dir: true, id: d.id, etag: d.etag, size: 0, mtime: d.mtime });
-    this.state.base[rel] = { dir: true, id: d.id, size: 0, mtime: 0, ino: local.get(rel)!.ino };
+    this.setBase(rel, { dir: true, id: d.id, size: 0, mtime: 0, ino: local.get(rel)!.ino });
     this.spell(rel, local.get(rel)!.name);
     this.log(rel, 'folder');
     return d.id;
@@ -675,16 +1118,21 @@ export class SyncEngine extends EventEmitter {
   /** Detects renames/moves on either side and repeats them on the other one. True if anything moved. */
   async applyMoves(local: Map<string, Local>, remote: Map<string, Remote>): Promise<boolean> {
     const base = this.state.base;
-    const byIno = new Map<number, string>();
-    const byId = new Map<number, string>();
-    for (const [p, b] of Object.entries(base)) {
-      if (b.ino) byIno.set(b.ino, p);
-      if (b.id) byId.set(b.id, p);
-    }
+    // Built only when something new shows up on one side (most cycles have nothing that could be a move).
+    let index: { byIno: Map<number, string>; byId: Map<number, string> } | null = null;
+    const idx = () => {
+      if (index) return index;
+      index = { byIno: new Map(), byId: new Map() };
+      for (const [p, b] of Object.entries(base)) {
+        if (b.ino) index.byIno.set(b.ino, p);
+        if (b.id) index.byId.set(b.id, p);
+      }
+      return index;
+    };
     const moves: { from: string; to: string; side: 'remote' | 'local' }[] = [];
     for (const [p, l] of local) {
       if (base[p] || remote.has(p)) continue;
-      const from = byIno.get(l.ino);
+      const from = idx().byIno.get(l.ino);
       if (!from || local.has(from)) continue;
       const b = base[from];
       const r = remote.get(from);
@@ -694,7 +1142,7 @@ export class SyncEngine extends EventEmitter {
     }
     for (const [p, r] of remote) {
       if (base[p] || local.has(p)) continue;
-      const from = byId.get(r.id);
+      const from = idx().byId.get(r.id);
       if (!from || remote.has(from)) continue;
       const b = base[from];
       const l = local.get(from);
@@ -702,10 +1150,11 @@ export class SyncEngine extends EventEmitter {
       if (!l || l.dir !== b.dir || (!l.dir && !sameFile(l, b))) continue;
       moves.push({ from, to: p, side: 'local' });
     }
+    if (!moves.length) return false;
     moves.sort((a, b) => depth(a.from) - depth(b.from));
-    const done: string[] = [];
+    const done = new Set<string>();
     for (const m of moves) {
-      if (done.some((d) => under(m.from, d))) continue; // moved along with its folder
+      if (ancestorIn(done, m.from)) continue; // moved along with its folder
       if (this.isUnknown(m.from) || this.isUnknown(m.to)) continue;
       try {
         if (m.side === 'remote') {
@@ -722,14 +1171,19 @@ export class SyncEngine extends EventEmitter {
           const at = await lstat(this.full(m.to)).catch(() => null);
           if (at && at.ino !== local.get(m.from)!.ino) continue;
           if (!(await this.insideRoot(m.to))) { this.problem(m.to, this.msg('outside')); continue; }
-          await mkdir(this.full(parentOf(m.to)), { recursive: true });
-          await rename(this.full(m.from), this.full(m.to));
+          const w = this.beginWrite([m.from, m.to]);
+          try {
+            await mkdir(this.full(parentOf(m.to)), { recursive: true });
+            await rename(this.full(m.from), this.full(m.to));
+          } finally {
+            await this.endWrite(w);
+          }
           const r = remote.get(m.to)!;
           this.rebase(m.from, m.to);
           this.spell(m.to, nameOf(m.to)); // renamed here to the server's spelling
           if (!r.dir) Object.assign(base[m.to], { etag: r.etag, rmtime: r.mtime });
         }
-        done.push(m.from);
+        done.add(m.from);
         this.log(m.to, 'moved');
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) throw e;
@@ -737,7 +1191,7 @@ export class SyncEngine extends EventEmitter {
         this.problem(m.to, (e as Error).message);
       }
     }
-    return done.length > 0;
+    return done.size > 0;
   }
 
   /** Works out and carries out what each path needs. True if another pass is needed (conflicts renamed). */
@@ -746,16 +1200,30 @@ export class SyncEngine extends EventEmitter {
     const keys = [...new Set([...Object.keys(base), ...local.keys(), ...remote.keys()])].sort();
     type Op = 'mkdirRemote' | 'mkdirLocal' | 'record' | 'upload' | 'download' | 'compare' | 'conflict' | 'deleteRemote' | 'deleteLocal' | 'forget';
     const ops: { op: Op; p: string }[] = [];
-    const wholeDir: string[] = []; // folders deleted as a whole: skip what's inside
+    const wholeDir = new Set<string>(); // folders deleted as a whole: skip what's inside
 
+    // "Is anything inside this folder changed?" is answered from sets built once (folders above every changed item),
+    // not by looking through the whole tree for every folder.
     // Something unreadable inside a folder counts as a change: deleting the folder as a whole would take it along.
-    const unknownIn = (dir: string) => { const f = this.foldPath(dir); return [...this.unknown].some((u) => under(u, f)); };
-    const localTreeChanged = (dir: string) => unknownIn(dir) || [...local].some(([k, l]) => under(k, dir) && this.localChanged(l, base[k]));
-    const remoteTreeChanged = (dir: string) => unknownIn(dir) || [...remote].some(([k, r]) => under(k, dir) && this.remoteChanged(r, base[k]));
+    let unknownAbove: Set<string> | null = null;
+    let localAbove: Set<string> | null = null;
+    let remoteAbove: Set<string> | null = null;
+    const unknownIn = (dir: string) => {
+      if (!unknownAbove) { unknownAbove = new Set(); for (const u of this.unknown) addAncestors(unknownAbove, u); }
+      return unknownAbove.has(this.foldPath(dir));
+    };
+    const localTreeChanged = (dir: string) => {
+      if (!localAbove) { localAbove = new Set(); for (const [k, l] of local) if (this.localChanged(l, base[k])) addAncestors(localAbove, k); }
+      return unknownIn(dir) || localAbove.has(dir);
+    };
+    const remoteTreeChanged = (dir: string) => {
+      if (!remoteAbove) { remoteAbove = new Set(); for (const [k, r] of remote) if (this.remoteChanged(r, base[k])) addAncestors(remoteAbove, k); }
+      return unknownIn(dir) || remoteAbove.has(dir);
+    };
 
     for (const p of keys) {
-      if (wholeDir.some((d) => under(p, d))) continue;
-      if (this.isUnknown(p)) continue;
+      if (ancestorIn(wholeDir, p)) continue;
+      if (this.isUnknown(p) || this.excludedMeanwhile(p)) continue;
       const l = local.get(p);
       const r = remote.get(p);
       const b = base[p];
@@ -764,7 +1232,7 @@ export class SyncEngine extends EventEmitter {
         if (!b) ops.push({ op: l.dir ? 'mkdirRemote' : 'upload', p });
         else if (l.dir) {
           if (localTreeChanged(p)) ops.push({ op: 'mkdirRemote', p });
-          else { ops.push({ op: 'deleteLocal', p }); wholeDir.push(p); }
+          else { ops.push({ op: 'deleteLocal', p }); wholeDir.add(p); }
         } else ops.push({ op: this.localChanged(l, b) ? 'upload' : 'deleteLocal', p });
         continue;
       }
@@ -772,13 +1240,13 @@ export class SyncEngine extends EventEmitter {
         if (!b) ops.push({ op: r.dir ? 'mkdirLocal' : 'download', p });
         else if (r.dir) {
           if (remoteTreeChanged(p)) ops.push({ op: 'mkdirLocal', p });
-          else { ops.push({ op: 'deleteRemote', p }); wholeDir.push(p); }
+          else { ops.push({ op: 'deleteRemote', p }); wholeDir.add(p); }
         } else ops.push({ op: this.remoteChanged(r, b) ? 'download' : 'deleteRemote', p });
         continue;
       }
       // on both sides
       if (l!.dir && r!.dir) { if (!b || b.id !== r!.id || b.ino !== l!.ino) ops.push({ op: 'record', p }); continue; }
-      if (l!.dir !== r!.dir) { ops.push({ op: 'conflict', p }); wholeDir.push(p); continue; }
+      if (l!.dir !== r!.dir) { ops.push({ op: 'conflict', p }); wholeDir.add(p); continue; }
       const lc = this.localChanged(l!, b);
       const rc = this.remoteChanged(r!, b);
       if (!b || (lc && rc)) ops.push({ op: l!.size === r!.size ? 'compare' : 'conflict', p });
@@ -787,24 +1255,33 @@ export class SyncEngine extends EventEmitter {
     }
 
     // Many deletions at once usually mean something went wrong (a drive not mounted, a folder emptied by mistake).
-    const total = Object.values(base).filter((e) => !e.dir).length;
-    const filesAt = (p: string) => (base[p] && !base[p].dir ? 1 : Object.keys(base).filter((k) => under(k, p) && !base[k].dir).length);
-    for (const where of ['local', 'remote'] as const) {
-      const op = where === 'local' ? 'deleteLocal' : 'deleteRemote';
-      const del = ops.filter((o) => o.op === op);
-      const files = del.reduce((n, o) => n + filesAt(o.p), 0);
-      // Ask for ≥ 100 files, for a small account losing every one of its files, and whenever the side the deletions
-      // come from is now completely empty (an unmounted disk's empty mount point, a server folder emptied by mistake).
-      const emptied = files > 0 && (where === 'remote' ? local.size === 0 : remote.size === 0);
-      const suspicious = files >= MASS_DELETE || (files === total && total >= 10) || emptied;
-      if (suspicious && files >= total / 2 && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
-        // Keep them: forgetting the base makes the files "new" on the side that still has them, so they are copied back.
-        for (const o of del) { this.forget(o.p); o.op = 'forget'; }
+    if (ops.some((o) => o.op === 'deleteLocal' || o.op === 'deleteRemote')) {
+      let total = 0;
+      const filesBelow = new Map<string, number>(); // one pass over base, not one per deleted folder
+      for (const [k, e] of Object.entries(base)) {
+        if (e.dir) continue;
+        total++;
+        for (let d = parentOf(k); d; d = parentOf(d)) filesBelow.set(d, (filesBelow.get(d) ?? 0) + 1);
+      }
+      const filesAt = (p: string) => (base[p] && !base[p].dir ? 1 : filesBelow.get(p) ?? 0);
+      for (const where of ['local', 'remote'] as const) {
+        const op = where === 'local' ? 'deleteLocal' : 'deleteRemote';
+        const del = ops.filter((o) => o.op === op);
+        const files = del.reduce((n, o) => n + filesAt(o.p), 0);
+        // Ask for ≥ 100 files, for a small account losing every one of its files, and whenever the side the deletions
+        // come from is now completely empty (an unmounted disk's empty mount point, a server folder emptied by mistake).
+        const emptied = files > 0 && (where === 'remote' ? local.size === 0 : remote.size === 0);
+        const suspicious = files >= MASS_DELETE || (files === total && total >= 10) || emptied;
+        if (suspicious && files >= total / 2 && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
+          // Keep them: forgetting the base makes the files "new" on the side that still has them, so they are copied back.
+          for (const o of del) { this.forget(o.p); o.op = 'forget'; }
+        }
       }
     }
 
     const work = ops.filter((o) => o.op !== 'forget');
     for (const o of ops) if (o.op === 'forget') this.forget(o.p);
+    this.flushForget();
     let done = 0;
     let again = false;
     let fatal: unknown = null; // signed out / offline: stop every worker
@@ -812,21 +1289,30 @@ export class SyncEngine extends EventEmitter {
     const run = async (o: { op: Op; p: string }) => {
       if (this.paused || this.stopped || fatal) return;
       this.setStatus({ current: o.p });
+      const writes = o.op === 'mkdirLocal' || o.op === 'download' || o.op === 'compare' || o.op === 'conflict' || o.op === 'deleteLocal'
+        ? this.beginWrite([o.p]) : null;
       try {
         if (await this.execute(o.op, o.p, local.get(o.p), remote.get(o.p), remote, local)) again = true;
       } catch (e: any) {
         if (this.paused || this.stopped) return; // aborted on purpose
         if (isFatal(e)) { fatal ??= e; return; }
         this.problem(o.p, e?.code === 'EBUSY' || e?.code === 'EPERM' ? this.msg('locked') : e?.message ?? String(e));
+      } finally {
+        if (writes) await this.endWrite(writes);
       }
       this.setStatus({ done: ++done });
       await this.save();
     };
     const phase = (names: Op[]) => work.filter((o) => names.includes(o.op));
-    for (const o of phase(['mkdirRemote', 'mkdirLocal', 'record'])) await run(o);
-    const queue = phase(['upload', 'download', 'compare', 'conflict']);
-    await Promise.all(Array.from({ length: PARALLEL }, async () => { for (let o; (o = queue.shift()); ) await run(o); }));
-    for (const o of phase(['deleteRemote', 'deleteLocal'])) await run(o);
+    // Folders level by level (a folder's parent exists before it), each level in parallel.
+    const dirs = phase(['mkdirRemote', 'mkdirLocal', 'record']);
+    const levels = new Map<number, typeof dirs>();
+    for (const o of dirs) { const d = depth(o.p); const l = levels.get(d); if (l) l.push(o); else levels.set(d, [o]); }
+    for (const d of [...levels.keys()].sort((a, b) => a - b)) await pool(levels.get(d)!, REQUESTS, run);
+    await pool(phase(['upload', 'download', 'compare', 'conflict']), TRANSFERS, run);
+    await pool(phase(['deleteRemote']), REQUESTS, run);
+    for (const o of phase(['deleteLocal'])) await run(o); // the system trash is slow and not made for parallel calls
+    this.flushForget();
     if (fatal) throw fatal;
     return again;
   }
@@ -860,9 +1346,9 @@ export class SyncEngine extends EventEmitter {
   /** `disk`: the item's name on disk (see `spell`). */
   private async record(p: string, r: Remote, disk = nameOf(p)): Promise<void> {
     const st = await lstat(this.full(p));
-    this.state.base[p] = r.dir
+    this.setBase(p, r.dir
       ? { dir: true, id: r.id, size: 0, mtime: 0, ino: st.ino }
-      : { dir: false, id: r.id, etag: r.etag, rmtime: r.mtime, size: st.size, mtime: Math.floor(st.mtimeMs), ino: st.ino };
+      : { dir: false, id: r.id, etag: r.etag, rmtime: r.mtime, size: st.size, mtime: Math.floor(st.mtimeMs), ino: st.ino });
     this.spell(p, disk);
   }
 
@@ -933,9 +1419,10 @@ export class SyncEngine extends EventEmitter {
         const before = await lstat(this.full(p));
         if (!before.isFile()) return false;
         const up = await this.api.upload(parentId, nameOf(p), this.full(p), before.size, this.abort.signal);
-        const n = (await this.api.node(up.id)).node;
+        // Servers from 1.16 answer the last chunk with the whole node; older ones only with its id.
+        const n = up.etag && up.mtime ? up : (await this.api.node(up.id)).node;
         // The size/mtime from before the upload: if the file changed meanwhile, the next pass uploads it again.
-        base[p] = { dir: false, id: n.id, etag: n.etag, rmtime: n.mtime, size: before.size, mtime: Math.floor(before.mtimeMs), ino: before.ino };
+        this.setBase(p, { dir: false, id: n.id, etag: n.etag, rmtime: n.mtime, size: before.size, mtime: Math.floor(before.mtimeMs), ino: before.ino });
         this.spell(p, l?.name ?? nameOf(p));
         this.log(p, 'uploaded');
         const after = await lstat(this.full(p)).catch(() => null);
@@ -956,10 +1443,16 @@ export class SyncEngine extends EventEmitter {
       }
 
       case 'compare': {
-        // Same size on both sides but no shared history (first sync) or both edited: compare the bytes.
+        // Same size on both sides but no shared history (first sync) or both edited: compare the content. With the
+        // server's hash nothing is downloaded when they are the same; without it the server's copy is fetched first.
+        const ours = await hashFile(this.full(p));
+        if (r!.sha256 && r!.sha256 === ours) {
+          await this.record(p, r!, l?.name);
+          return false;
+        }
         const tmp = await this.fetchTemp(p, r!);
         try {
-          if ((await hashFile(tmp)) === (await hashFile(this.full(p)))) {
+          if (!r!.sha256 && (await hashFile(tmp)) === ours) {
             await this.record(p, r!, l?.name);
             return false;
           }
@@ -991,6 +1484,8 @@ export class SyncEngine extends EventEmitter {
       }
 
       case 'deleteRemote': {
+        // Back here since the scan (or the scan missed it): never trash on the server what this computer has.
+        if (await lstat(this.full(p)).catch(() => null)) return true;
         try {
           await this.api.trash(base[p].id!);
         } catch (e) {
@@ -1020,6 +1515,6 @@ export class SyncEngine extends EventEmitter {
 function hashFile(file: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const h = createHash('sha256');
-    createReadStream(file).on('error', reject).on('data', (c) => h.update(c)).on('end', () => resolve(h.digest('hex')));
+    createReadStream(file, { highWaterMark: 1 << 20 }).on('error', reject).on('data', (c) => h.update(c)).on('end', () => resolve(h.digest('hex')));
   });
 }

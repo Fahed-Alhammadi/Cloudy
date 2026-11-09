@@ -8,9 +8,11 @@ or contacts.
 
 `src/main/sync.ts` (no Electron imports) compares three trees by relative path on each pass:
 
-- the **local folder**;
+- the **local folder**. Each folder's listing is cached too: while the folder watcher works, a pass re-reads only the
+  folders it reported (and the ones the app itself wrote to). Every 5 minutes, at start and whenever the watcher
+  is not trusted, every folder is read. Entries are `lstat`ed in parallel, 16 folders at a time;
 - the **server**, read through `GET /api/nodes/:id`. Each folder's listing is cached and only re-read when its etag
-  changes, and etags change all the way up the tree on every edit;
+  changes, and etags change all the way up the tree on every edit. Changed folders are read 8 at a time;
 - **base**, which is both sides as of the last sync, saved in `sync-state.json` in the app's data folder.
 
 Each side "changed" if it differs from base. Here is what each case does:
@@ -19,7 +21,7 @@ Each side "changed" if it differs from base. Here is what each case does:
 |---|---|
 | One side changed | The change is copied to the other side. Uploads are chunked; downloads go to a temp file first. |
 | Both sides changed | `name (conflicted copy <date>).ext` is kept next to the server version. |
-| Same size, no history | The bytes are compared first, so a first sync into a folder that already has the files doesn't duplicate them. |
+| Same size, no history | The content is compared first, so a first sync into a folder that already has the files doesn't duplicate them. Servers from 1.16 list a SHA-256 per file: the local file is hashed and nothing is downloaded when they match. |
 | Renamed or moved | Detected by inode (local) or node id (server) and repeated on the other side, not transferred again. |
 | Deleted | Goes to the server trash or the computer's trash. |
 | ≥ 100 files (or every file of a folder with ≥ 10, or every file on one side) and ≥ half of them deleted at once | The app asks first. "Keep" copies the files back. |
@@ -32,7 +34,11 @@ Each side "changed" if it differs from base. Here is what each case does:
 
 A pass is triggered by:
 
-- the folder watcher (`fs.watch`, recursive);
+- the folder watcher: `fs.watch` recursive on macOS (FSEvents) and Windows; on Linux one watcher per folder (Node's
+  recursive watch reads the whole tree synchronously and throws uncaught errors at the inotify limit). When watching
+  fails (e.g. `ENOSPC`, the inotify limit), every pass reads the whole folder and the timer runs every minute.
+  Events caused by the app's own writes (downloads, new folders, deletions) start no pass: within 5 s of a write,
+  an event for that path is compared with what was written;
 - the server's live events (`/api/events`, SSE);
 - a check every 5 minutes;
 - waking from sleep.
@@ -40,6 +46,13 @@ A pass is triggered by:
 Ignored names: `.DS_Store`, `Thumbs.db`, `desktop.ini`, Office lock files, `.cloudy-tmp-*`. On Windows, names the
 filesystem can't hold, and names that differ only by upper/lower case on macOS and Windows, are listed under
 "Not synced".
+
+Work runs in parallel where the server allows it: transfers 6 at a time, new folders level by level and server
+deletions 8 at a time (local deletions one by one: the system trash). Anything over the whole tree (which folders
+hold changes, file counts for the "many deletions" question, forgetting deleted folders) is done once per pass, never
+once per item, so deleting or moving thousands of folders at once stays fast. `sync-state.json` is only written when
+something in it changed (at most every 10 s during a pass), stored as arrays rather than objects (version 2; version 1
+files are still read).
 
 Downloads go to a temp file and replace the local file only when complete (size checked). Upload chunks that fail on
 the way are retried from the offset the server stored. Requests time out instead of hanging (downloads and live events

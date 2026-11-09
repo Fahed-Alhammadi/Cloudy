@@ -30,6 +30,22 @@ else app.on('second-instance', () => showWindow());
 if (process.platform === 'win32') app.setAppUserModelId('io.cloudy.desktop'); // notifications under the Start-menu shortcut's identity
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
+// A tray app must not die (or show Electron's error dialog) over one failure somewhere: log it and keep going.
+// Example: Node's recursive fs.watch on Linux throws ENOSPC/EMFILE from inside its own watcher when the inotify
+// limits are reached; the engine then falls back to scanning on a timer.
+function uncaught(kind: string, e: unknown): void {
+  console.error(`Cloudy: ${kind}:`, e);
+  const err = e as NodeJS.ErrnoException | undefined;
+  if ((err?.code === 'ENOSPC' || err?.code === 'EMFILE') && /watch/i.test(`${err.syscall ?? ''} ${err.message ?? ''}`)) {
+    try { engine?.watcherFailed(); } catch {}
+  }
+}
+process.on('uncaughtException', (e) => uncaught('uncaught exception', e));
+process.on('unhandledRejection', (e) => uncaught('unhandled rejection', e));
+
+/** Account language, else the system's (preferred languages work even when Electron's own locale files were left out). */
+const applyLanguage = () => setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale(), ...app.getPreferredSystemLanguages());
+
 // Electron's fetch goes through Chromium: the system proxy and the OS certificate store (company CAs) work like in a browser.
 const api = () => new Api(settings.server!, decodeToken(settings) ?? '', userAgent, net.fetch);
 const signedIn = () => !!(settings.server && decodeToken(settings) && settings.rootId);
@@ -107,7 +123,8 @@ async function startEngine(): Promise<void> {
   engine.on('activity', (a: Activity) => {
     try {
       if (a.kind === 'conflict') notify(t('Edited in two places'), t('Kept both versions of {name}.', { name: path.basename(a.path) }));
-      send({ activity: engine?.activity });
+      activityChanged = true;
+      scheduleSend();
     } catch {}
   });
   engine.on('problems', (p: Problem[]) => { problems = p; try { refresh(); } catch {} });
@@ -160,26 +177,41 @@ function trayIcon() {
   return nativeImage.createFromPath(path.join(OUT, 'icons', name));
 }
 
+// While syncing, the engine reports several status changes per file. The window gets at most ~4 updates a second and
+// the tray menu at most one; each is a trailing timer, so the last state always arrives.
+const SEND_MS = 250;
+const MENU_MS = 1000;
+let sendTimer: NodeJS.Timeout | null = null;
+let lastSend = 0;
 let menuTimer: NodeJS.Timeout | null = null;
+let lastMenu = 0;
 
 function refresh(): void {
-  send(snapshot());
+  scheduleSend();
   if (menuTimer) return;
-  menuTimer = setTimeout(() => { menuTimer = null; buildMenu(); }, 300);
+  menuTimer = setTimeout(() => { menuTimer = null; lastMenu = Date.now(); buildMenu(); }, Math.max(0, lastMenu + MENU_MS - Date.now()));
 }
+
+let menuKey = '';
+let tooltip = '';
 
 function buildMenu(): void {
   if (!tray) return;
   const text = statusText();
-  tray.setToolTip(`Cloudy: ${text}`);
+  if (text !== tooltip) tray.setToolTip(`Cloudy: ${(tooltip = text)}`);
   const u = updater?.state;
+  // Rebuilding a native menu is not free: only when something it shows changed.
+  const key = JSON.stringify([text, language(), !!settings.folder, !!settings.server, !!engine, engine?.isPaused,
+    u?.state, u && 'version' in u ? u.version : null, u && 'url' in u ? u.url : null]);
+  if (key === menuKey) return;
+  menuKey = key;
   const items: Electron.MenuItemConstructorOptions[] = [
     { label: text, enabled: false },
     { type: 'separator' },
     { label: t('Open Cloudy folder'), enabled: !!settings.folder, click: () => void shell.openPath(settings.folder!) },
     { label: t('Open Cloudy in the browser'), enabled: !!settings.server, click: () => void shell.openExternal(settings.server!) },
     { type: 'separator' },
-    { label: t('Sync now'), enabled: !!engine && !engine.isPaused, click: () => engine?.schedule(0) },
+    { label: t('Sync now'), enabled: !!engine && !engine.isPaused, click: () => engine?.rescan() },
     engine?.isPaused
       ? { label: t('Resume syncing'), click: () => void setPaused(false) }
       : { label: t('Pause syncing'), enabled: !!engine, click: () => void setPaused(true) },
@@ -219,7 +251,11 @@ function showWindow(): void {
   win.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
   win.webContents.on('will-attach-webview', (e) => e.preventDefault());
   win.removeMenu();
-  win.on('closed', () => { win = null; if (process.platform === 'darwin') app.dock?.hide(); });
+  win.on('closed', () => {
+    win = null;
+    if (sendTimer) { clearTimeout(sendTimer); sendTimer = null; }
+    if (process.platform === 'darwin') app.dock?.hide();
+  });
   win.once('ready-to-show', () => { win?.show(); if (process.platform === 'darwin') app.focus({ steal: true }); });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url) || (settings.server && url.startsWith(settings.server + '/'))) void shell.openExternal(url);
@@ -230,8 +266,36 @@ function showWindow(): void {
   void win.loadFile(path.join(OUT, 'ui', 'index.html'));
 }
 
+const hasWindow = () => !!win && !win.isDestroyed();
+
 function send(data: object): void {
-  if (win && !win.isDestroyed()) win.webContents.send('cloudy:update', data);
+  if (hasWindow()) win!.webContents.send('cloudy:update', data);
+}
+
+function scheduleSend(): void {
+  if (!hasWindow() || sendTimer) return; // no window: nothing to build (it asks for the whole state when it opens)
+  sendTimer = setTimeout(() => {
+    sendTimer = null;
+    lastSend = Date.now();
+    send(update());
+  }, Math.max(0, lastSend + SEND_MS - Date.now()));
+}
+
+// What the window already has: the large parts are sent again only when they changed (the window merges updates
+// into its state). Reset when the window asks for the whole state.
+let sent: { strings?: object; problems?: Problem[]; engine?: SyncEngine | null } = {};
+let activityChanged = false;
+
+/** The window's state; the translations, problems and activity only when they changed since the last message. */
+function update() {
+  const { strings: dict, problems: list, activity, ...rest } = snapshot();
+  const out: Partial<ReturnType<typeof snapshot>> = rest;
+  if (dict !== sent.strings) out.strings = sent.strings = dict;
+  if (list !== sent.problems) out.problems = sent.problems = list;
+  if (activityChanged || engine !== sent.engine) out.activity = activity;
+  activityChanged = false;
+  sent.engine = engine;
+  return out;
 }
 
 function snapshot() {
@@ -322,7 +386,12 @@ const folderNames = (v: unknown): string[] => {
 };
 
 const handlers: Record<string, (...args: any[]) => unknown> = {
-  state: () => snapshot(),
+  state: () => {
+    const s = snapshot();
+    sent = { strings: s.strings, problems: s.problems, engine };
+    activityChanged = false;
+    return s;
+  },
 
   async login(server: unknown, user: unknown, password: unknown, code?: unknown) {
     try {
@@ -347,7 +416,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
       settings.rootId = r.user.rootId;
       settings.language = r.user.language ?? null;
       encodeToken(settings, r.token);
-      setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale());
+      applyLanguage();
       await saveSettings(settings);
       if (settings.folder) await startEngine();
       refresh();
@@ -419,7 +488,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
 
   pause: () => setPaused(true),
   resume: () => setPaused(false),
-  syncNow: () => engine?.schedule(0),
+  syncNow: () => engine?.rescan(),
   openFolder: () => settings.folder && shell.openPath(settings.folder),
   openWeb: () => settings.server && shell.openExternal(settings.server),
   openRelease: () => updater.state.state === 'available' && /^https:\/\/github\.com\//.test(updater.state.url) && shell.openExternal(updater.state.url),
@@ -473,7 +542,9 @@ app.on('before-quit', (e) => {
   if (quitting || !engine) return;
   e.preventDefault();
   quitting = true;
-  void flush().finally(() => app.quit());
+  // Not app.quit() straight away: when the engine stops at once, this would run inside the quit that was just
+  // prevented, and Electron drops that nested quit (the app kept running).
+  void flush().finally(() => setTimeout(() => app.quit(), 0));
 });
 async function installUpdate(): Promise<void> {
   if (updater.state.state !== 'ready') return;
@@ -484,12 +555,18 @@ async function installUpdate(): Promise<void> {
 
 // ---------------------------------------------------------------- start
 
+// Started by the login item (--hidden on Windows/Linux; macOS tells): the first sync waits until the login rush
+// (other apps starting, disks spinning up) is over.
+const LOGIN_DELAY = 15_000;
+
 app.whenReady().then(async () => {
   if (!primary) return;
+  // Read first: macOS only knows while it handles the launch.
+  const atLogin = process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
   if (process.platform === 'darwin') app.dock?.hide();
   settings = await loadSettings();
   await pickDefaultFolder();
-  setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale());
+  applyLanguage();
   updater = new Updater((s: UpdateState) => {
     if (s.state === 'ready') notify(t('Cloudy {version} is ready', { version: s.version }),
       process.platform === 'darwin' ? t('It is installed when you restart or quit Cloudy.') : t('Choose "Restart to update" in the menu to install it.'));
@@ -498,8 +575,13 @@ app.whenReady().then(async () => {
   tray = new Tray(trayIcon());
   tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
   buildMenu();
-  powerMonitor.on('resume', () => engine?.schedule(5000));
-  await startEngine();
+  powerMonitor.on('resume', () => engine?.rescan(5000)); // a full scan: nothing the watcher missed while asleep stays unseen
+  if (atLogin && configured()) {
+    // Sign-in or setup in the meantime starts an engine itself; this one then has nothing to do.
+    setTimeout(() => { if (!engine && configured()) void startEngine().catch((e) => console.error('Cloudy: start', e)); }, LOGIN_DELAY);
+  } else {
+    await startEngine();
+  }
   if (!configured()) showWindow(); // first run, or signed out: started at login with --hidden or not
   if (app.isPackaged) updater.start();
   // The account language may have changed on the web.
@@ -508,7 +590,7 @@ app.whenReady().then(async () => {
       if (me.language === settings.language) return;
       settings.language = me.language ?? null;
       await saveSettings(settings);
-      setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale());
+      applyLanguage();
       refresh();
     }).catch(() => {});
   }

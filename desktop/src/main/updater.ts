@@ -4,7 +4,7 @@
 // install on restart or quit. Development builds only report.
 import { existsSync } from 'node:fs';
 import { app, net } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import type { AppUpdater } from 'electron-updater';
 
 export const REPO = 'Fahed-Alhammadi/Cloudy';
 const TAG = /^desktop-(\d+\.\d+\.\d+)$/;
@@ -47,8 +47,16 @@ export class Updater {
   /** last GitHub answer, reused for repeated manual checks (unauthenticated API: 60 requests per hour) */
   private last: { at: number; rel: Awaited<ReturnType<typeof latestRelease>> } | null = null;
 
+  /** electron-updater, loaded only when there is something to download (~17 ms and ~2.5 MB less at start-up). */
+  private updater: AppUpdater | null = null;
+
   constructor(onChange: (s: UpdateState) => void) {
     this.onChange = onChange;
+  }
+
+  private async autoUpdater(): Promise<AppUpdater> {
+    if (this.updater) return this.updater;
+    const { autoUpdater } = await import('electron-updater');
     autoUpdater.autoDownload = true;
     // macOS updates are verified by Squirrel against the running app's signature. Windows builds are unsigned and
     // Linux has no signature check, so there a downloaded update is installed only when the user asks for it.
@@ -56,6 +64,7 @@ export class Updater {
     autoUpdater.on('download-progress', (p) => {
       if (this.state.state === 'downloading') this.set({ ...this.state, percent: Math.round(p.percent) });
     });
+    return (this.updater = autoUpdater);
   }
 
   private set(s: UpdateState): void {
@@ -88,6 +97,7 @@ export class Updater {
       await visible;
       if (!rel || !newer(rel.version, app.getVersion())) return this.set({ state: 'none', checkedAt: Date.now() });
       if (!this.canInstall) return this.set({ state: 'available', version: rel.version, url: rel.url });
+      const autoUpdater = await this.autoUpdater();
       autoUpdater.setFeedURL({ provider: 'generic', url: `https://github.com/${REPO}/releases/download/${rel.tag}` });
       this.set({ state: 'downloading', version: rel.version, percent: 0 });
       const found = await autoUpdater.checkForUpdates();
@@ -103,6 +113,6 @@ export class Updater {
   }
 
   install(): void {
-    if (this.state.state === 'ready') autoUpdater.quitAndInstall();
+    if (this.state.state === 'ready') this.updater?.quitAndInstall();
   }
 }

@@ -4,7 +4,7 @@ import { app, safeStorage } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { SyncState } from './sync.ts';
+import { packState, unpackState, type SyncState } from './sync.ts';
 
 export interface Settings {
   server?: string;
@@ -85,7 +85,7 @@ export function decodeToken(s: Settings): string | null {
   }
 }
 
-export const loadState = () => readJson<SyncState>('sync-state.json');
-export const saveState = (s: SyncState) => writeJson('sync-state.json', s);
+export const loadState = async () => unpackState(await readJson<unknown>('sync-state.json'));
+export const saveState = (s: SyncState) => writeJson('sync-state.json', packState(s));
 /** After any save still in flight, so a late write cannot bring the old state back. */
 export const clearState = () => queued('sync-state.json', () => rm(file('sync-state.json'), { force: true }));

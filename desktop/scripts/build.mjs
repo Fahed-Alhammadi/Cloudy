@@ -15,6 +15,9 @@ const common = {
   minify: production,
   logLevel: 'warning',
   external: ['electron', 'electron-updater'],
+  // import('electron-updater') (loaded only when an update is found) becomes a plain require(): Node's ESM loader
+  // would not see the CommonJS getter exports of electron-updater.
+  supported: { 'dynamic-import': false },
 };
 await build({ ...common, entryPoints: ['src/main/main.ts'], outfile: 'out/main.cjs' });
 await build({ ...common, entryPoints: ['src/preload/preload.ts'], outfile: 'out/preload.cjs' });

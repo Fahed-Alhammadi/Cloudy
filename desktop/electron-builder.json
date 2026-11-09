@@ -9,6 +9,7 @@
   "files": ["out/**/*", "package.json"],
   "asar": true,
   "npmRebuild": false,
+  "electronLanguages": ["en", "en-US", "ar", "de", "fr", "es", "es-419"],
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
   "publish": [
     {

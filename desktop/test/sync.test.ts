@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, rm, symlink, chmo
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Api, ApiError } from '../src/main/api.ts';
-import { SyncEngine, stateFitsServer, type SyncState } from '../src/main/sync.ts';
+import { SyncEngine, stateFitsServer, packState, unpackState, type SyncState } from '../src/main/sync.ts';
 
 const URL = process.env.CLOUDY_TEST_URL;
 const skip = !URL && 'CLOUDY_TEST_URL not set';
@@ -685,4 +685,217 @@ test('signing in again: a state that still fits the server is kept, one from a r
   assert.equal(await stateFitsServer(fakeRoot([{ id: 4, name: 'notes.txt', isDir: false, etag: 'other' }]), state), false, 'same name, new content id');
   assert.equal(await stateFitsServer(fakeRoot([]), { rootId: 1, base: {}, folders: {} }), true, 'nothing synced yet');
   assert.equal(await stateFitsServer(fakeRoot(before), { rootId: 1, base: state.base, folders: {} }), false, 'no listing to compare with');
+});
+
+// ---------------------------------------------------------------- watcher, incremental scans, own writes
+
+async function waitFor(what: string, cond: () => Promise<boolean> | boolean, ms = 15_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!(await cond())) {
+    if (Date.now() > end) throw new Error(`timed out waiting for: ${what}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** Starts the engine (watcher) and waits for its first cycle to finish. */
+async function startEngine(engine: SyncEngine): Promise<void> {
+  const before = engine.status.lastSync ?? 0;
+  engine.start();
+  await waitFor('first cycle after start', () => (engine.status.lastSync ?? 0) > before && engine.status.phase === 'idle');
+}
+
+/** Counts the cycles an engine runs. */
+function countCycles(engine: SyncEngine) {
+  const counter = { n: 0 };
+  const cycle = engine.cycle.bind(engine);
+  engine.cycle = async () => { counter.n++; return cycle(); };
+  return counter;
+}
+
+test('with the watcher, local changes are synced by reading only the folders that changed', { skip }, async () => {
+  const { a, b } = await setup('watch');
+  for (let i = 0; i < 20; i++) {
+    await mkdir(path.join(a.dir, `F${i}`));
+    await writeFile(path.join(a.dir, `F${i}/x.txt`), `x${i}`);
+  }
+  await a.sync();
+  try {
+    await startEngine(a.engine);
+    const synced = async (want: Record<string, string>) => {
+      await b.sync();
+      const t = await tree(b.dir);
+      return Object.entries(want).every(([k, v]) => (v === '<gone>' ? !(k in t) : t[k] === v));
+    };
+
+    await writeFile(path.join(a.dir, 'F3/new.txt'), 'new');
+    await waitFor('new file uploaded', () => synced({ 'F3/new.txt': 'new' }));
+    assert.equal(a.engine.lastScan.full, false, 'an incremental scan');
+    assert.ok(a.engine.lastScan.read <= 3, `read ${a.engine.lastScan.read} of ${a.engine.lastScan.dirs} folders`);
+
+    await later();
+    await writeFile(path.join(a.dir, 'F4/x.txt'), 'edited');
+    await waitFor('edit uploaded', () => synced({ 'F4/x.txt': 'edited' }));
+
+    await mkdir(path.join(a.dir, 'New/Sub'), { recursive: true });
+    await writeFile(path.join(a.dir, 'New/Sub/deep.txt'), 'deep');
+    await waitFor('new nested folder uploaded', () => synced({ 'New/Sub/deep.txt': 'deep' }));
+
+    await rename(path.join(a.dir, 'F5'), path.join(a.dir, 'Renamed'));
+    await waitFor('folder rename', () => synced({ 'Renamed/x.txt': 'x5', 'F5/x.txt': '<gone>' }));
+
+    await rm(path.join(a.dir, 'F6'), { recursive: true });
+    await waitFor('folder deletion', () => synced({ 'F6/x.txt': '<gone>' }));
+    assert.deepEqual(a.engine.problems, []);
+  } finally {
+    await a.engine.stop();
+  }
+});
+
+test("the engine's own downloads do not start another cycle", { skip }, async () => {
+  const { a, b } = await setup('echo');
+  await writeFile(path.join(a.dir, 'one.txt'), '1');
+  await a.sync();
+  await b.sync();
+  try {
+    await startEngine(a.engine);
+    const cycles = countCycles(a.engine);
+    await mkdir(path.join(b.dir, 'Dir'));
+    await writeFile(path.join(b.dir, 'Dir/two.txt'), '2');
+    await writeFile(path.join(b.dir, 'one.txt'), 'one, edited');
+    await b.sync();
+    a.engine.schedule(0); // what the server's live event does
+    await waitFor('downloads', async () => (await tree(a.dir))['Dir/two.txt'] === '2' && a.engine.status.phase === 'idle');
+    assert.equal(await readFile(path.join(a.dir, 'one.txt'), 'utf8'), 'one, edited');
+    const after = cycles.n;
+    await new Promise((r) => setTimeout(r, 4000)); // the watcher's events for those writes arrive meanwhile
+    assert.equal(cycles.n, after, 'no cycle for its own writes');
+
+    // A real edit right after is still seen.
+    await later();
+    await writeFile(path.join(a.dir, 'Dir/two.txt'), 'two, edited by the user');
+    await waitFor('user edit uploaded', async () => { await b.sync(); return (await tree(b.dir))['Dir/two.txt'] === 'two, edited by the user'; });
+  } finally {
+    await a.engine.stop();
+  }
+});
+
+test('when the watcher fails, every cycle reads the whole folder again', { skip }, async () => {
+  const { a } = await setup('watch-failed');
+  await mkdir(path.join(a.dir, 'D'));
+  try {
+    await startEngine(a.engine);
+    a.engine.watcherFailed();
+    await writeFile(path.join(a.dir, 'D/f.txt'), 'f');
+    await waitFor('cycle after the failure', () => a.engine.status.phase === 'idle' && a.engine.lastScan.full && a.engine.lastScan.read === a.engine.lastScan.dirs);
+    a.engine.schedule(0);
+    await waitFor('uploaded', async () => !!(await api.node(a.engine.rootId)).children?.find((c) => c.name === 'D'));
+  } finally {
+    await a.engine.stop();
+  }
+});
+
+test('files that are the same on both sides are not downloaded when the server knows their hash', { skip }, async () => {
+  const { a, b } = await setup('hash');
+  await writeFile(path.join(a.dir, 'same.txt'), 'same content');
+  await writeFile(path.join(a.dir, 'differs.txt'), 'version A');
+  await a.sync();
+  const listed = (await api.node(a.engine.rootId)).children!;
+  if (!listed.some((c) => c.sha256)) return; // a server before 1.16: nothing to test
+  await later();
+  await writeFile(path.join(b.dir, 'same.txt'), 'same content'); // already there (another copy, other time)
+  await writeFile(path.join(b.dir, 'differs.txt'), 'version B'); // same size, other content
+  let downloads = 0;
+  const download = b.engine.api.download.bind(b.engine.api);
+  b.engine.api.download = async (...args) => { downloads++; return download(...args); };
+  await b.sync();
+  assert.equal(downloads, 1, 'only the file that differs');
+  const t = await tree(b.dir);
+  assert.equal(t['same.txt'], 'same content');
+  assert.equal(t['differs.txt'], 'version A');
+  assert.equal(Object.values(t).filter((v) => v === 'version B').length, 1, 'ours kept as a conflicted copy');
+});
+
+test('many folders deleted at once are synced in one go', { skip }, async () => {
+  const { a, b } = await setup('many-deletes');
+  for (let i = 0; i < 150; i++) {
+    await mkdir(path.join(a.dir, `Top/D${i}`), { recursive: true });
+    await writeFile(path.join(a.dir, `Top/D${i}/f.txt`), String(i));
+  }
+  await writeFile(path.join(a.dir, 'Top/keep.txt'), 'keep');
+  await a.sync();
+  await b.sync();
+  for (let i = 0; i < 150; i++) await rm(path.join(a.dir, `Top/D${i}`), { recursive: true });
+  await a.sync();
+  assert.deepEqual(a.confirms, [150], 'asked once for the 150 files');
+  await b.sync();
+  assert.deepEqual(await tree(b.dir), { 'Top/': '', 'Top/keep.txt': 'keep' });
+  assert.equal(Object.keys(a.state!.base).length, 2, 'base holds only what is left');
+});
+
+test('the state is stored compactly and reads back the same (also the older form)', async () => {
+  const state: SyncState = {
+    rootId: 7, root: '/x',
+    base: { 'a': { dir: true, id: 2, size: 0, mtime: 0, ino: 11 }, 'a/f.txt': { dir: false, id: 3, etag: 'e', rmtime: 'm', size: 5, mtime: 9, ino: 12, lname: 'F.txt' }, 'new': { dir: false, size: 1, mtime: 2 } },
+    folders: { '': { id: 7, etag: 'r', children: [{ id: 2, name: 'a', isDir: true, size: 0, etag: 'x', mtime: 't' }] },
+      'a': { id: 2, etag: 'x', children: [{ id: 3, name: 'f.txt', isDir: false, size: 5, etag: 'e', mtime: 'm', sha256: 'abc' }] } },
+  };
+  const packed = JSON.parse(JSON.stringify(packState(state)));
+  assert.deepEqual(unpackState(packed), state);
+  assert.ok(JSON.stringify(packed).length < JSON.stringify(state).length * 0.75);
+  assert.deepEqual(unpackState(JSON.parse(JSON.stringify(state))), state, 'version 1 file');
+  assert.equal(unpackState(null), null);
+  assert.equal(unpackState({ v: 2, rootId: 1, base: 5, folders: {} }), null, 'damaged');
+});
+
+test('two folders swapped by renames while the watcher runs: nothing is deleted on the server', { skip }, async () => {
+  const { a, folder } = await setup('swap');
+  await mkdir(path.join(a.dir, 'A/x'), { recursive: true });
+  await mkdir(path.join(a.dir, 'B/x'), { recursive: true });
+  await writeFile(path.join(a.dir, 'A/x/f1.txt'), 'one');
+  await writeFile(path.join(a.dir, 'B/x/f2.txt'), 'two');
+  await a.sync();
+  const list = async (p: string) => {
+    let id = folder.id;
+    for (const n of p.split('/')) id = (await api.node(id)).children!.find((c) => c.name === n)!.id;
+    return (await api.node(id)).children!.map((c) => c.name).sort();
+  };
+  try {
+    await startEngine(a.engine);
+    await rename(path.join(a.dir, 'A'), path.join(a.dir, 'T'));
+    await rename(path.join(a.dir, 'B'), path.join(a.dir, 'A'));
+    await rename(path.join(a.dir, 'T'), path.join(a.dir, 'B'));
+    await waitFor('swap synced', async () => (await list('A/x')).join() === 'f2.txt' && (await list('B/x')).join() === 'f1.txt');
+    await later();
+    await writeFile(path.join(a.dir, 'A/x/f2.txt'), 'two, edited'); // an edit in a folder whose path was cached
+    await waitFor('edit synced', async () => a.engine.status.phase === 'idle' && a.engine.lastScan.full === false
+      && (await list('A/x')).join() === 'f2.txt' && (await list('B/x')).join() === 'f1.txt');
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.deepEqual(await list('A/x'), ['f2.txt']);
+    assert.deepEqual(await list('B/x'), ['f1.txt'], 'f1 still on the server');
+  } finally {
+    await a.engine.stop();
+  }
+});
+
+test('a folder excluded while a cycle reads the server is not deleted on the server', { skip }, async () => {
+  const { a, folder } = await setup('exclude-race');
+  await mkdir(path.join(a.dir, 'Keep'));
+  for (let i = 0; i < 5; i++) await writeFile(path.join(a.dir, `Keep/f${i}.txt`), `f${i}`);
+  for (let i = 0; i < 20; i++) await writeFile(path.join(a.dir, `other${i}.txt`), `o${i}`);
+  await a.sync();
+  const keepId = (await api.node(folder.id)).children!.find((c) => c.name === 'Keep')!.id;
+  await api.mkdir(keepId, 'sub'); // changes Keep's etag, so the next walk lists it
+  const node = a.engine.api.node.bind(a.engine.api);
+  let fired = false;
+  a.engine.api.node = async (id: number) => {
+    const out = await node(id);
+    if (id === keepId && !fired) { fired = true; await a.engine.setExcluded(['Keep']); } // unticked in Settings right now
+    return out;
+  };
+  await a.sync();
+  assert.ok(fired);
+  assert.ok((await api.node(folder.id)).children!.find((c) => c.name === 'Keep'), 'Keep is still on the server');
+  await a.sync(); // the next cycle removes it here (unchanged), as excluding does
+  assert.ok((await api.node(folder.id)).children!.find((c) => c.name === 'Keep'), 'and still on the server');
+  assert.deepEqual(a.trashed, ['Keep']);
 });
