@@ -3,7 +3,7 @@
 
 Every product has its own version and is released by pushing its tag:
   server   server-X.Y.Z   → container image ghcr.io/<owner>/cloudy:X.Y.Z + :latest (notes: CHANGELOG.md)
-  android  android-X.Y.Z  → Google Play internal testing (notes: android/whatsnew/whatsnew-en-US)
+  android  android-X.Y.Z  → Google Play closed testing (notes: android/whatsnew/whatsnew-en-US)
   ios      ios-X.Y.Z      → App Store Connect / TestFlight (notes: ios/whatsnew/en-US.txt)
   desktop  desktop-X.Y.Z  → GitHub release titled vX.Y.Z with the packages
 
