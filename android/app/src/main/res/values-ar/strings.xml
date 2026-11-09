@@ -37,7 +37,6 @@
     <string name="available_offline">متاح دون اتصال</string>
     <string name="deleted_files">الملفات المحذوفة</string>
     <string name="photo_backup">النسخ الاحتياطي للصور</string>
-    <string name="connection_check">فحص الاتصال</string>
     <string name="log_out">تسجيل الخروج</string>
     <string name="log_out_text">سيتم إلغاء رمز هذا الجهاز.</string>
     <string name="version">الإصدار %1$s</string>
@@ -232,20 +231,6 @@
     <string name="birthday_error">استخدم الصيغة YYYY-MM-DD، مثل 1990-05-14، أو اختر تاريخًا</string>
     <string name="delete_contact">حذف جهة الاتصال</string>
     <string name="delete_name">حذف %1$s؟</string>
-    <string name="share_report">مشاركة التقرير</string>
-    <string name="connection_intro">يتحقق من أن %1$s يعمل من هذا الهاتف عبر الوكيل العكسي، بما في ذلك العناوين التي تستخدمها التطبيقات الأخرى. لا يتم تغيير أي شيء على الخادم.</string>
-    <string name="problems_found">تم العثور على %1$d مشكلة. راجع الحلول أعلاه.</string>
-    <string name="works_with_warnings">يعمل، مع %1$d تحذير.</string>
-    <string name="everything_works">كل شيء يعمل.</string>
-    <string name="checking">جارٍ الفحص…</string>
-    <string name="run_again">تشغيل مرة أخرى</string>
-    <string name="addresses_other_apps">عناوين للتطبيقات الأخرى</string>
-    <string name="addresses_note">استخدمها في عميل WebDAV (تطبيقات الملفات، rclone…) أو في تطبيق تقويم/جهات اتصال (DAVx⁵، iPhone، Thunderbird). سجّل الدخول باسم المستخدم وكلمة مرور تطبيق من إعدادات Cloudy على الويب.</string>
-    <string name="files_webdav">الملفات (WebDAV)</string>
-    <string name="calendars_contacts">التقويمات وجهات الاتصال</string>
-    <string name="how_to_fix">طريقة الإصلاح: %1$s</string>
-    <string name="copied_name">تم نسخ %1$s</string>
-    <string name="copy_name">نسخ %1$s</string>
     <!-- Multi-select -->
     <string name="select">تحديد</string>
     <string name="n_selected">تم تحديد %1$d</string>

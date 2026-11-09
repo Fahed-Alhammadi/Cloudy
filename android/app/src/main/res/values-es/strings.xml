@@ -37,7 +37,6 @@
     <string name="available_offline">Disponible sin conexión</string>
     <string name="deleted_files">Archivos eliminados</string>
     <string name="photo_backup">Copia de fotos</string>
-    <string name="connection_check">Comprobar conexión</string>
     <string name="log_out">Cerrar sesión</string>
     <string name="log_out_text">Se revocará el token de este dispositivo.</string>
     <string name="version">Versión %1$s</string>
@@ -232,20 +231,6 @@
     <string name="birthday_error">Usa AAAA-MM-DD, por ejemplo 1990-05-14, o elige una fecha</string>
     <string name="delete_contact">Eliminar contacto</string>
     <string name="delete_name">¿Eliminar a %1$s?</string>
-    <string name="share_report">Compartir informe</string>
-    <string name="connection_intro">Comprueba que %1$s funciona desde este teléfono a través de su proxy inverso, incluidas las direcciones que usan otras apps. No se cambia nada en el servidor.</string>
-    <string name="problems_found">Se han encontrado %1$d problema(s). Mira las soluciones arriba.</string>
-    <string name="works_with_warnings">Funciona, con %1$d aviso(s).</string>
-    <string name="everything_works">Todo funciona.</string>
-    <string name="checking">Comprobando…</string>
-    <string name="run_again">Volver a comprobar</string>
-    <string name="addresses_other_apps">Direcciones para otras apps</string>
-    <string name="addresses_note">Úsalas en un cliente WebDAV (apps de archivos, rclone…) o en una app de calendario/contactos (DAVx⁵, iPhone, Thunderbird). Inicia sesión con tu nombre de usuario y una contraseña de aplicación de los Ajustes web de Cloudy.</string>
-    <string name="files_webdav">Archivos (WebDAV)</string>
-    <string name="calendars_contacts">Calendarios y contactos</string>
-    <string name="how_to_fix">Cómo solucionarlo: %1$s</string>
-    <string name="copied_name">%1$s copiado</string>
-    <string name="copy_name">Copiar %1$s</string>
     <!-- Multi-select -->
     <string name="select">Seleccionar</string>
     <string name="n_selected">%1$d seleccionados</string>

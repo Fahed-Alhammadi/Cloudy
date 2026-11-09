@@ -58,7 +58,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material.icons.outlined.PersonRemove
-import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Star
@@ -174,7 +173,6 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
             composable("contacts") { ContactsScreen() }
             composable("more") { MoreScreen(nav) }
             composable("backup") { BackupScreen(nav) }
-            composable("connection") { ConnectionScreen(nav) }
             composable("devices") { DevicesScreen(nav) }
         }
     }
@@ -245,7 +243,6 @@ fun MoreScreen(nav: NavController) {
             }
             Group {
                 Entry(R.string.photo_backup, Icons.Outlined.PhotoCamera, SettingColor.Pink, "backup")
-                Entry(R.string.connection_check, Icons.Outlined.NetworkCheck, SettingColor.Sky, "connection")
             }
             Text(stringResource(R.string.section_security), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)

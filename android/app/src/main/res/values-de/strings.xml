@@ -37,7 +37,6 @@
     <string name="available_offline">Offline verfügbar</string>
     <string name="deleted_files">Gelöschte Dateien</string>
     <string name="photo_backup">Foto-Backup</string>
-    <string name="connection_check">Verbindungstest</string>
     <string name="log_out">Abmelden</string>
     <string name="log_out_text">Das Token dieses Geräts wird widerrufen.</string>
     <string name="version">Version %1$s</string>
@@ -232,20 +231,6 @@
     <string name="birthday_error">Verwende JJJJ-MM-TT, zum Beispiel 1990-05-14, oder wähle ein Datum</string>
     <string name="delete_contact">Kontakt löschen</string>
     <string name="delete_name">%1$s löschen?</string>
-    <string name="share_report">Bericht teilen</string>
-    <string name="connection_intro">Prüft, ob %1$s von diesem Telefon über den Reverse-Proxy funktioniert, auch die Adressen, die andere Apps nutzen. Auf dem Server wird nichts geändert.</string>
-    <string name="problems_found">%1$d Problem(e) gefunden. Lösungen siehe oben.</string>
-    <string name="works_with_warnings">Funktioniert, mit %1$d Warnung(en).</string>
-    <string name="everything_works">Alles funktioniert.</string>
-    <string name="checking">Wird geprüft…</string>
-    <string name="run_again">Erneut prüfen</string>
-    <string name="addresses_other_apps">Adressen für andere Apps</string>
-    <string name="addresses_note">Nutze sie in einem WebDAV-Client (Datei-Apps, rclone…) oder einer Kalender-/Kontakte-App (DAVx⁵, iPhone, Thunderbird). Melde dich mit deinem Benutzernamen und einem App-Passwort aus den Web-Einstellungen von Cloudy an.</string>
-    <string name="files_webdav">Dateien (WebDAV)</string>
-    <string name="calendars_contacts">Kalender &amp; Kontakte</string>
-    <string name="how_to_fix">So behebst du es: %1$s</string>
-    <string name="copied_name">%1$s kopiert</string>
-    <string name="copy_name">%1$s kopieren</string>
     <!-- Multi-select -->
     <string name="select">Auswählen</string>
     <string name="n_selected">%1$d ausgewählt</string>

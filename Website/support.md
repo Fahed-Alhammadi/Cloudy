@@ -20,7 +20,6 @@ If the app can't reach your server:
 - Check that the address opens in your phone's or computer's browser.
 - From outside your home network, the server needs HTTPS through a reverse proxy
   ([how to set it up](https://github.com/Fahed-Alhammadi/Cloudy#production)).
-- On Android, *More → Connection check* tests the server and the proxy and says how to fix what fails.
 
 Forgot your password? Use *Forgot password* on the web sign-in page if your server sends email, or ask the server's admin
 to reset it.

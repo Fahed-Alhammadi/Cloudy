@@ -171,11 +171,6 @@ location / {
 }
 ```
 
-**Check the proxy from a phone:** in the Android app, *More → Connection check* tests the API, WebDAV and
-CalDAV/CardDAV (`PROPFIND` with Basic auth), `/.well-known/caldav|carddav`, an 8 MB upload chunk, the live-updates
-stream and the forwarded headers (HTTPS, `Host`, client IP), and says how to fix what fails. It changes nothing on
-the server and can share a report.
-
 **Back up** the database (`DB_PATH`) and the user files (`DATA_PATH`) together. For a consistent database dump
 while Cloudy runs:
 

@@ -37,7 +37,6 @@
     <string name="available_offline">Disponible hors ligne</string>
     <string name="deleted_files">Fichiers supprimés</string>
     <string name="photo_backup">Sauvegarde des photos</string>
-    <string name="connection_check">Test de connexion</string>
     <string name="log_out">Se déconnecter</string>
     <string name="log_out_text">Le jeton de cet appareil sera révoqué.</string>
     <string name="version">Version %1$s</string>
@@ -232,20 +231,6 @@
     <string name="birthday_error">Utilisez AAAA-MM-JJ, par exemple 1990-05-14, ou choisissez une date</string>
     <string name="delete_contact">Supprimer le contact</string>
     <string name="delete_name">Supprimer %1$s ?</string>
-    <string name="share_report">Partager le rapport</string>
-    <string name="connection_intro">Vérifie que %1$s fonctionne depuis ce téléphone via son proxy inverse, y compris les adresses utilisées par d\'autres applications. Rien n\'est modifié sur le serveur.</string>
-    <string name="problems_found">%1$d problème(s) trouvé(s). Voir les solutions ci-dessus.</string>
-    <string name="works_with_warnings">Fonctionne, avec %1$d avertissement(s).</string>
-    <string name="everything_works">Tout fonctionne.</string>
-    <string name="checking">Vérification…</string>
-    <string name="run_again">Relancer</string>
-    <string name="addresses_other_apps">Adresses pour les autres applications</string>
-    <string name="addresses_note">Utilisez-les dans un client WebDAV (applications Fichiers, rclone…) ou une application d\'agenda/contacts (DAVx⁵, iPhone, Thunderbird). Connectez-vous avec votre nom d\'utilisateur et un mot de passe d\'application créé dans les paramètres web de Cloudy.</string>
-    <string name="files_webdav">Fichiers (WebDAV)</string>
-    <string name="calendars_contacts">Calendriers et contacts</string>
-    <string name="how_to_fix">Comment corriger : %1$s</string>
-    <string name="copied_name">%1$s copié</string>
-    <string name="copy_name">Copier %1$s</string>
     <!-- Multi-select -->
     <string name="select">Sélectionner</string>
     <string name="n_selected">%1$d sélectionné(s)</string>

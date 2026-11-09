@@ -404,12 +404,8 @@ check('status reports version', s == 200 and st.get('version'), st)
 s, _ = admin.req('GET', '/api/admin/app/android')
 check('server-side APK publishing removed', s == 404)
 
-print('== connection diagnostics')
-s, dg = admin.req('GET', '/api/diagnostics')
-check('diagnostics describe the request', s == 200 and dg['user'] == ADMIN and dg['davFiles'].endswith(f'/dav/files/{ADMIN}/')
-      and dg['davRoot'].endswith('/dav/') and isinstance(dg['secure'], bool) and dg['clientIp'], dg)
-s, _ = Client().req('GET', '/api/diagnostics')
-check('diagnostics need login', s == 401)
+s, _ = admin.req('GET', '/api/diagnostics')
+check('connection diagnostics endpoint removed', s == 404)
 noredir2 = urllib.request.build_opener(type('NoRedirect2', (urllib.request.HTTPRedirectHandler,), {'redirect_request': lambda *a: None}))
 for kind in ('caldav', 'carddav'):
     try:

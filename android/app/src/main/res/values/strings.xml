@@ -39,7 +39,6 @@
     <string name="available_offline">Available offline</string>
     <string name="deleted_files">Deleted files</string>
     <string name="photo_backup">Photo backup</string>
-    <string name="connection_check">Connection check</string>
     <string name="log_out">Log out</string>
     <string name="log_out_text">This device\'s token will be revoked.</string>
     <string name="version">Version %1$s</string>
@@ -234,20 +233,6 @@
     <string name="birthday_error">Use YYYY-MM-DD, for example 1990-05-14, or pick a date</string>
     <string name="delete_contact">Delete contact</string>
     <string name="delete_name">Delete %1$s?</string>
-    <string name="share_report">Share report</string>
-    <string name="connection_intro">Checks that %1$s works from this phone through its reverse proxy, including the addresses other apps use. Nothing on the server is changed.</string>
-    <string name="problems_found">%1$d problem(s) found. See the fixes above.</string>
-    <string name="works_with_warnings">Works, with %1$d warning(s).</string>
-    <string name="everything_works">Everything works.</string>
-    <string name="checking">Checking…</string>
-    <string name="run_again">Run again</string>
-    <string name="addresses_other_apps">Addresses for other apps</string>
-    <string name="addresses_note">Use these in a WebDAV client (Files apps, rclone…) or a calendar/contacts app (DAVx⁵, iPhone, Thunderbird). Sign in with your username and an app password from Cloudy\'s web Settings.</string>
-    <string name="files_webdav">Files (WebDAV)</string>
-    <string name="calendars_contacts">Calendars &amp; contacts</string>
-    <string name="how_to_fix">How to fix: %1$s</string>
-    <string name="copied_name">%1$s copied</string>
-    <string name="copy_name">Copy %1$s</string>
     <!-- Multi-select -->
     <string name="select">Select</string>
     <string name="n_selected">%1$d selected</string>

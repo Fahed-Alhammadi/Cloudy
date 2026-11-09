@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.ts';
 import { migrate, q } from './db.ts';
-import { Router, HttpError, json, publicOrigin, isHttps, clientIp } from './http.ts';
+import { Router, HttpError, json } from './http.ts';
 import type { Ctx } from './http.ts';
 import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
@@ -43,26 +43,6 @@ registerShares(router, authed);
 registerGroupware(router, authed);
 registerOffice(router, authed);
 registerMail(router, authed, admin);
-// What the server sees of this request through the reverse proxy (Android "Connection check").
-router.get('/api/diagnostics', authed(async ({ req, res }, user) => {
-  const origin = publicOrigin(req);
-  json(res, {
-    version: config.version,
-    user: user.id,
-    secure: isHttps(req),
-    origin,
-    clientIp: clientIp(req),
-    trustProxy: config.trustProxy,
-    // The raw chain, so the client can show where a visitor's address was lost.
-    forwardedFor: String(req.headers['x-forwarded-for'] ?? ''),
-    remoteAddress: req.socket.remoteAddress ?? '',
-    publicUrl: !!config.publicUrl,
-    chunkSize: config.chunkSize,
-    davFiles: `${origin}/dav/files/${encodeURIComponent(user.id)}/`,
-    davRoot: `${origin}/dav/`,
-  });
-}));
-
 // Live updates (Server-Sent Events): {folders, shares} whenever something the user can see changes.
 router.get('/api/events', authed(async ({ res }, user) => openStream(user.id, res)));
 router.get('/status', async ({ res }) => {

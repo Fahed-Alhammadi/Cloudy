@@ -42,7 +42,7 @@ import androidx.compose.ui.res.stringResource
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.material3.TextButton
-import io.cloudy.app.data.ConnectionCheck
+import io.cloudy.app.data.PrivateHost
 import io.cloudy.app.work.BackupSettings
 import io.cloudy.app.work.Jobs
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -83,7 +83,7 @@ fun LoginScreen() {
         var url = server.trim().trimEnd('/')
         if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://$url"
         // Plain http:// would send the password and the device token in the clear: only on the local network.
-        if (url.startsWith("http://") && !ConnectionCheck.isPrivateHost(runCatching { java.net.URI(url).host ?: "" }.getOrDefault(""))) {
+        if (url.startsWith("http://") && !PrivateHost.isPrivateHost(runCatching { java.net.URI(url).host ?: "" }.getOrDefault(""))) {
             error = context.getString(R.string.login_https_required)
             return
         }
