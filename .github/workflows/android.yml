@@ -1,11 +1,11 @@
 # Android app (Google Play). Runs when android/ changes.
 #   - every push / pull request: debug build
-#   - tag android-X.Y.Z (must match versionName, scripts/version.py check): signed bundle → Play closed-testing track
-#     (promote to production by hand in Play Console). No GitHub release. A versionCode already on Play is skipped.
+#   - tag android-X.Y.Z (must match versionName, scripts/version.py check): signed bundle → Play internal testing track
+#     (test it, then promote it to production by hand in Play Console). No GitHub release. A versionCode already on Play is skipped.
 # Secrets: ANDROID_KEYSTORE_BASE64 (base64 of android/cloudy-release.keystore), ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD, PLAY_SERVICE_ACCOUNT_JSON (Play Developer API service account key).
 # Release notes: android/whatsnew/whatsnew-en-US (one file per Play listing language; update it with each version bump).
-# Variables (optional): PLAY_TRACK (default "alpha" = closed testing), PLAY_RELEASE_STATUS (default "completed").
+# Variables (optional): PLAY_TRACK (default "internal" = internal testing; "alpha" = closed testing, "production"), PLAY_RELEASE_STATUS (default "completed").
 # Without the secrets the publish job fails (the bundle, if built, is in the workflow artifacts), so the run fails.
 name: Android
 
@@ -105,7 +105,7 @@ jobs:
           releaseFiles: android/Cloudy-*.aab
           mappingFile: android/app/build/outputs/mapping/release/mapping.txt
           whatsNewDirectory: android/whatsnew # "What's new" per language: whatsnew-<locale>, max 500 characters
-          tracks: ${{ vars.PLAY_TRACK || 'alpha' }}
+          tracks: ${{ vars.PLAY_TRACK || 'internal' }}
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
       - name: Not uploaded
         if: steps.done.outputs.skip != 'true' && (env.PLAY_JSON == '')
