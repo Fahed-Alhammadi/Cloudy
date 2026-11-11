@@ -11,6 +11,14 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.16.2 (2026-11-11)
+
+Security hardening in the web app, no changes to the API or the data.
+
+- Moving files by drag and drop only accepts drags that started in Cloudy: something dragged in from another web page
+  can no longer make the web app send a request to a different address on your server.
+- Folder links (`#/files/<id>`) only accept numeric ids.
+
 ## 1.16.1 (2026-11-11)
 
 Maintenance release, no changes to the API or the data.

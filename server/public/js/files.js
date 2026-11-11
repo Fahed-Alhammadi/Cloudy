@@ -216,7 +216,9 @@ function fileTable(opts) {
 }
 
 /** Moves the dragged ids into `parentId` (skipping the folder itself). */
-async function moveByDrop(ids, parentId) {
+async function moveByDrop(data, parentId) {
+  // Drag data can come from another page dropped onto ours: only plain numeric ids (what our rows set) go into API paths.
+  const ids = Array.isArray(data) ? data.filter((id) => Number.isSafeInteger(id) && id > 0) : [];
   let moved = 0;
   for (const id of ids) {
     if (id === parentId) continue;
