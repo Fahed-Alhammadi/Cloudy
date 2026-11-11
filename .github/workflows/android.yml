@@ -25,6 +25,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-android-${{ github.ref }}
 
+# Read-only token by default; publish/release jobs ask for more themselves.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04

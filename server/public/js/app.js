@@ -312,7 +312,8 @@ async function route({ refresh = false } = {}) {
   main.setAttribute('aria-busy', 'true');
   try {
     switch (view) {
-      case 'files': await renderFolder(slot, arg || ctx.me.rootId, ctx); break;
+      // Only a numeric id goes into the API path (a crafted "#/files/.." would otherwise point the request elsewhere).
+      case 'files': await renderFolder(slot, /^\d+$/.test(arg || '') ? arg : ctx.me.rootId, ctx); break;
       case 'recent': await renderRecent(slot, ctx); break;
       case 'favorites': await renderFavorites(slot, ctx); break;
       case 'shared-in': await renderSharedIn(slot, ctx); break;

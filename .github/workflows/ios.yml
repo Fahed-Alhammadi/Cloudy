@@ -31,6 +31,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-ios-${{ github.ref }}
 
+# Read-only token by default; publish/release jobs ask for more themselves.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-26

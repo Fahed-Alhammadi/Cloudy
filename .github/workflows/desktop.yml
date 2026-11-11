@@ -25,6 +25,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-desktop-${{ github.ref }}
 
+# Read-only token by default; publish/release jobs ask for more themselves.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-24.04
