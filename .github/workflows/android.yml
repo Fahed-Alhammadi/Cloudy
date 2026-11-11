@@ -89,7 +89,7 @@ jobs:
           printf 'storeFile=cloudy-release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$STORE_PW" "$ALIAS" "$KEY_PW" > keystore.properties
           ./gradlew --no-daemon bundleRelease
           cp app/build/outputs/bundle/release/app-release.aab "Cloudy-${{ steps.v.outputs.version }}.aab"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: steps.done.outputs.skip != 'true'
         with:
           name: play-bundle
