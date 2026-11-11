@@ -39,27 +39,39 @@ struct ContactsView: View {
             List {
                 // A–Z sections, like the Contacts app.
                 ForEach(sections, id: \.letter) { section in
-                    Section(section.letter) {
+                    Section {
                         ForEach(section.contacts) { c in
                             NavigationLink(value: c) {
                                 HStack(spacing: 12) {
                                     Avatar(name: c.displayName)
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(c.displayName)
+                                        Text(c.displayName).lineLimit(2)
                                         if let detail = [c.org].filter({ !$0.isEmpty }).first ?? c.emails.first ?? c.phones.first {
                                             Text(detail).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                     }
                                 }
+                                .padding(.vertical, -4) // a little off the stock row padding, on top of the tighter sections
                             }
                         }
+                    } header: {
+                        Text(section.letter).listRowInsets(EdgeInsets(top: 10, leading: 20, bottom: 5, trailing: 20))
                     }
                 }
             }
+            // One card per letter with the stock gaps and header heights showed five contacts a screen: the letters now
+            // sit close above their cards and the cards close together.
+            .listSectionSpacing(0)
+            .environment(\.defaultMinListHeaderHeight, 0)
+            .groupedBackground()
+            .animation(.default, value: contacts?.map(\.id))
             .overlay {
                 if let loadError, contacts == nil { ErrorState(message: loadError) { Task { await load() } } }
                 else if contacts == nil { ProgressView() }
-                else if contacts!.isEmpty { ContentUnavailableView("No contacts", systemImage: "person.crop.circle") }
+                else if contacts!.isEmpty {
+                    ContentUnavailableView("No contacts", systemImage: "person.crop.circle",
+                                           description: Text("Tap + to add one, or import a .vcf or .csv file from the ⋯ menu."))
+                }
                 else if filtered.isEmpty { ContentUnavailableView.search(text: query) }
             }
             .searchable(text: $query)

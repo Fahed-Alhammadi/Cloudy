@@ -19,7 +19,21 @@ final class Uploads {
     }
 
     private(set) var jobs: [Job] = []
+    /// Counts up each time the last running upload finished well (the app answers with a haptic: one per batch, not per file).
+    private(set) var finished = 0
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var quiet: Task<Void, Never>?
+
+    /// Counts a batch as finished once nothing has been uploading for a moment: the photos of one pick start one
+    /// after the other (each after its export), so "no upload running" alone can be true between two of them.
+    @MainActor
+    private func batchMayBeDone() {
+        quiet?.cancel()
+        quiet = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            if !Task.isCancelled, !jobs.contains(where: { $0.error == nil }) { finished += 1 }
+        }
+    }
 
     func jobs(in folder: Int64) -> [Job] { jobs.filter { $0.parentId == folder } }
 
@@ -36,6 +50,7 @@ final class Uploads {
                     DispatchQueue.main.async { self.update(job.id) { $0.sent = sent; $0.total = total } }
                 }
                 jobs.removeAll { $0.id == job.id }
+                batchMayBeDone()
                 NotificationCenter.default.post(name: .cloudyChange, object: ChangeEvent(folders: [parentId]))
             } catch is CancellationError {
                 jobs.removeAll { $0.id == job.id } // cancelled by the user

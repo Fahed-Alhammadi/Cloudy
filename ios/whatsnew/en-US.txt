@@ -1,7 +1,7 @@
-• Show password: tap the eye in the password field
-• Help, Send feedback and Rate Cloudy in More
-• New? "Don't have a server yet?" links to the setup guide
-• Uploads resume after a dropped connection and can be cancelled
-• Read-only shares no longer offer actions that would fail; Leave share
-• Share to Cloudy: faster, with progress and cancel
-• Many fixes and accessibility improvements
+• Smoother movement: months slide as you swipe, lists animate when files come and go, and switching between list and grid fades in
+• Calendar in landscape shows the month and the day's events side by side
+• Clearer file icons and favorite stars, especially in dark mode
+• The text editor uses the whole screen
+• More contacts fit on a screen
+• Tidier sign-in, welcome and lock screens, and helpful hints on empty screens
+• Better support for large text, plus subtle haptics when you select, favorite or delete

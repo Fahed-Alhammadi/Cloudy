@@ -26,9 +26,10 @@ struct MoreView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(user.name).font(.title3.weight(.semibold))
                                 Text(verbatim: "\(user.id) · \(URL(string: session.server)?.host ?? session.server)")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.footnote).foregroundStyle(.secondary)
                             }
                         }
+                        .padding(.vertical, 2)
                         StorageRow(user: user)
                     }
                 }
@@ -41,7 +42,7 @@ struct MoreView: View {
                     NavigationLink(value: Route.trash) { SettingsLabel("Trash", icon: "trash.fill", color: .settingsGray) }
                 }
                 Section {
-                    NavigationLink { DevicesView() } label: { SettingsLabel("Devices", icon: "iphone", color: .settingsIndigo) }
+                    NavigationLink(value: Route.devices) { SettingsLabel("Devices", icon: "iphone", color: .settingsIndigo) }
                     if canUseAppLock {
                         Toggle(isOn: $appLock) { SettingsLabel("App lock", icon: "faceid", color: .settingsGreen) }
                     }
@@ -141,7 +142,8 @@ private let rateURL = URL(string: "https://apps.apple.com/app/id6826676331?actio
 
 /// Settings app tones: fixed, deep and solid in light and dark mode (the dynamic system colors are paler since iOS 26).
 /// Orange, green and teal are a shade deeper than Apple's so the white symbol keeps ~3:1 contrast.
-private extension Color {
+/// Also used by the welcome screen's permission rows.
+extension Color {
     static let settingsBlue = Color(red: 0x00 / 255, green: 0x7A / 255, blue: 0xFF / 255)
     static let settingsOrange = Color(red: 0xF0 / 255, green: 0x82 / 255, blue: 0x00 / 255)
     static let settingsGreen = Color(red: 0x2F / 255, green: 0xA8 / 255, blue: 0x4F / 255)
@@ -152,11 +154,12 @@ private extension Color {
     static let settingsPink = Color(red: 0xFF / 255, green: 0x2D / 255, blue: 0x55 / 255)
 }
 
-/// A row label with a white symbol on a colored rounded square, like the Settings app.
+/// A row label with a white symbol on a colored rounded square, like the Settings app (and growing with the text like there).
 private struct SettingsLabel: View {
     let title: LocalizedStringKey
     let icon: String
     let color: Color
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
     init(_ title: LocalizedStringKey, icon: String, color: Color) {
         self.title = title
@@ -168,11 +171,12 @@ private struct SettingsLabel: View {
         Label {
             Text(title)
         } icon: {
+            let side = 29 * min(scale, 1.5)
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: side * 0.52, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 29, height: 29)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(color))
+                .frame(width: side, height: side)
+                .background(RoundedRectangle(cornerRadius: side * 0.24, style: .continuous).fill(color))
         }
     }
 }
@@ -184,12 +188,14 @@ private struct StorageRow: View {
         let used = user.used ?? 0
         VStack(alignment: .leading, spacing: 6) {
             if let quota = user.quotaBytes, quota > 0 {
-                ProgressView(value: min(Double(used) / Double(quota), 1))
-                Text("\(formatSize(used)) of \(formatSize(quota)) used").font(.caption).foregroundStyle(.secondary)
+                let part = min(Double(used) / Double(quota), 1)
+                ProgressView(value: part).tint(part > 0.9 ? .red : .accentColor).animation(.default, value: part)
+                Text("\(formatSize(used)) of \(formatSize(quota)) used").font(.footnote).foregroundStyle(.secondary)
             } else {
-                Text("\(formatSize(used)) used").font(.caption).foregroundStyle(.secondary)
+                Text("\(formatSize(used)) used").font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -204,18 +210,19 @@ struct DevicesView: View {
         List {
             Section {
                 ForEach(items ?? []) { p in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(p.name)
-                            if p.current == true {
-                                Text("This device").font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(.tint)
-                            }
+                    VStack(alignment: .leading, spacing: 3) {
+                        // The badge sits next to the name, or under it when the two don't fit (long names, large text).
+                        let badge = Text("This device").font(.caption.bold()).padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.15))).foregroundStyle(.tint)
+                        ViewThatFits(in: .horizontal) {
+                            HStack { Text(p.name).lineLimit(1); if p.current == true { badge } }
+                            VStack(alignment: .leading, spacing: 3) { Text(p.name); if p.current == true { badge } }
                         }
                         if let d = parseDate(p.lastUsedAt) ?? parseDate(p.createdAt) {
-                            Text("Last used \(d.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary)
+                            Text("Last used \(d.formatted(date: .abbreviated, time: .shortened))").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
+                    .padding(.vertical, 2)
                     .swipeActions {
                         if p.current != true {
                             Button("Revoke", role: .destructive) { revoking = p }
@@ -230,6 +237,7 @@ struct DevicesView: View {
             if let loadError, items == nil { ErrorState(message: loadError) { Task { await load() } } }
             else if items == nil { ProgressView() }
         }
+        .animation(.default, value: items?.map(\.id))
         .navigationTitle("Devices")
         .refreshable { await load() }
         .task { await load() }

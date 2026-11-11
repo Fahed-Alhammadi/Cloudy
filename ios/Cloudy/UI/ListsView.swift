@@ -15,8 +15,10 @@ struct NodeListView: View {
         .overlay {
             if let loadError, nodes == nil { ErrorState(message: loadError) { Task { await load() } } }
             else if nodes == nil { ProgressView() }
-            else if nodes!.isEmpty { ContentUnavailableView(emptyText, systemImage: icon) }
+            else if nodes!.isEmpty { ContentUnavailableView(emptyText, systemImage: icon, description: Text(emptyHint)) }
         }
+        .groupedBackground()
+        .animation(.default, value: nodes?.map(\.id)) // rows that come and go (unfavorited, deleted, shared) don't jump
         .navigationTitle(title)
         .refreshable { await load() }
         .task {
@@ -42,6 +44,14 @@ struct NodeListView: View {
         case .recent: "No recent files"
         case .favorites: "No favorites yet"
         case .shared: "Nothing shared with you yet"
+        }
+    }
+
+    private var emptyHint: LocalizedStringKey {
+        switch kind {
+        case .recent: "Files you add or change show up here."
+        case .favorites: "Mark files as favorites from their ⋯ menu to find them here."
+        case .shared: "Files and folders other people share with you show up here."
         }
     }
 
@@ -87,12 +97,11 @@ struct LinksView: View {
                     if let n = s.node { sharing = n }
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: s.type == "link" ? "link" : s.type == "group" ? "person.3" : "person")
-                            .foregroundStyle(.tint).frame(width: 32)
+                        ShareKindTile(type: s.type)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(s.node?.name ?? "")
+                            Text(s.node?.name ?? "").lineLimit(2)
                             Text(s.type == "link" ? String(localized: "Public link") : String(localized: "With \(s.shareWith ?? "")"))
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -103,8 +112,13 @@ struct LinksView: View {
         .overlay {
             if let loadError, shares == nil { ErrorState(message: loadError) { Task { await load() } } }
             else if shares == nil { ProgressView() }
-            else if shares!.isEmpty { ContentUnavailableView("You haven't shared anything yet", systemImage: "link") }
+            else if shares!.isEmpty {
+                ContentUnavailableView("You haven't shared anything yet", systemImage: "link",
+                                       description: Text("Share a file or folder from its ⋯ menu to see it here."))
+            }
         }
+        .groupedBackground()
+        .animation(.default, value: shares?.map(\.id))
         .navigationTitle("Shared by you")
         .refreshable { await load() }
         .task { await load() }
@@ -127,7 +141,28 @@ struct LinksView: View {
     }
 }
 
+/// How something is shared (link, person, group) as a tinted rounded square, the size of the file rows' `TypeTile`.
+struct ShareKindTile: View {
+    let type: String
+    @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+
+    var body: some View {
+        let side = 38 * min(scale, 1.4)
+        RoundedRectangle(cornerRadius: side * 0.27, style: .continuous)
+            .fill(Color.accentColor.opacity(scheme == .dark ? 0.22 : 0.12))
+            .frame(width: side, height: side)
+            .overlay {
+                Image(systemName: type == "link" ? "link" : type == "group" ? "person.3.fill" : "person.fill")
+                    .font(.system(size: side * (type == "group" ? 0.36 : 0.44), weight: .semibold)).foregroundStyle(.tint)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 struct TrashView: View {
+    @Environment(Session.self) private var session
+    @State private var removed = 0 // haptic when something was restored or deleted for good
     @State private var items: [TrashItem]?
     @State private var loadError: String?
     @State private var error: String?
@@ -153,8 +188,13 @@ struct TrashView: View {
         .overlay {
             if let loadError, items == nil { ErrorState(message: loadError) { Task { await load() } } }
             else if items == nil { ProgressView() }
-            else if items!.isEmpty { ContentUnavailableView("Trash is empty", systemImage: "trash") }
+            else if items!.isEmpty {
+                ContentUnavailableView("Trash is empty", systemImage: "trash", description: note.map { Text($0) })
+            }
         }
+        .groupedBackground()
+        .animation(.default, value: items?.map(\.id))
+        .sensoryFeedback(.success, trigger: removed)
         .navigationTitle("Trash")
         .toolbar {
             Button("Empty", role: .destructive) { confirmEmpty = true }.disabled(items?.isEmpty ?? true)
@@ -171,9 +211,15 @@ struct TrashView: View {
         .errorAlert($error)
     }
 
+    /// How long the server keeps deleted files, in Android's words (`/api/me` says so; without it, no note).
+    private var note: String? {
+        guard let days = session.user?.trashDays, days > 0 else { return nil }
+        return String(localized: "Deleted items are removed permanently after \(days) days.")
+    }
+
     private func act(_ work: @escaping () async throws -> Void) {
         Task {
-            do { try await work() } catch { self.error = errorText(error) }
+            do { try await work(); removed += 1 } catch { self.error = errorText(error) }
             await load()
         }
     }

@@ -57,6 +57,8 @@ struct FolderPicker: View {
                     onPick(id)
                     dismiss()
                 }
+                // Deeper levels have Back where the first one has Cancel; the way out of the sheet stays on screen.
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } } }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
@@ -78,19 +80,26 @@ private struct PickerFolder: View {
     var body: some View {
         List(folders ?? []) { f in
             NavigationLink(value: Crumb(id: f.id, name: f.name)) {
-                Label(f.name, systemImage: "folder.fill")
+                HStack(spacing: 12) {
+                    TypeTile(node: f, size: 32)
+                    Text(f.name).lineLimit(2)
+                }
             }
             .disabled(excluding.contains(f.id))
         }
         .overlay {
             if let error { ErrorState(message: error) { Task { await load() } } }
             else if folders == nil { ProgressView() }
+            else if folders!.isEmpty {
+                ContentUnavailableView("No folders in here", systemImage: "folder")
+            }
         }
+        .groupedBackground()
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             Button { onPick(id) } label: { Text(action).bold().frame(maxWidth: .infinity) }
-                .buttonStyle(.borderedProminent).controlSize(.large).padding()
+                .primaryButton().padding()
                 .background(.bar)
         }
         .task { await load() }

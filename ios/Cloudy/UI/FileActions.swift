@@ -31,6 +31,9 @@ final class FileActions {
     var error: String?
     /// Called after a change so the screen reloads (live updates usually do it too).
     var changed: () -> Void = {}
+    /// Haptics: counted up when files became favorites / went to the trash (or a share was left); `.fileActions` plays them.
+    var starred = 0
+    var removed = 0
     private var task: Task<Void, Never>?
     private var taskId: UUID?
 
@@ -86,11 +89,12 @@ final class FileActions {
         }
     }
 
+    /// `more`: further files to tick at once (Debug screenshots).
     @MainActor
-    func select(_ node: FileNode) {
+    func select(_ node: FileNode, more: [Int64] = []) {
         withAnimation { selecting = true }
         // A List clears its selection when it switches to edit mode, so tick the file once that has happened.
-        DispatchQueue.main.async { self.selection = [node.id] }
+        DispatchQueue.main.async { self.selection = Set([node.id] + more) }
     }
 
     @MainActor
@@ -100,8 +104,10 @@ final class FileActions {
     }
 
     /// Runs `work` on each file, then ends the selection and reloads; reports how many failed.
+    /// `counting`: the haptic counter to bump when at least one file went through.
     @MainActor
-    func runEach(_ nodes: [FileNode], _ work: @escaping (FileNode) async throws -> Void) {
+    func runEach(_ nodes: [FileNode], counting: ReferenceWritableKeyPath<FileActions, Int>? = nil,
+                 _ work: @escaping (FileNode) async throws -> Void) {
         endSelection()
         Task {
             var failed = 0
@@ -109,6 +115,7 @@ final class FileActions {
                 do { try await work(n) } catch { failed += 1 }
             }
             if failed > 0 { self.error = String(localized: "\(failed) failed") }
+            if let counting, failed < nodes.count { self[keyPath: counting] += 1 }
             changed()
         }
     }
@@ -151,7 +158,10 @@ final class FileActions {
             Button { self.sharing = node } label: { Label("Share", systemImage: "person.crop.circle.badge.plus") }
         }
         Button {
-            self.run { try await API.shared.setFavorite(node.id, !node.isFavorite) }
+            self.run {
+                try await API.shared.setFavorite(node.id, !node.isFavorite)
+                if !node.isFavorite { self.starred += 1 }
+            }
         } label: {
             node.isFavorite ? Label("Remove from favorites", systemImage: "star.slash") : Label("Add to favorites", systemImage: "star")
         }
@@ -200,36 +210,44 @@ private struct FileActionsModifier: ViewModifier {
                                 isPresented: Binding(get: { actions.deleting != nil }, set: { if !$0 { actions.deleting = nil } }),
                                 titleVisibility: .visible) {
                 Button("Move to trash", role: .destructive) {
-                    if let n = actions.deleting { actions.run { try await API.shared.delete(n.id) } }
+                    if let n = actions.deleting { actions.run { try await API.shared.delete(n.id); actions.removed += 1 } }
                 }
             }
             .confirmationDialog(Text("Remove \"\(actions.leaving?.name ?? "")\" from your shared items?"),
                                 isPresented: Binding(get: { actions.leaving != nil }, set: { if !$0 { actions.leaving = nil } }),
                                 titleVisibility: .visible) {
                 Button("Leave share", role: .destructive) {
-                    if let id = actions.leaving?.shareId { actions.run { try await API.shared.deleteShare(id) } }
+                    if let id = actions.leaving?.shareId { actions.run { try await API.shared.deleteShare(id); actions.removed += 1 } }
                 }
             }
             .confirmationDialog(Text("Move \(actions.deletingMany?.count ?? 0) items to the trash?"),
                                 isPresented: Binding(get: { actions.deletingMany != nil }, set: { if !$0 { actions.deletingMany = nil } }),
                                 titleVisibility: .visible) {
                 Button("Move to trash", role: .destructive) {
-                    if let list = actions.deletingMany { actions.runEach(list) { try await API.shared.delete($0.id) } }
+                    if let list = actions.deletingMany { actions.runEach(list, counting: \.removed) { try await API.shared.delete($0.id) } }
                 }
             }
             .overlay {
-                if let n = actions.downloading {
-                    VStack(spacing: 14) {
-                        ProgressView()
-                        Text("Downloading \(n.name)…").font(.callout).multilineTextAlignment(.center)
-                        Button("Cancel", role: .cancel) { actions.cancelDownload() }
+                ZStack {
+                    if let n = actions.downloading {
+                        VStack(spacing: 14) {
+                            ProgressView()
+                            Text("Downloading \(n.name)…").font(.callout).multilineTextAlignment(.center)
+                            Button("Cancel", role: .cancel) { actions.cancelDownload() }
+                                .frame(minHeight: 44)
+                        }
+                        .padding([.horizontal, .top], 24).padding(.bottom, 12)
+                        .frame(maxWidth: 280)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .shadow(color: .black.opacity(0.12), radius: 20, y: 8)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
                     }
-                    .padding(24)
-                    .frame(maxWidth: 280)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
                 }
+                .animation(.snappy(duration: 0.25), value: actions.downloading?.id)
             }
             .errorAlert($actions.error)
+            .sensoryFeedback(.success, trigger: actions.removed)
+            .sensoryFeedback(.impact(weight: .light), trigger: actions.starred)
     }
 }
 
@@ -256,6 +274,8 @@ private struct SelectionModifier: ViewModifier {
                 if actions.selecting {
                     ToolbarItem(placement: .principal) {
                         Text("\(actions.selection.count) selected").font(.headline)
+                            .contentTransition(.numericText())
+                            .animation(.snappy(duration: 0.2), value: actions.selection.count)
                     }
                     ToolbarItem(placement: .topBarLeading) {
                         if actions.selection.count == items.count && !items.isEmpty {
@@ -276,7 +296,7 @@ private struct SelectionModifier: ViewModifier {
                         Button { actions.transferring = FileActions.Transfer(nodes: chosen, copy: true) } label: { Label("Copy", systemImage: "doc.on.doc") }
                         Spacer()
                         Button {
-                            actions.runEach(chosen.filter { !$0.isFavorite }) { try await API.shared.setFavorite($0.id, true) }
+                            actions.runEach(chosen.filter { !$0.isFavorite }, counting: \.starred) { try await API.shared.setFavorite($0.id, true) }
                         } label: { Label("Add to favorites", systemImage: "star") }
                         Spacer()
                         Button(role: .destructive) { actions.deletingMany = modifiable } label: { Label("Delete", systemImage: "trash") }
@@ -292,6 +312,8 @@ private struct SelectionModifier: ViewModifier {
                 actions.selection.formIntersection(ids)
             }
             .onDisappear { if actions.selecting { actions.endSelection() } }
+            // A tick per file while selecting; ending the selection (which clears it) stays silent.
+            .sensoryFeedback(trigger: actions.selection) { _, _ in actions.selecting ? .selection : nil }
     }
 }
 
@@ -367,32 +389,42 @@ struct FileRow: View {
     }
 }
 
-/// A grid tile with an image thumbnail (or the file's icon), like Android's NodeGrid.
+/// A grid tile with an image thumbnail (or the file's icon on its type's tint), like Android's NodeGrid.
 struct FileTile: View {
     let node: FileNode
     let actions: FileActions
     @State private var image: UIImage?
+    @Environment(\.colorScheme) private var scheme
+    @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 40 // tiles widen with the text size, the icon follows
 
     var body: some View {
+        let (icon, color) = fileIcon(node)
         let tile = VStack(spacing: 6) {
             Color(.secondarySystemGroupedBackground)
                 .aspectRatio(1, contentMode: .fit)
                 .overlay {
                     if let image {
-                        Image(uiImage: image).resizable().scaledToFill()
+                        Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
                     } else {
-                        let (icon, color) = fileIcon(node)
-                        Image(systemName: icon).font(.system(size: 40)).foregroundStyle(color)
+                        color.opacity(scheme == .dark ? 0.16 : 0.08)
+                        Image(systemName: icon).font(.system(size: min(glyph, 64), weight: .medium)).foregroundStyle(color)
                     }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(alignment: .topLeading) {
                     HStack(spacing: 3) {
-                        if node.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                        if node.isFavorite {
+                            Image(systemName: "star.fill").foregroundStyle(TypeColor.favorite)
+                                .transition(.scale(scale: 0.2).combined(with: .opacity))
+                        }
                         if node.shared == true { Image(systemName: "person.2.fill").foregroundStyle(.secondary) }
                     }
                     .font(.caption2)
-                    .padding(6)
+                    .padding(5)
+                    // On a photo the marks need their own ground to stay readable.
+                    .background { if image != nil && (node.isFavorite || node.shared == true) { Capsule().fill(.regularMaterial) } }
+                    .padding(4)
+                    .animation(.spring(duration: 0.35, bounce: 0.45), value: node.isFavorite)
                 }
             Text(node.name)
                 .font(.caption)
@@ -406,7 +438,7 @@ struct FileTile: View {
             if actions.selecting {
                 Button {
                     if isSelected { actions.selection.remove(node.id) } else { actions.selection.insert(node.id) }
-                } label: { tile.opacity(isSelected ? 1 : 0.75) }
+                } label: { tile.opacity(isSelected ? 1 : 0.7).scaleEffect(isSelected ? 0.94 : 1) }
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
             } else if let route = node.route(canEdit: actions.canEditContent(node)) {
                 NavigationLink(value: route) { tile }
@@ -420,16 +452,22 @@ struct FileTile: View {
             if actions.selecting {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(isSelected ? Color.white : Color.secondary, isSelected ? Color.accentColor : Color.clear)
+                    .foregroundStyle(isSelected ? Color.white : Color.secondary, isSelected ? Color.solidAccent : Color.clear)
                     .background(Circle().fill(.regularMaterial).opacity(isSelected ? 0 : 1))
+                    .contentTransition(.symbolEffect(.replace))
                     .padding(6)
                     .allowsHitTesting(false)
+                    .transition(.scale(scale: 0.5).combined(with: .opacity))
             } else {
                 ActionsButton(node: node, actions: actions, circle: true)
+                    .transition(.opacity)
             }
         }
+        .animation(.snappy(duration: 0.2), value: isSelected)
         .task(id: node.etag) {
-            if Thumbnails.supports(node) { image = await Thumbnails.shared.image(for: node) }
+            guard Thumbnails.supports(node) else { return }
+            let loaded = await Thumbnails.shared.image(for: node)
+            withAnimation(.easeOut(duration: 0.2)) { image = loaded } // fades in over the icon instead of popping
         }
     }
 }

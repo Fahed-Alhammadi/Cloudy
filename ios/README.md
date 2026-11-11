@@ -43,6 +43,11 @@ Account deletion without tapping: add `SIMCTL_CHILD_CLOUDY_DELETE_TEST=<password
 *Delete account* prompt filled in, or `go:<password>` to submit it (Debug builds only; it really deletes the account).
 Login screen without typing: `SIMCTL_CHILD_CLOUDY_LOGIN_TEST=<user>:<password>` fills in the form;
 `SIMCTL_CHILD_CLOUDY_PASSWORD_VISIBLE=1` starts password fields shown (eye toggled on).
+Looking at states and motion without tapping (all in `Cloudy/UI/Screenshots.swift`): `SIMCTL_CHILD_CLOUDY_SCRIPT=<seconds>:<step>;…`
+plays steps such as `tab:1`, `folder:<id>:<name>`, `route:trash`, `pop`, `grid`, `sort:date`, `select:3`, `done`, `month:1`,
+`day:3`, `landscape`; `CLOUDY_LANDSCAPE=1` starts rotated (the simulator can't be rotated from the command line),
+`CLOUDY_LOCK=1` shows the app-lock screen, `CLOUDY_ICONS=1` one row per file type, `CLOUDY_LOGIN_ERROR=<text>` the sign-in
+screen with an error, and `CLOUDY_SERVER` without a token fills in the sign-in screen's address.
 
 **App Store screenshots and preview video:** [appstore/README.md](appstore/README.md) (`appstore/seed.py` fills a
 throwaway server with the demo account, `appstore/render.py` frames the captures).

@@ -15,6 +15,7 @@ struct TextFileView: View {
     /// Not UTF-8 (e.g. an old Windows file): shown read-only, since saving would change every special character.
     @State private var readOnly = false
     @State private var actions = FileActions()
+    @State private var saves = 0 // haptic when a save went through
 
     private var dirty: Bool { saved != nil && text != saved }
 
@@ -50,6 +51,9 @@ struct TextFileView: View {
         }
         .navigationTitle(node.name)
         .navigationBarTitleDisplayMode(.inline)
+        // A focus screen: the tab bar steps aside for the text and the keyboard.
+        .toolbar(.hidden, for: .tabBar)
+        // With unsaved changes Back (and the swipe back) gives way to Cancel, which asks before discarding.
         .navigationBarBackButtonHidden(dirty)
         .toolbar {
             if dirty {
@@ -57,13 +61,14 @@ struct TextFileView: View {
                     Button("Cancel") { confirmDiscard = true }
                 }
             }
-            ToolbarItem(placement: .confirmationAction) {
-                if saving {
-                    ProgressView()
-                } else if dirty {
-                    Button("Save", action: save).bold()
-                } else {
-                    Menu { actions.menu(for: node) } label: { Label("Actions", systemImage: "ellipsis.circle") }
+            // Save is the screen's confirming action (drawn prominent since iOS 26); the file's menu is a plain button.
+            if saving {
+                ToolbarItem(placement: .confirmationAction) { ProgressView() }
+            } else if dirty {
+                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).bold() }
+            } else {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu { actions.menu(for: node) } label: { Label("Actions", systemImage: "ellipsis") }
                 }
             }
         }
@@ -83,6 +88,7 @@ struct TextFileView: View {
         }
         #endif
         .errorAlert($error)
+        .sensoryFeedback(.success, trigger: saves)
     }
 
     private func load() async {
@@ -105,6 +111,7 @@ struct TextFileView: View {
             do {
                 try await API.shared.saveText(node.id, content)
                 saved = content
+                saves += 1
             } catch {
                 self.error = errorText(error)
             }

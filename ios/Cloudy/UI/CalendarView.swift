@@ -19,10 +19,17 @@ private func onDay(_ e: CalEvent, _ day: Date) -> Bool {
 }
 
 struct CalendarView: View {
+    @Environment(\.verticalSizeClass) private var heightClass
+    @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var month = cal.dateInterval(of: .month, for: Date())!.start
     @State private var selected = cal.startOfDay(for: Date())
     @State private var calendars: [DavCollection]?
     @State private var events: [CalEvent] = []
+    /// The events of each day in the grid, worked out once per load: every cell used to ask every event on each redraw.
+    @State private var byDay: [Date: [CalEvent]] = [:]
+    /// Whether the last month change went forward: the new month slides in from that side.
+    @State private var forward = true
     @State private var loadError: String?
     @State private var editing: EditRequest?
 
@@ -32,33 +39,38 @@ struct CalendarView: View {
         let day: Date
     }
 
-    private var gridStart: Date {
+    private func gridStart(_ month: Date) -> Date {
         let weekday = cal.component(.weekday, from: month)
         let offset = (weekday - cal.firstWeekday + 7) % 7
         return cal.date(byAdding: .day, value: -offset, to: month)!
     }
 
+    private var compact: Bool { heightClass == .compact }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    monthGrid
-                }
-                Section(selected.formatted(date: .complete, time: .omitted)) {
-                    let today = events.filter { onDay($0, selected) }.sorted { a, b in
-                        a.isAllDay != b.isAllDay ? a.isAllDay : startOf(a) < startOf(b)
+            Group {
+                if let loadError, calendars == nil {
+                    ErrorState(message: loadError) { Task { await load() } }
+                } else if compact {
+                    // Landscape: the month and the selected day's events side by side instead of one long scroll.
+                    HStack(spacing: 0) {
+                        // Tight enough for the six weeks to fit between the bars without scrolling.
+                        List { Section { monthGrid.listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12)) } }
+                            .scrollBounceBehavior(.basedOnSize)
+                            .contentMargins(.top, 0, for: .scrollContent)
+                        List { daySection }
+                            .contentMargins(.top, 0, for: .scrollContent)
                     }
-                    if today.isEmpty {
-                        Text("No events").foregroundStyle(.secondary)
-                    }
-                    ForEach(today) { e in
-                        Button { editing = EditRequest(event: e, day: selected) } label: { EventRow(event: e, color: color(e)) }
-                            .foregroundStyle(.primary)
+                    .background(Color(.systemGroupedBackground))
+                } else {
+                    List {
+                        Section { monthGrid }
+                        daySection
                     }
                 }
             }
             .listStyle(.insetGrouped)
-            .overlay { if let loadError, calendars == nil { ErrorState(message: loadError) { Task { await load() } } } }
             .navigationTitle(month.formatted(.dateTime.month(.wide).year()))
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
@@ -66,10 +78,7 @@ struct CalendarView: View {
                     Button { shift(1) } label: { Label("Next month", systemImage: "chevron.forward") }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Today") {
-                        month = cal.dateInterval(of: .month, for: Date())!.start
-                        selected = cal.startOfDay(for: Date())
-                    }
+                    Button("Today") { show(cal.dateInterval(of: .month, for: Date())!.start, select: cal.startOfDay(for: Date())) }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button { editing = EditRequest(event: nil, day: selected) } label: { Label("New event", systemImage: "plus") }
@@ -82,8 +91,8 @@ struct CalendarView: View {
             #if DEBUG
             .onReceive(NotificationCenter.default.publisher(for: .tour)) { note in
                 switch note.object as? Screenshots.Step {
-                case .month(let n): withAnimation { shift(n) }
-                case .day(let n): withAnimation { selected = cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
+                case .month(let n): shift(n)
+                case .day(let n): withAnimation(.snappy(duration: 0.25)) { selected = cal.date(byAdding: .day, value: n, to: cal.startOfDay(for: Date()))! }
                 default: break
                 }
             }
@@ -94,53 +103,92 @@ struct CalendarView: View {
         }
     }
 
+    /// The selected day: its events, a spinner until the first answer, or "No events".
+    private var daySection: some View {
+        Section(selected.formatted(date: .complete, time: .omitted)) {
+            let today = eventsOn(selected).sorted { a, b in
+                a.isAllDay != b.isAllDay ? a.isAllDay : startOf(a) < startOf(b)
+            }
+            if calendars == nil {
+                ProgressView().frame(maxWidth: .infinity, minHeight: 60)
+            } else if today.isEmpty {
+                ContentUnavailableView("No events", systemImage: "calendar")
+                    .padding(.vertical, compact ? 0 : -8) // the stock padding is made for a whole screen, not one row
+            }
+            ForEach(today) { e in
+                Button { editing = EditRequest(event: e, day: selected) } label: { EventRow(event: e, color: color(e)) }
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    /// Weekday letters, then the month's six weeks. Changing month slides the weeks in the direction of travel (the next
+    /// month comes from the trailing side, so it mirrors in Arabic); with Reduce Motion they cross-fade instead.
     private var monthGrid: some View {
         let symbols = cal.veryShortStandaloneWeekdaySymbols
         let first = cal.firstWeekday - 1
         let headers = Array(symbols[first...] + symbols[..<first])
-        return VStack(spacing: 6) {
-            HStack {
+        let slide: AnyTransition = reduceMotion ? .opacity : .asymmetric(
+            insertion: .move(edge: forward ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: forward ? .leading : .trailing).combined(with: .opacity))
+        return VStack(spacing: compact ? 2 : 6) {
+            HStack(spacing: 0) {
                 ForEach(Array(headers.enumerated()), id: \.offset) { _, s in
                     Text(s).font(.caption2.bold()).foregroundStyle(.secondary).frame(maxWidth: .infinity)
                 }
             }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: 4) {
-                ForEach(0..<42, id: \.self) { i in
-                    let day = cal.date(byAdding: .day, value: i, to: gridStart)!
-                    dayCell(day)
-                }
+            ZStack {
+                weeks(of: month).id(month).transition(slide)
             }
+            .clipped()
         }
         .padding(.vertical, 4)
         // Seven columns can't grow with the largest accessibility sizes (numbers turned into "…"); the selected day's
         // title and events below still use the full size.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .contentShape(Rectangle())
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in
-            if abs(v.translation.width) > abs(v.translation.height) { shift(v.translation.width < 0 ? 1 : -1) }
+            guard abs(v.translation.width) > abs(v.translation.height) * 1.5 else { return }
+            // Pulling the page toward the leading edge brings the next month, whichever way the language reads.
+            shift((v.translation.width < 0) == (layoutDirection == .leftToRight) ? 1 : -1)
         })
     }
 
-    private func dayCell(_ day: Date) -> some View {
+    private func weeks(of month: Date) -> some View {
+        let start = gridStart(month)
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 7), spacing: compact ? 0 : 4) {
+            ForEach(0..<42, id: \.self) { i in
+                dayCell(cal.date(byAdding: .day, value: i, to: start)!, in: month)
+            }
+        }
+    }
+
+    private func dayCell(_ day: Date, in month: Date) -> some View {
         let inMonth = cal.isDate(day, equalTo: month, toGranularity: .month)
         let isSelected = day == selected
         let isToday = cal.isDateInToday(day)
-        let dots = events.filter { onDay($0, day) }.prefix(3)
+        let dots = eventsOn(day).prefix(3)
+        let circle: CGFloat = compact ? 26 : 32
         return Button {
-            selected = day
+            withAnimation(.snappy(duration: 0.25)) { selected = day }
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: compact ? 1 : 3) {
                 Text("\(cal.component(.day, from: day))")
                     .font(.callout.weight(isToday ? .bold : .regular))
-                    .lineLimit(1).minimumScaleFactor(0.6) // never "…" in the 32 pt circle
+                    .lineLimit(1).minimumScaleFactor(0.6) // never "…" in the circle
                     .foregroundStyle(isSelected ? Color.white : isToday ? Color.accentColor : inMonth ? Color.primary : Color.secondary.opacity(0.6))
-                    .frame(width: 32, height: 32)
-                    .background(isSelected ? Circle().fill(Color.accentColor) : nil)
+                    .frame(width: circle, height: circle)
+                    .background {
+                        // Today keeps a faint disc; the selected day's solid one grows in and fades out.
+                        if isToday { Circle().fill(Color.accentColor.opacity(0.14)) }
+                        Circle().fill(Color.solidAccent).scaleEffect(isSelected ? 1 : 0.6).opacity(isSelected ? 1 : 0)
+                    }
                 HStack(spacing: 2) {
                     ForEach(Array(dots.enumerated()), id: \.offset) { _, e in Circle().fill(color(e)).frame(width: 5, height: 5) }
                 }
                 .frame(height: 5)
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: compact ? 34 : 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -153,19 +201,46 @@ struct CalendarView: View {
         Color(hex: calendars?.first { $0.id == e.calendarId }?.color) ?? .accentColor
     }
 
+    /// A day outside the loaded grid (it can be selected while another month is on its way) is looked up directly.
+    private func eventsOn(_ day: Date) -> [CalEvent] { byDay[day] ?? events.filter { onDay($0, day) } }
+
     private func shift(_ months: Int) {
-        month = cal.date(byAdding: .month, value: months, to: month)!
-        selected = month
+        let target = cal.date(byAdding: .month, value: months, to: month)!
+        show(target, select: target)
+    }
+
+    private func show(_ target: Date, select day: Date) {
+        guard target != month else { withAnimation(.snappy(duration: 0.25)) { selected = day }; return }
+        forward = target > month
+        // The month that leaves takes its exit side from `forward` as it was last drawn, so the change waits one pass.
+        DispatchQueue.main.async {
+            withAnimation(.snappy(duration: 0.35)) {
+                month = target
+                selected = day
+            }
+        }
     }
 
     private func load() async {
+        let requested = month
         do {
             let cals = try await API.shared.calendars()
-            let from = gridStart, to = cal.date(byAdding: .day, value: 42, to: gridStart)!
+            let from = gridStart(month), to = cal.date(byAdding: .day, value: 42, to: from)!
             var all: [CalEvent] = []
             for c in cals { all += try await API.shared.events(c.id, from: from, to: to) }
-            calendars = cals
-            events = all
+            var days: [Date: [CalEvent]] = [:]
+            for i in 0..<42 {
+                let day = cal.date(byAdding: .day, value: i, to: from)!
+                days[day] = all.filter { onDay($0, day) }
+            }
+            // A reload started for another month (a live update just before a swipe) must not replace this month's events.
+            guard requested == month else { return }
+            // Dots and rows fade in rather than pop; the very first load just shows.
+            withAnimation(calendars == nil ? nil : .easeOut(duration: 0.2)) {
+                calendars = cals
+                events = all
+                byDay = days
+            }
             loadError = nil
         } catch is CancellationError {
         } catch let e as URLError where e.code == .cancelled {
@@ -178,27 +253,43 @@ struct CalendarView: View {
 private struct EventRow: View {
     let event: CalEvent
     let color: Color
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .subheadline) private var timeWidth: CGFloat = 70
 
     var body: some View {
-        // Time column, calendar color bar, then title and place (the same layout as Android's event cards).
+        // Time column, calendar color bar, then title and place (the same layout as Android's event cards). At the
+        // accessibility sizes the times move above the title, where they have the row's whole width.
+        let large = typeSize.isAccessibilitySize
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                if event.isAllDay {
-                    Text("All day").font(.subheadline.weight(.semibold))
-                } else {
-                    Text(startOf(event).formatted(date: .omitted, time: .shortened)).font(.subheadline.weight(.semibold))
-                    Text(endOf(event).formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+            if !large {
+                VStack(alignment: .leading, spacing: 1) {
+                    if event.isAllDay {
+                        Text("All day").font(.subheadline.weight(.semibold))
+                    } else {
+                        Text(startOf(event).formatted(date: .omitted, time: .shortened)).font(.subheadline.weight(.semibold))
+                        Text(endOf(event).formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                .frame(width: timeWidth, alignment: .leading)
             }
-            .frame(width: 70, alignment: .leading)
-            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 4, height: 36)
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 4).frame(minHeight: 36)
             VStack(alignment: .leading, spacing: 2) {
-                Text((event.summary ?? "").isEmpty ? String(localized: "(no title)") : event.summary!).font(.body.weight(.medium)).lineLimit(1)
-                if let loc = event.location, !loc.isEmpty { Text(loc).font(.footnote).foregroundStyle(.secondary).lineLimit(1) }
+                if large {
+                    Group {
+                        if event.isAllDay { Text("All day") } else {
+                            Text(verbatim: "\(startOf(event).formatted(date: .omitted, time: .shortened)) – \(endOf(event).formatted(date: .omitted, time: .shortened))")
+                        }
+                    }
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                }
+                Text((event.summary ?? "").isEmpty ? String(localized: "(no title)") : event.summary!).font(.body.weight(.medium))
+                    .lineLimit(large ? 3 : 2)
+                if let loc = event.location, !loc.isEmpty { Text(loc).font(.footnote).foregroundStyle(.secondary).lineLimit(large ? 2 : 1) }
             }
             Spacer(minLength: 0)
             if event.recurring == true { Image(systemName: "repeat").font(.footnote).foregroundStyle(.secondary) }
         }
+        .fixedSize(horizontal: false, vertical: true) // lets the color bar take the row's height
     }
 }
 

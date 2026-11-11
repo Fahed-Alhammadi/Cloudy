@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainView: View {
     @Environment(Session.self) private var session
+    @Environment(Uploads.self) private var uploads
     @Environment(\.scenePhase) private var phase
     #if DEBUG
     @State private var tab = Int(ProcessInfo.processInfo.environment["CLOUDY_TAB"] ?? "") ?? 0 // screenshots
@@ -20,6 +21,7 @@ struct MainView: View {
             MoreView()
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }.tag(3)
         }
+        .sensoryFeedback(.success, trigger: uploads.finished)
         // One live-update stream while the app is active; restarts when it comes back.
         .task(id: phase == .active) {
             guard phase == .active else { return }

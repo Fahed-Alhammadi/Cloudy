@@ -1771,6 +1771,34 @@
         }
       }
     },
+    "Deleted items are removed permanently after %lld days." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تُزال العناصر المحذوفة نهائيًا بعد %lld يومًا."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gelöschte Elemente werden nach %lld Tagen endgültig entfernt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los elementos eliminados se borran definitivamente tras %lld días."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les éléments supprimés sont effacés définitivement après %lld jours."
+          }
+        }
+      }
+    },
     "Deletes your account and all your data on this server for good." : {
       "localizations" : {
         "ar" : {
@@ -2611,6 +2639,34 @@
         }
       }
     },
+    "Files and folders other people share with you show up here." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تظهر هنا الملفات والمجلدات التي يشاركها الآخرون معك."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dateien und Ordner, die andere mit dir teilen, erscheinen hier."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los archivos y carpetas que otras personas comparten contigo aparecen aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les fichiers et dossiers que d’autres partagent avec vous apparaissent ici."
+          }
+        }
+      }
+    },
     "Files downloaded to this iPhone are removed. Your data stays on the server." : {
       "localizations" : {
         "ar" : {
@@ -2635,6 +2691,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Les fichiers téléchargés sur cet iPhone sont supprimés. Vos données restent sur le serveur."
+          }
+        }
+      }
+    },
+    "Files you add or change show up here." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تظهر هنا الملفات التي تضيفها أو تغيّرها."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dateien, die du hinzufügst oder änderst, erscheinen hier."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los archivos que añades o cambias aparecen aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les fichiers que vous ajoutez ou modifiez apparaissent ici."
           }
         }
       }
@@ -3367,6 +3451,34 @@
         }
       }
     },
+    "Mark files as favorites from their ⋯ menu to find them here." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "أضف الملفات إلى المفضلة من قائمة ⋯ الخاصة بها لتجدها هنا."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Markiere Dateien über ihr ⋯-Menü als Favoriten, um sie hier zu finden."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Marca archivos como favoritos desde su menú ⋯ para encontrarlos aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ajoutez des fichiers aux favoris depuis leur menu ⋯ pour les retrouver ici."
+          }
+        }
+      }
+    },
     "More" : {
       "localizations" : {
         "ar" : {
@@ -3923,6 +4035,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sin carpetas"
+          }
+        }
+      }
+    },
+    "No folders in here" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "لا توجد مجلدات هنا"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Ordner hier"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No hay carpetas aquí"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aucun dossier ici"
           }
         }
       }
@@ -5075,6 +5215,34 @@
         }
       }
     },
+    "Share a file or folder from its ⋯ menu to see it here." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "شارك ملفًا أو مجلدًا من قائمة ⋯ الخاصة به ليظهر هنا."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Teile eine Datei oder einen Ordner über das ⋯-Menü, dann erscheint sie hier."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comparte un archivo o una carpeta desde su menú ⋯ para verlo aquí."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partagez un fichier ou un dossier depuis son menu ⋯ pour le voir ici."
+          }
+        }
+      }
+    },
     "Shared by you" : {
       "localizations" : {
         "ar" : {
@@ -5491,6 +5659,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Début"
+          }
+        }
+      }
+    },
+    "Tap + to add one, or import a .vcf or .csv file from the ⋯ menu." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اضغط + لإضافة جهة اتصال، أو استورد ملف .vcf أو .csv من قائمة ⋯."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tippe auf +, um einen hinzuzufügen, oder importiere eine .vcf- oder .csv-Datei über das ⋯-Menü."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toca + para añadir uno, o importa un archivo .vcf o .csv desde el menú ⋯."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Touchez + pour en ajouter un, ou importez un fichier .vcf ou .csv depuis le menu ⋯."
           }
         }
       }
@@ -5995,6 +6191,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Déverrouiller Cloudy"
+          }
+        }
+      }
+    },
+    "Unlock with Face ID, Touch ID or your passcode." : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "افتح القفل باستخدام Face ID أو Touch ID أو رمز الدخول."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Entsperre mit Face ID, Touch ID oder deinem Code."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Desbloquea con Face ID, Touch ID o tu código."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Déverrouillez avec Face ID, Touch ID ou votre code."
           }
         }
       }

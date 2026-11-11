@@ -3,6 +3,7 @@ import SwiftUI
 struct LoginView: View {
     @Environment(Session.self) private var session
     @Environment(\.openURL) private var openURL
+    @Environment(\.verticalSizeClass) private var heightClass
     /// The last server (kept in the App Group since the share extension; signing out keeps the address).
     @State private var server = Session.shared.server
     @State private var user = ""
@@ -19,16 +20,8 @@ struct LoginView: View {
         NavigationStack {
             Form {
                 Section {
-                    VStack(spacing: 10) {
-                        Image("Logo")
-                            .resizable().frame(width: 72, height: 72)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        Text("Cloudy").font(.largeTitle.bold())
-                        Text("Sign in to your own Cloudy server: the self-hosted cloud for files, calendars and contacts.")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .listRowBackground(Color.clear)
+                    BrandHeader(title: "Cloudy", text: "Sign in to your own Cloudy server: the self-hosted cloud for files, calendars and contacts.",
+                                compact: heightClass == .compact)
                 }
                 Section {
                     TextField("Server address", text: $server, prompt: Text(verbatim: "https://cloud.example.com"))
@@ -54,17 +47,22 @@ struct LoginView: View {
                     Text("Use the address of your server, e.g. https://cloud.example.com. Plain http:// only works on your local network.")
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red) }
+                    Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
                 }
                 Section {
                     Button(action: signIn) {
-                        HStack {
-                            Spacer()
-                            if busy { ProgressView() } else { Text("Sign in").bold() }
-                            Spacer()
-                        }
+                        // The label keeps its place under the spinner, so the button doesn't change size while busy.
+                        Text("Sign in").fontWeight(.semibold).opacity(busy ? 0 : 1)
+                            .frame(maxWidth: .infinity)
+                            .overlay { if busy { ProgressView().tint(.white) } }
                     }
-                    .disabled(busy || server.isEmpty || user.isEmpty || password.isEmpty)
+                    .primaryButton()
+                    // Busy keeps the button's color under the white spinner (a disabled button turns gray and hid it);
+                    // signIn() ignores a second tap anyway.
+                    .disabled(server.isEmpty || user.isEmpty || password.isEmpty)
+                    .allowsHitTesting(!busy)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
                 } footer: {
                     Link("Don't have a server yet?", destination: installURL)
                         .font(.footnote)
@@ -82,9 +80,14 @@ struct LoginView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .animation(.default, value: error) // the error row fades in and out instead of jolting the form
+            .animation(.default, value: needsCode)
+            .sensoryFeedback(trigger: error) { _, new in new == nil ? nil : .error }
             #if DEBUG
-            // Screenshots: CLOUDY_LOGIN_TEST=<user>:<password> fills in the form.
+            // Screenshots: CLOUDY_LOGIN_TEST=<user>:<password> fills in the form, CLOUDY_SERVER (without a token) the address.
             .task {
+                error = Screenshots.loginError
+                if let s = ProcessInfo.processInfo.environment["CLOUDY_SERVER"] { server = s }
                 guard let v = ProcessInfo.processInfo.environment["CLOUDY_LOGIN_TEST"], let i = v.firstIndex(of: ":") else { return }
                 user = String(v[..<i])
                 password = String(v[v.index(after: i)...])
@@ -122,6 +125,42 @@ struct LoginView: View {
             }
             busy = false
         }
+    }
+}
+
+/// Logo, name and one line of text at the top of the sign-in and welcome screens. `compact` (landscape): the logo moves
+/// beside the text, so the form below starts on the first screen.
+struct BrandHeader: View {
+    let title: LocalizedStringKey
+    let text: LocalizedStringKey
+    var compact = false
+
+    var body: some View {
+        let logo = Image("Logo")
+            .resizable().frame(width: compact ? 56 : 76, height: compact ? 56 : 76)
+            .clipShape(RoundedRectangle(cornerRadius: compact ? 13 : 17, style: .continuous))
+            .shadow(color: .black.opacity(0.1), radius: 10, y: 5)
+            .accessibilityHidden(true)
+        let name = Text(title).font(compact ? .title2.bold() : .largeTitle.bold())
+        let line = Text(text).font(.subheadline).foregroundStyle(.secondary)
+        Group {
+            if compact {
+                HStack(spacing: 16) {
+                    logo
+                    VStack(alignment: .leading, spacing: 4) { name; line }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 10) {
+                    logo.padding(.bottom, 4)
+                    name.multilineTextAlignment(.center)
+                    line.multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 8, leading: 4, bottom: 0, trailing: 4))
     }
 }
 

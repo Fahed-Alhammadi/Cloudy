@@ -11,6 +11,7 @@ enum Route: Hashable {
     case list(ListKind)
     case links
     case trash
+    case devices
 }
 
 struct FilesTab: View {
@@ -27,9 +28,10 @@ struct FilesTab: View {
         #if DEBUG
         .task { (path, sharing) = Screenshots.filesPath() }
         .sheet(item: $sharing) { ShareSheetView(node: $0) }
+        .fullScreenCover(isPresented: .constant(Screenshots.icons)) { Screenshots.IconSamples() }
         .onReceive(NotificationCenter.default.publisher(for: .tour)) { note in
             switch note.object as? Screenshots.Step {
-            case .files(let p): path = p
+            case .files(let p): path = p // animated like a tap: NavigationStack pushes and pops path changes
             case .share(let n): sharing = n
             default: break
             }
@@ -47,6 +49,7 @@ extension View {
             case .list(let kind): NodeListView(kind: kind)
             case .links: LinksView()
             case .trash: TrashView()
+            case .devices: DevicesView()
             }
         }
     }
@@ -89,10 +92,15 @@ struct FolderView: View {
     let title: String
 
     @Environment(Uploads.self) private var uploads
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption) private var tileWidth: CGFloat = 104 // grid tiles widen with the text under them
     @AppStorage("sort") private var sort = SortOrder.name
     @AppStorage("sortDescending") private var descending = false
     @AppStorage("grid") private var grid = false
     @State private var listing: NodeListing?
+    @State private var settled = true // false for a moment after list ↔ grid, see below
+    @State private var lift: CGFloat = 0 // how far the "+" still is from its place after the bottom bar came or went
+    @State private var bottomInset: CGFloat?
     @State private var loadError: String?
     @State private var actions = FileActions()
     @State private var query = ""
@@ -112,6 +120,18 @@ struct FolderView: View {
 
     var body: some View {
         content
+            // List ↔ grid: the new layout fades in (growing a little, unless Reduce Motion is on). The two are not
+            // cross-faded: with both scroll views on screen at once the navigation bar lost its large title.
+            .opacity(settled ? 1 : 0)
+            .scaleEffect(settled || reduceMotion ? 1 : 0.95)
+            .background(Color(.systemGroupedBackground).ignoresSafeArea()) // stays put while the files fade in
+            .onChange(of: grid) {
+                settled = false
+                DispatchQueue.main.async { withAnimation(.snappy(duration: 0.3)) { settled = true } }
+            }
+            // The sort order lives in UserDefaults, whose changes arrive outside `withAnimation`: animate on the values.
+            .animation(.default, value: sort)
+            .animation(.default, value: descending)
             .overlay {
                 if let loadError, listing == nil {
                     ErrorState(message: loadError) { Task { await load() } }
@@ -126,11 +146,31 @@ struct FolderView: View {
                                            description: Text("Tap + to upload files or create a folder."))
                 }
             }
-            // Round "+" at the bottom, like Android's floating button.
+            // Round "+" at the bottom, like Android's floating button. It shrinks away while files are being selected
+            // or searched, and the last rows scroll clear of it.
+            .contentMargins(.bottom, showsAdd ? 72 : 0, for: .scrollContent)
             .overlay(alignment: .bottomTrailing) {
-                if canEdit && results == nil && !actions.selecting { addButton.padding(20) }
+                ZStack {
+                    if showsAdd {
+                        addButton.padding(.horizontal, 20).padding(.bottom, 16)
+                            .transition(reduceMotion ? .opacity : .scale(scale: 0.3).combined(with: .opacity))
+                    }
+                }
+                .offset(y: lift)
+                .animation(.snappy(duration: 0.25), value: showsAdd)
+            }
+            // The tab bar returns in one step after coming back from the text editor (which hides it), and the "+" above it
+            // jumped along. It now starts where it was and glides to its new place.
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { new in
+                defer { bottomInset = new }
+                // Only steps the size of the tab bar: the keyboard changes this inset too, and that move is already animated.
+                guard let old = bottomInset, abs(new - old) > 1, abs(new - old) < 100, !reduceMotion else { return }
+                lift = new - old
+                DispatchQueue.main.async { withAnimation(.snappy(duration: 0.3)) { lift = 0 } }
             }
             .navigationTitle(title)
+            // The system's own placement: pinning the field (`displayMode: .always`) made list ↔ grid swaps steadier, but a
+            // grid that is the first screen then started with the title collapsed.
             .searchable(text: $query, prompt: Text("Search all files"))
             .searchScopes($filter, activation: .onSearchPresentation) {
                 ForEach(TypeFilter.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -147,6 +187,17 @@ struct FolderView: View {
                 if !actions.selecting { viewButtons }
             }
             .selectionMode(actions, items: shown, canModify: { _ in canEdit })
+            #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: .tour)) { note in
+                switch note.object as? Screenshots.Step {
+                case .grid: grid.toggle()
+                case .sort(let by): if let by = SortOrder(rawValue: by) { sort = by } else { descending.toggle() }
+                case .select(let n): if let first = shown.first { actions.select(first, more: shown.dropFirst().prefix(n - 1).map(\.id)) }
+                case .done: actions.endSelection()
+                default: break
+                }
+            }
+            #endif
 
         .fileActions(actions)
         .textPrompt("New folder", isPresented: $newFolder, text: $newName, action: "Create") { name in
@@ -190,11 +241,13 @@ struct FolderView: View {
     }
 
     private var canEdit: Bool { listing?.canEdit ?? true }
+    private var showsAdd: Bool { canEdit && results == nil && !actions.selecting }
 
     /// Search results are always a list (with their folder path); the folder itself is a list or a grid.
     @ViewBuilder
     private var content: some View {
         let jobs = query.isEmpty ? uploads.jobs(in: id) : []
+        let pop: AnyTransition = reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.9))
         if grid && results == nil {
             ScrollView {
                 VStack(spacing: 12) {
@@ -203,16 +256,17 @@ struct FolderView: View {
                             .font(.footnote).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    ForEach(jobs) { job in UploadRow(job: job) }
+                    ForEach(jobs) { job in UploadRow(job: job).transition(.opacity) }
                 }
                 .padding(.horizontal)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 14)], spacing: 18) {
-                    ForEach(shown) { node in FileTile(node: node, actions: actions) }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: tileWidth), spacing: 14, alignment: .top)], spacing: 18) {
+                    ForEach(shown) { node in FileTile(node: node, actions: actions).transition(pop) }
                 }
                 .padding(.horizontal)
-                .padding(.bottom, 90) // room for the + button
+                .padding(.bottom, 12)
             }
             .background(Color(.systemGroupedBackground))
+            .animation(.default, value: jobs.map(\.id))
         } else {
             List(selection: $actions.selection) {
                 if !jobs.isEmpty {
@@ -228,19 +282,21 @@ struct FolderView: View {
                     if listing?.perm == "read" && results == nil {
                         Label("Shared with you as read-only", systemImage: "lock").textCase(nil)
                     }
-                } footer: {
-                    Color.clear.frame(height: 60) // room for the + button
                 }
             }
             .environment(\.editMode, .constant(actions.selecting ? .active : .inactive))
+            .scrollContentBackground(.hidden) // the grouped gray behind stays when the folder is empty
+            .animation(.default, value: jobs.map(\.id))
         }
     }
 
     @ToolbarContentBuilder
     private var viewButtons: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            Button { withAnimation { grid.toggle() } } label: {
-                grid ? Label("List view", systemImage: "list.bullet") : Label("Grid view", systemImage: "square.grid.2x2")
+            Button { grid.toggle() } label: {
+                Label(grid ? "List view" : "Grid view", systemImage: grid ? "list.bullet" : "square.grid.2x2")
+                    .contentTransition(.symbolEffect(.replace))
+                    .animation(.snappy(duration: 0.3), value: grid)
             }
             sortMenu
         }
@@ -273,12 +329,14 @@ struct FolderView: View {
             Button { newName = ""; newText = true } label: { Label("New text file", systemImage: "doc.plaintext") }
         } label: {
             Image(systemName: "plus")
-                .font(.title2.weight(.semibold))
+                .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 58, height: 58)
-                .background(Circle().fill(Color.accentColor))
-                .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                .background(Circle().fill(Color.solidAccent))
+                .shadow(color: .black.opacity(0.22), radius: 8, y: 4)
+                .contentShape(Circle())
         }
+        .buttonStyle(PressDip())
         .accessibilityLabel(Text("Add"))
     }
 
@@ -298,7 +356,9 @@ struct FolderView: View {
 
     private func load() async {
         do {
-            listing = try await API.shared.node(id)
+            let fresh = try await API.shared.node(id)
+            // Rows that came or went (upload, delete, a change on another device) slide in and out; the first load just shows.
+            withAnimation(listing == nil ? nil : .default) { listing = fresh }
             loadError = nil
         } catch is CancellationError {
         } catch let e as URLError where e.code == .cancelled {
@@ -315,7 +375,7 @@ struct FolderView: View {
         do {
             let found = try await API.shared.search(q)
             guard !Task.isCancelled else { return } // a newer query is on its way
-            results = found
+            withAnimation(results == nil ? nil : .default) { results = found }
             searchError = nil
         } catch {
             // Typing on cancels the previous request: that is not "no results".
@@ -375,7 +435,8 @@ private struct UploadRow: View {
                 if let error = job.error {
                     Text(error).font(.caption).foregroundStyle(.red)
                 } else {
-                    ProgressView(value: job.fraction)
+                    // Progress arrives a chunk at a time; gliding between the steps reads as steady progress.
+                    ProgressView(value: job.fraction).animation(.linear(duration: 0.3), value: job.fraction)
                 }
             }
             // Stops a running upload, or clears a failed one from the list.
@@ -385,5 +446,15 @@ private struct UploadRow: View {
             .buttonStyle(.borderless)
             .accessibilityLabel(job.error == nil ? Text("Cancel upload") : Text("Dismiss"))
         }
+    }
+}
+
+/// Pressed look for the round "+" button: it dips a little under the finger.
+struct PressDip: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
     }
 }

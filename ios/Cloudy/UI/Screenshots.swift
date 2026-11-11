@@ -1,5 +1,5 @@
 #if DEBUG
-import Foundation
+import SwiftUI
 import UIKit
 
 /// Debug builds only: opens a screen from the launch environment so App Store screenshots can be taken without
@@ -7,6 +7,12 @@ import UIKit
 /// (a folder's share sheet); `CLOUDY_CONTACT` = a contact's display name.
 /// `CLOUDY_TOUR` = `<folder id>:<folder name>:<text file id>:<text file name>:<contact>` plays a scripted ~25 s walk
 /// through the app for the App Store preview video; screens follow it via `.tour` notifications.
+/// `CLOUDY_SCRIPT` = `<seconds>:<step>;…` plays any steps, to look at states and motion without tapping:
+/// `tab:<n>`, `folder:<id>:<name>`, `text:<id>:<name>`, `route:recent|favorites|shared|links|trash|devices`, `pop`, `grid` (list ↔ grid), `sort:name|date|size|flip`,
+/// `select:<n>` (multi-select with the first n files ticked), `done`, `month:<±n>`, `day:<±n>`, `contact:<name>`,
+/// `landscape`, `portrait`. Example: `2:tab:1;1:month:1;1:month:-1;1:landscape`.
+/// `CLOUDY_LANDSCAPE=1` starts rotated, `CLOUDY_LOCK=1` shows the app-lock screen (and keeps it), `CLOUDY_ICONS=1` shows
+/// one row per file type, `CLOUDY_LOGIN_ERROR=<text>` shows the sign-in screen with that error.
 enum Screenshots {
     private static let env = ProcessInfo.processInfo.environment
 
@@ -23,6 +29,31 @@ enum Screenshots {
     }
 
     static var contact: String? { env["CLOUDY_CONTACT"] }
+    static var lock: Bool { env["CLOUDY_LOCK"] != nil }
+    static var icons: Bool { env["CLOUDY_ICONS"] != nil }
+    static var loginError: String? { env["CLOUDY_LOGIN_ERROR"] }
+
+    /// Turns the window (the simulator can't be rotated from the command line).
+    @MainActor static func rotate(landscape: Bool) {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: landscape ? .landscapeRight : .portrait))
+    }
+
+    /// One row per file type, to judge the tiles' glyphs and tints side by side.
+    struct IconSamples: View {
+        var body: some View {
+            let names = ["Folder", "Photo.jpg", "Clip.mp4", "Song.mp3", "Paper.pdf", "Backup.zip", "Budget.xlsx", "Deck.pptx",
+                         "Letter.docx", "Notes.txt", "Disk.bin"]
+            let mimes = ["Photo.jpg": "image/jpeg", "Clip.mp4": "video/mp4", "Song.mp3": "audio/mpeg", "Paper.pdf": "application/pdf",
+                         "Notes.txt": "text/plain"]
+            let nodes = names.enumerated().map { i, n in
+                FileNode(id: Int64(i + 1), name: n, isDir: i == 0, size: 48_000, mime: mimes[n], favorite: i % 4 == 1, shared: i % 5 == 2)
+            }
+            NavigationStack {
+                List(nodes) { NodeRow(node: $0) }.navigationTitle(Text(verbatim: "File types"))
+            }
+        }
+    }
 
     /// `CLOUDY_SHARE_TEST=1`: opens the system share sheet with a small text file, to check that the "Cloudy"
     /// share extension is offered and works (simulator testing).
@@ -47,6 +78,44 @@ enum Screenshots {
         case day(Int)
         case contact(String?)
         case type(String)
+        case grid
+        case sort(String)
+        case select(Int)
+        case done
+    }
+
+    /// Things to do once the first screen is up: rotate, play `CLOUDY_SCRIPT`.
+    static func start() async {
+        if env["CLOUDY_LANDSCAPE"] != nil {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            await rotate(landscape: true)
+        }
+        for item in (env["CLOUDY_SCRIPT"] ?? "").split(separator: ";") {
+            let p = item.split(separator: ":", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard p.count >= 2, let wait = Double(p[0]) else { continue }
+            let arg = p.count > 2 ? p[2] : "", name = p.count > 3 ? p[3] : ""
+            try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            var step: Step?
+            switch p[1] {
+            case "tab": step = .tab(Int(arg) ?? 0)
+            case "folder": step = .files([.folder(Int64(arg) ?? 0, name)])
+            case "text": step = .files([.text(FileNode(id: Int64(arg) ?? 0, name: name, isDir: false))])
+            case "route":
+                let routes: [String: Route] = ["links": .links, "trash": .trash, "devices": .devices]
+                step = (ListKind(rawValue: arg).map { .list($0) } ?? routes[arg]).map { .files([$0]) }
+            case "pop": step = .files([])
+            case "grid": step = .grid
+            case "sort": step = .sort(arg)
+            case "select": step = .select(Int(arg) ?? 1)
+            case "done": step = .done
+            case "month": step = .month(Int(arg) ?? 1)
+            case "day": step = .day(Int(arg) ?? 0)
+            case "contact": step = .contact(arg.isEmpty ? nil : arg)
+            case "landscape", "portrait": await rotate(landscape: p[1] == "landscape")
+            default: break
+            }
+            if let step { await MainActor.run { NotificationCenter.default.post(name: .tour, object: step) } }
+        }
     }
 
     /// Starts the tour if `CLOUDY_TOUR` is set; waits a few seconds first so the recording can start.

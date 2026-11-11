@@ -19,7 +19,11 @@ struct RootView: View {
     @Environment(\.scenePhase) private var phase
     @AppStorage("appLock") private var appLock = false
     @AppStorage("welcomed") private var welcomed = false
+    #if DEBUG
+    @State private var locked = UserDefaults.standard.bool(forKey: "appLock") || Screenshots.lock // screenshots
+    #else
     @State private var locked = UserDefaults.standard.bool(forKey: "appLock")
+    #endif
 
     var body: some View {
         Group {
@@ -45,6 +49,9 @@ struct RootView: View {
             }
         }
         .task { if locked { unlock() } }
+        #if DEBUG
+        .task { await Screenshots.start() }
+        #endif
     }
 
     @State private var unlocking = false
@@ -52,6 +59,9 @@ struct RootView: View {
 
     private func unlock() {
         guard !unlocking else { return }
+        #if DEBUG
+        if Screenshots.lock { return } // stays locked for the screenshot
+        #endif
         let ctx = LAContext()
         guard ctx.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { locked = false; return }
         unlocking = true
@@ -87,13 +97,27 @@ private struct LockView: View {
     var unlock: () -> Void
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "lock.fill").font(.system(size: 48)).foregroundStyle(.tint)
-            Text("Cloudy is locked").font(.title2.bold())
-            Button("Unlock", action: unlock).buttonStyle(.borderedProminent)
+        // The app's mark and one line in the middle, the button low where the thumb is. Also what the app switcher shows.
+        VStack(spacing: 0) {
+            Spacer(minLength: 16)
+            Image("Logo")
+                .resizable().frame(width: 84, height: 84)
+                .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+                .accessibilityHidden(true)
+            Text("Cloudy is locked").font(.title2.bold()).padding(.top, 20)
+            Text("Unlock with Face ID, Touch ID or your passcode.")
+                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.top, 6)
+            Spacer(minLength: 16)
+            Button(action: unlock) {
+                Label("Unlock", systemImage: "lock.open.fill").fontWeight(.semibold).frame(maxWidth: .infinity)
+            }
+            .primaryButton()
         }
+        .padding(.horizontal, 24).padding(.bottom, 20)
+        .frame(maxWidth: 440)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Color(.systemGroupedBackground))
     }
 }
 

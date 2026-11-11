@@ -48,11 +48,10 @@ struct ShareSheetView: View {
                 }
                 Section("People and groups") {
                     ForEach(people) { s in
-                        HStack {
-                            Image(systemName: s.type == "group" ? "person.3" : "person")
-                            Text(s.shareWith ?? "")
-                            Spacer()
-                            Text(s.canEdit == true ? "Can edit" : "Can view").font(.caption).foregroundStyle(.secondary)
+                        LabeledContent {
+                            Text(s.canEdit == true ? "Can edit" : "Can view").font(.subheadline)
+                        } label: {
+                            Label(s.shareWith ?? "", systemImage: s.type == "group" ? "person.3.fill" : "person.fill")
                         }
                     }
                     .onDelete { remove(people, $0) }
@@ -72,6 +71,9 @@ struct ShareSheetView: View {
             .navigationTitle(node.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .animation(.default, value: shares?.map(\.id)) // new links and people slide in, removed ones out
+            .animation(.default, value: sharees.users?.map(\.id))
+            .sensoryFeedback(.success, trigger: copied) { _, new in new != nil }
             .task { await load() }
             .task(id: query) {
                 let q = query.trimmingCharacters(in: .whitespaces)
@@ -86,23 +88,37 @@ struct ShareSheetView: View {
     @ViewBuilder
     private func linkRow(_ s: Share) -> some View {
         let url = API.shared.publicURL(s)
-        VStack(alignment: .leading, spacing: 6) {
-            Text(url?.absoluteString ?? "").font(.callout).lineLimit(1).truncationMode(.middle)
-            HStack(spacing: 8) {
-                if s.hasPassword == true { Label("Password", systemImage: "lock").labelStyle(.iconOnly) }
-                if let d = parseDate(s.expiresAt) { Text("Until \(d.formatted(date: .abbreviated, time: .omitted))") }
-                if node.isDir && s.canEdit == true { Text("Uploads allowed") }
-                Spacer()
-                Button {
-                    UIPasteboard.general.url = url
-                    copied = s.id
-                } label: {
-                    Label(copied == s.id ? "Copied" : "Copy", systemImage: copied == s.id ? "checkmark" : "doc.on.doc")
+        // The address and what applies to it on the left; Copy and Share as two full-size (44 pt) buttons on the right.
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(url?.absoluteString ?? "").font(.callout).lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    if s.hasPassword == true { Label("Password", systemImage: "lock.fill").labelStyle(.iconOnly) }
+                    if let d = parseDate(s.expiresAt) { Text("Until \(d.formatted(date: .abbreviated, time: .omitted))") }
+                    if node.isDir && s.canEdit == true { Text("Uploads allowed") }
+                    if copied == s.id { Text("Copied").foregroundStyle(.tint).transition(.opacity) }
                 }
-                if let url { ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up").labelStyle(.iconOnly) } }
+                .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
-            .font(.caption).foregroundStyle(.secondary).buttonStyle(.borderless)
+            Spacer(minLength: 8)
+            Button {
+                UIPasteboard.general.url = url
+                withAnimation { copied = s.id }
+            } label: {
+                Image(systemName: copied == s.id ? "checkmark" : "doc.on.doc")
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .accessibilityLabel(copied == s.id ? Text("Copied") : Text("Copy"))
+            if let url {
+                ShareLink(item: url) {
+                    Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel(Text("Share"))
+            }
         }
+        .buttonStyle(.borderless)
+        .padding(.trailing, -8) // the glyphs, not their touch areas, line up with the row's edge
     }
 
     private func load() async {
@@ -116,7 +132,7 @@ struct ShareSheetView: View {
                 let s = try await API.shared.createLink(node.id, password: password, expires: expires ? expiry : nil, canEdit: node.isDir && allowUpload)
                 password = ""
                 await load()
-                if let url = API.shared.publicURL(s) { UIPasteboard.general.url = url; copied = s.id }
+                if let url = API.shared.publicURL(s) { UIPasteboard.general.url = url; withAnimation { copied = s.id } }
             } catch {
                 self.error = errorText(error)
             }

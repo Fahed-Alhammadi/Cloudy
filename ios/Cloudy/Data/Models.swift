@@ -13,6 +13,8 @@ struct User: Codable, Hashable {
     var rootId: Int64?
     /// Preferred language (en, ar, de, fr, es); nil = follow the device. Shared with the web app and emails.
     var language: String?
+    /// Days the server keeps deleted files in the trash.
+    var trashDays: Int?
 
     var name: String { (displayName ?? "").isEmpty ? id : displayName! }
 }
