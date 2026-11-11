@@ -24,7 +24,12 @@ screenshots/
   shows 50 GB), the debug build (`io.cloudy.app.debug`), `cloud.local` as the server name via `adb root` + a
   bind-mounted hosts file (`127.0.0.1 cloud.local`, `chcon u:object_r:system_file:s0`) + `adb reverse tcp:80 tcp:<server
   port>`, and SystemUI demo mode for the status bar (clock 09:41, full Wi-Fi with `-e fully true`, full battery, no
-  notifications). Dark: `adb shell cmd uimode night yes`. The desktop and XR images are big (4 and 8 GB): install with
+  notifications). Dark: `adb shell cmd uimode night yes`. The tablet sets can also be taken on the phone emulator
+  with its display overridden (as done for app version 1.16): `adb shell wm size 1200x1920; adb shell wm density 320` for
+  the 7-inch set, `wm size 1600x2560` + `wm density 320` + `wm user-rotation lock 1` for the 10-inch set, then
+  `wm size reset; wm density reset; wm user-rotation lock 0`. Photo backup creates a "Camera Uploads" folder when it is
+  switched on: take `photos.png` last and delete that folder again. The desktop and XR sets are still from app version
+  1.15 (bottom bar instead of the side rail). The desktop and XR images are big (4 and 8 GB): install with
   `sdkmanager "system-images;android-34;android-desktop;arm64-v8a" "system-images;android-34;google-xr;arm64-v8a"`
   and uninstall again afterwards. On XR the system starts in dark mode (`cmd uimode night no`), Back closes the panel
   (use the app's own back arrow) and the short panel needs the file actions sheet dragged up to reach "Manage sharing".
