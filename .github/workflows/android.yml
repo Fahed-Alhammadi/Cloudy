@@ -39,7 +39,7 @@ jobs:
           java-version: 21
       - uses: android-actions/setup-android@v4
         with:
-          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0
       - name: Build debug APK
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
@@ -75,7 +75,7 @@ jobs:
       - uses: android-actions/setup-android@v4
         if: steps.done.outputs.skip != 'true'
         with:
-          packages: platform-tools platforms;android-36 build-tools;36.0.0
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0
       - name: Build signed Play bundle
         if: steps.done.outputs.skip != 'true'
         working-directory: android
@@ -89,7 +89,7 @@ jobs:
           printf 'storeFile=cloudy-release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' "$STORE_PW" "$ALIAS" "$KEY_PW" > keystore.properties
           ./gradlew --no-daemon bundleRelease
           cp app/build/outputs/bundle/release/app-release.aab "Cloudy-${{ steps.v.outputs.version }}.aab"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: steps.done.outputs.skip != 'true'
         with:
           name: play-bundle

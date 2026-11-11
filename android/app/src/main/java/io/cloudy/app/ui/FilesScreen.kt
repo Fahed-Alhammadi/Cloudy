@@ -34,7 +34,7 @@ import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.CreateNewFolder
-import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.DownloadForOffline
@@ -327,7 +327,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
                     DropdownMenuItem({ Text(stringResource(R.string.new_folder)) }, leadingIcon = { Icon(Icons.Outlined.CreateNewFolder, null) }, onClick = {
                         menuOpen = false; newFolder = true
                     })
-                    DropdownMenuItem({ Text(stringResource(R.string.new_text_file)) }, leadingIcon = { Icon(Icons.Outlined.NoteAdd, null) }, onClick = {
+                    DropdownMenuItem({ Text(stringResource(R.string.new_text_file)) }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.NoteAdd, null) }, onClick = {
                         menuOpen = false; newTextFile = true
                     })
                 }
@@ -363,7 +363,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
                     error != null && l == null -> EmptyState(Icons.Outlined.CloudOff, error!!)
                     l == null -> Loading()
                     l.children.isNullOrEmpty() -> EmptyState(Icons.Outlined.FolderOpen, stringResource(if (canEdit) R.string.empty_folder_tap else R.string.empty_folder))
-                    else -> NodeList(sortNodes(l.children!!, sort), nav, canModify = { canEdit }, reload = reload, scope = scope, grid = grid,
+                    else -> NodeList(sortNodes(l.children, sort), nav, canModify = { canEdit }, reload = reload, scope = scope, grid = grid,
                         onSelecting = { selecting = it })
                 }
             }

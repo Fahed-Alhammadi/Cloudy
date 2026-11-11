@@ -63,7 +63,7 @@ class Api(private val session: Session) {
             headers.forEach { (k, v) -> req.header(k, v) }
             val sentToken = session.token
             client.newCall(req.build()).execute().use { res ->
-                val text = res.body?.string() ?: ""
+                val text = res.body.string()
                 if (!res.isSuccessful) {
                     // Only when the rejected token is still the current one: a late answer to a request sent before
                     // logging out and in again must not sign the new session out.
@@ -167,7 +167,7 @@ class Api(private val session: Session) {
             if (!res.isSuccessful) throw ApiException(res.code, "Download failed (HTTP ${res.code})")
             dest.parentFile?.mkdirs()
             val tmp = File(dest.path + ".part")
-            res.body!!.byteStream().use { input ->
+            res.body.byteStream().use { input ->
                 tmp.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     var total = 0L
@@ -197,7 +197,7 @@ class Api(private val session: Session) {
             call.execute().use { res ->
                 if (!res.isSuccessful) throw ApiException(res.code, "HTTP ${res.code}")
                 onOpen()
-                val src = res.body!!.source()
+                val src = res.body.source()
                 var event = ""
                 val data = StringBuilder()
                 while (true) {

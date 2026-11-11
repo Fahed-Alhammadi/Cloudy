@@ -9,6 +9,10 @@ updates:
     directory: /server
     schedule: { interval: weekly, day: monday }
     commit-message: { prefix: "Server deps" }
+    ignore:
+      # @types/node follows the Node major the code runs on (Node 24 in the image; Electron 45 ships Node 24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       server-minor:
         update-types: [minor, patch]
@@ -27,6 +31,10 @@ updates:
     directory: /desktop
     schedule: { interval: weekly, day: monday }
     commit-message: { prefix: "Desktop deps" }
+    ignore:
+      # @types/node follows the Node major the code runs on (Node 24 in the image; Electron 45 ships Node 24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       desktop-minor:
         update-types: [minor, patch]

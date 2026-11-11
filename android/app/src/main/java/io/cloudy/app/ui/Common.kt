@@ -39,7 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
-import androidx.compose.material.icons.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.FolderZip
 import androidx.compose.material.icons.outlined.Image
@@ -175,7 +175,7 @@ fun iconFor(node: FileNode): Pair<ImageVector, Color> {
         ext in setOf("xls", "xlsx", "ods", "csv", "numbers") -> Icons.Outlined.TableChart to TypeColor.Sheet
         ext in setOf("ppt", "pptx", "odp", "key") -> Icons.Outlined.Slideshow to TypeColor.Slides
         ext in setOf("doc", "docx", "odt", "rtf", "pages") -> Icons.Outlined.Description to TypeColor.Doc
-        m.startsWith("text/") || m.contains("json") || m.contains("xml") -> Icons.Outlined.Article to TypeColor.Other
+        m.startsWith("text/") || m.contains("json") || m.contains("xml") -> Icons.AutoMirrored.Outlined.Article to TypeColor.Other
         else -> Icons.AutoMirrored.Outlined.InsertDriveFile to TypeColor.Other
     }
 }

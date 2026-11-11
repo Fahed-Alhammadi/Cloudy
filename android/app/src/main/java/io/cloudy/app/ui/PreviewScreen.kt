@@ -175,7 +175,7 @@ fun PreviewScreen(nav: NavController, id: Long) {
 private fun ZoomableImage(n: FileNode) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    val state = rememberTransformableState { zoom, pan, _ ->
+    val state = rememberTransformableState { _, zoom, pan, _ ->
         scale = (scale * zoom).coerceIn(1f, 6f)
         offset = if (scale == 1f) androidx.compose.ui.geometry.Offset.Zero else offset + pan
     }
