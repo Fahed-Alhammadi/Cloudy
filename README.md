@@ -323,6 +323,8 @@ scripts/             versions and release helpers
 Questions and bug reports: [GitHub Issues](https://github.com/Fahed-Alhammadi/Cloudy/issues). Please don't include
 passwords, server addresses or personal files. More help: [support page](https://fahed-alhammadi.github.io/Cloudy/support.html).
 
+Found a security problem? Please report it privately, not as an issue: see [SECURITY.md](SECURITY.md).
+
 ## License
 
 Cloudy is released under the [MIT License](LICENSE). © 2026 Fahed Alhammadi
