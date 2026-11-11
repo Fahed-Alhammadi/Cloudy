@@ -29,7 +29,7 @@
     "electron": "44.7.2",
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
