@@ -1,5 +1,15 @@
 package io.cloudy.app.ui
 
+import androidx.compose.material.icons.outlined.EventAvailable
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import io.cloudy.app.R
 import androidx.compose.ui.res.stringResource
 import android.app.DatePickerDialog
@@ -162,9 +172,27 @@ fun CalendarScreen() {
                         Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
                 val circle = cellHeight?.let { (it - 11.dp).coerceIn(20.dp, 32.dp) } ?: 32.dp
+                // The month slides in from the side it lies on (next month from the end, the previous one from the
+                // start, mirrored in right-to-left languages); a sideways swipe turns the page like the arrows do.
+                val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+                val swipe = with(androidx.compose.ui.platform.LocalDensity.current) { 56.dp.toPx() }
+                AnimatedContent(month, Modifier.pointerInput(rtl) {
+                    var dragged = 0f
+                    detectHorizontalDragGestures(onDragStart = { dragged = 0f }, onDragEnd = {
+                        val forward = if (rtl) dragged > swipe else dragged < -swipe
+                        val backward = if (rtl) dragged < -swipe else dragged > swipe
+                        if (forward) month = month.plusMonths(1) else if (backward) month = month.minusMonths(1)
+                    }) { _, dx -> dragged += dx }
+                }, transitionSpec = {
+                    val towards = if (targetState > initialState) SlideDirection.Start else SlideDirection.End
+                    (slideIntoContainer(towards, tween(280)) + fadeIn(tween(200, delayMillis = 60))) togetherWith (slideOutOfContainer(towards, tween(280)) + fadeOut(tween(120)))
+                }, label = "month") { shownMonth ->
+                val shownFirst = shownMonth.atDay(1)
+                val shownStart = shownFirst.minusDays(((shownFirst.dayOfWeek.value - weekStart.value + 7) % 7).toLong())
+                Column {
                 for (w in 0 until 6) Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                     for (d in 0 until 7) {
-                        val day = gridStart.plusDays((w * 7 + d).toLong())
+                        val day = shownStart.plusDays((w * 7 + d).toLong())
                         val dayEvents = spans.filter { it.onDay(day) }
                         val isSel = day == selected
                         Column(
@@ -174,17 +202,18 @@ fun CalendarScreen() {
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             val today = day == LocalDate.now()
-                            // Today: filled circle; the selected day: tonal circle.
-                            Box(Modifier.padding(top = 3.dp).size(circle).clip(CircleShape).background(when {
+                            // Today: filled circle; the selected day: tonal circle (it fades from day to day).
+                            val fill by animateColorAsState(when {
                                 today -> MaterialTheme.colorScheme.primary
                                 isSel -> MaterialTheme.colorScheme.primaryContainer
-                                else -> Color.Transparent
-                            }), contentAlignment = Alignment.Center) {
+                                else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0f)
+                            }, tween(180), label = "day")
+                            Box(Modifier.padding(top = 3.dp).size(circle).clip(CircleShape).background(fill), contentAlignment = Alignment.Center) {
                                 Text(day.dayOfMonth.toString(), fontSize = 14.sp, fontWeight = if (today || isSel) FontWeight.SemiBold else FontWeight.Normal,
                                     color = when {
                                         today -> MaterialTheme.colorScheme.onPrimary
                                         isSel -> MaterialTheme.colorScheme.onPrimaryContainer
-                                        day.month != month.month -> MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                                        day.month != shownMonth.month -> MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                                         else -> MaterialTheme.colorScheme.onSurface
                                     })
                             }
@@ -193,6 +222,8 @@ fun CalendarScreen() {
                             }
                         }
                     }
+                }
+                }
                 }
             }
             @Composable
@@ -204,9 +235,14 @@ fun CalendarScreen() {
                         Text(selected.format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                     }
-                    if (today.isEmpty()) item { Text(stringResource(R.string.no_events), color = MaterialTheme.colorScheme.outline) }
+                    if (today.isEmpty()) item {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Outlined.EventAvailable, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(36.dp))
+                            Text(stringResource(R.string.no_events), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
                     // The same event file can be in two calendars (imported twice): the calendar is part of the key.
-                    items(today, key = { "${it.calendarId}/${it.uri}/${it.start}" }) { e -> EventCard(e, colorOf[e.calendarId] ?: Accent) { editing = e to selected } }
+                    items(today, key = { "${it.calendarId}/${it.uri}/${it.start}" }) { e -> EventCard(e, colorOf[e.calendarId] ?: Accent, Modifier.animateItem()) { editing = e to selected } }
                 }
             }
             if (wide) Row(Modifier.fillMaxSize()) {
@@ -235,9 +271,9 @@ fun CalendarScreen() {
 
 /** One event of the selected day: time column, calendar color bar, title and place. */
 @Composable
-private fun EventCard(e: CalEvent, color: Color, onClick: () -> Unit) {
+private fun EventCard(e: CalEvent, color: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val fmt = DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest).clickable(onClick = onClick)
+    Row(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerLowest).clickable(onClick = onClick)
         .padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.width(64.dp)) {
             if (e.allDay) Text(stringResource(R.string.all_day), style = MaterialTheme.typography.labelLarge)

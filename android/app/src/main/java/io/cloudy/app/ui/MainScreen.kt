@@ -1,5 +1,6 @@
 package io.cloudy.app.ui
 
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -15,11 +16,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import android.net.Uri
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.navigation.NavBackStackEntry
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -90,7 +115,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -111,19 +135,47 @@ import androidx.compose.ui.text.input.KeyboardType
 import java.text.DateFormat
 import java.util.Date
 
-private const val NAV_MS = 180
+// Screen changes follow Material's motion: going deeper slides the new screen in from the end while the old one
+// moves away toward the start, Back plays the same in reverse (also under the finger with predictive back), and
+// switching tabs fades through without any sideways movement, because tabs are neighbours, not steps.
+private const val NAV_MS = 300
+private val NavEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f) // Material "emphasized"
 
-private data class Tab(val route: String, val label: Int, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+private typealias NavScope = AnimatedContentTransitionScope<NavBackStackEntry>
+
+/** The four tabs' own screens (for Files: the root folder only). */
+private fun NavBackStackEntry.isTab(rootId: Long): Boolean = when (destination.route) {
+    "calendar", "contacts", "more" -> true
+    "files/{id}" -> arguments?.getLong("id") == rootId
+    else -> false
+}
+
+private fun NavScope.enter(rootId: Long, back: Boolean, tabSwitch: Boolean): EnterTransition =
+    if (tabSwitch || (initialState.isTab(rootId) && targetState.isTab(rootId)))
+        fadeIn(tween(210, delayMillis = 90)) + scaleIn(tween(210, delayMillis = 90), initialScale = 0.97f)
+    else slideIntoContainer(if (back) SlideDirection.End else SlideDirection.Start, tween(NAV_MS, easing = NavEasing)) { it / 5 } +
+        fadeIn(tween(NAV_MS * 2 / 3, delayMillis = NAV_MS / 6))
+
+private fun NavScope.exit(rootId: Long, back: Boolean, tabSwitch: Boolean): ExitTransition =
+    if (tabSwitch || (initialState.isTab(rootId) && targetState.isTab(rootId))) fadeOut(tween(90))
+    else slideOutOfContainer(if (back) SlideDirection.End else SlideDirection.Start, tween(NAV_MS, easing = NavEasing)) { it / 5 } +
+        fadeOut(tween(NAV_MS / 3))
+
+private data class Tab(
+    val route: String, val label: Int,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector, val selectedIcon: androidx.compose.ui.graphics.vector.ImageVector,
+)
 
 @Composable
 fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     val nav = rememberNavController()
     val rootId = Services.session.user.value?.rootId ?: 0
     val tabs = listOf(
-        Tab("files/$rootId", R.string.tab_files, Icons.Outlined.Folder),
-        Tab("calendar", R.string.tab_calendar, Icons.Outlined.CalendarMonth),
-        Tab("contacts", R.string.tab_contacts, Icons.Outlined.Contacts),
-        Tab("more", R.string.more, Icons.Outlined.Menu),
+        // Outlined at rest, filled when selected (Material): the current tab reads at a glance, not by color alone.
+        Tab("files/$rootId", R.string.tab_files, Icons.Outlined.Folder, Icons.Filled.Folder),
+        Tab("calendar", R.string.tab_calendar, Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
+        Tab("contacts", R.string.tab_contacts, Icons.Outlined.Contacts, Icons.Filled.Contacts),
+        Tab("more", R.string.more, Icons.Outlined.Menu, Icons.Outlined.Menu),
     )
     // Live updates while the app is visible; office file types once per session.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -139,41 +191,99 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     val currentFolder = entry?.arguments?.getLong("id")
     val showBar = route == "calendar" || route == "contacts" || route == "more" || (route == "files/{id}" && currentFolder == rootId)
 
-    Scaffold(bottomBar = {
-        if (showBar) NavigationBar {
-            tabs.forEach { t ->
-                val selected = if (t.route.startsWith("files/")) route == "files/{id}" else route == t.route
-                NavigationBarItem(selected = selected, icon = { Icon(t.icon, null) }, label = { Text(stringResource(t.label)) }, onClick = {
-                    nav.navigate(t.route) {
-                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                })
+    // Wide windows (tablets, foldables, desktop) and phones in landscape get a navigation rail at the side: a bottom
+    // bar would stretch four buttons across the width and take height that landscape doesn't have.
+    // The rail stays while browsing (there is room for it), so tabs can be switched from inside a folder; only the
+    // viewer hides it. Each tab keeps its own place: coming back to Files returns to the folder it was left in.
+    val useRail = wideWindow() || shortWindow()
+    val showRail = useRail && route != null && route != "preview/{id}"
+    // The tab the current screen belongs to: the last tab screen passed on the way here.
+    var currentTab by rememberSaveable { mutableStateOf("files/$rootId") }
+    val tabSwitch = remember { booleanArrayOf(false) } // the navigation under way was a tap on a tab (read by the transitions)
+    // Bar and rail appear without animation on the first frame (start, rotation, unlock); later changes animate.
+    var navReady by remember { mutableStateOf(false) }
+    LaunchedEffect(entry) {
+        val e = entry
+        if (e != null) navReady = true
+        if (e != null && e.isTab(rootId)) {
+            val files = e.destination.route == "files/{id}"
+            currentTab = if (files) "files/$rootId" else e.destination.route!!
+            // Files reached with Back instead of its tab: what the tab saved when it was left belongs to that earlier
+            // visit. Unless it is dropped, the next switch away can't save the folder open then (the library keeps the
+            // first save), and coming back would reopen the old folder.
+            if (files && !tabSwitch[0]) nav.clearBackStack(e.destination.id)
+        }
+        kotlinx.coroutines.delay(150)
+        tabSwitch[0] = false
+    }
+    fun select(t: Tab) {
+        // The tab that is already open: back to its first screen.
+        if (t.route == currentTab) { nav.popBackStack(t.route, inclusive = false); return }
+        tabSwitch[0] = true
+        currentTab = t.route
+        nav.navigate(t.route) {
+            // Down to the Files root, by its route: `graph.findStartDestination()` is the graph itself here (the start
+            // route carries the folder id), which also removed the Files root, so Back from a tab closed the app.
+            popUpTo("files/$rootId") { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+    fun isSelected(t: Tab) = t.route == currentTab
+
+    // The screens inset themselves (each has its own Scaffold); here only the bar's height is added, and consumed,
+    // so nothing below pads for the system navigation bar a second time.
+    Scaffold(contentWindowInsets = WindowInsets(0, 0, 0, 0), bottomBar = {
+        AnimatedVisibility(showBar && !useRail, enter = if (navReady) expandVertically(tween(NAV_MS, easing = NavEasing)) + fadeIn(tween(NAV_MS)) else EnterTransition.None,
+            exit = shrinkVertically(tween(NAV_MS, easing = NavEasing)) + fadeOut(tween(NAV_MS / 2))) {
+            NavigationBar {
+                tabs.forEach { t ->
+                    val selected = isSelected(t)
+                    NavigationBarItem(selected = selected, icon = { Icon(if (selected) t.selectedIcon else t.icon, null) },
+                        label = { Text(stringResource(t.label), maxLines = 1) }, onClick = { select(t) })
+                }
             }
         }
     }) { pad ->
-        // Short transitions: the library default is a 700 ms cross-fade, which makes every tap feel slow.
-        NavHost(nav, startDestination = "files/$rootId", modifier = Modifier.padding(bottom = pad.calculateBottomPadding()),
-            enterTransition = { fadeIn(tween(NAV_MS)) + slideInHorizontally(tween(NAV_MS)) { it / 12 } },
-            exitTransition = { fadeOut(tween(NAV_MS / 2)) },
-            popEnterTransition = { fadeIn(tween(NAV_MS)) },
-            popExitTransition = { fadeOut(tween(NAV_MS / 2)) + slideOutHorizontally(tween(NAV_MS)) { it / 12 } },
-        ) {
-            composable("files/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                FolderScreen(nav, it.arguments!!.getLong("id"), sharedUris)
+        Row(Modifier.padding(pad).consumeWindowInsets(pad)) {
+            // The screens stop insetting for the start edge by exactly the width the rail has at this moment, also while it slides.
+            var railWidth by remember { mutableStateOf(0.dp) }
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            AnimatedVisibility(showRail, Modifier.onSizeChanged { railWidth = with(density) { it.width.toDp() } },
+                enter = if (navReady) expandHorizontally(tween(NAV_MS, easing = NavEasing)) + fadeIn(tween(NAV_MS)) else EnterTransition.None,
+                exit = shrinkHorizontally(tween(NAV_MS, easing = NavEasing)) + fadeOut(tween(NAV_MS / 2))) {
+                NavigationRail(containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Start + WindowInsetsSides.Vertical)) {
+                    Spacer(Modifier.weight(1f))
+                    tabs.forEach { t ->
+                        val selected = isSelected(t)
+                        NavigationRailItem(selected = selected, icon = { Icon(if (selected) t.selectedIcon else t.icon, null) },
+                            label = { Text(stringResource(t.label), maxLines = 1) }, onClick = { select(t) })
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
             }
-            composable("preview/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
-                PreviewScreen(nav, it.arguments!!.getLong("id"))
+            NavHost(nav, startDestination = "files/$rootId", modifier = Modifier.weight(1f).consumeWindowInsets(androidx.compose.foundation.layout.PaddingValues(start = railWidth)),
+                enterTransition = { enter(rootId, back = false, tabSwitch[0]) },
+                exitTransition = { exit(rootId, back = false, tabSwitch[0]) },
+                popEnterTransition = { enter(rootId, back = true, tabSwitch[0]) },
+                popExitTransition = { exit(rootId, back = true, tabSwitch[0]) },
+            ) {
+                composable("files/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
+                    FolderScreen(nav, it.arguments!!.getLong("id"), sharedUris)
+                }
+                composable("preview/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
+                    PreviewScreen(nav, it.arguments!!.getLong("id"))
+                }
+                composable("list/{kind}") { NodeListScreen(nav, it.arguments!!.getString("kind")!!) }
+                composable("search") { SearchScreen(nav) }
+                composable("trash") { TrashScreen(nav) }
+                composable("calendar") { CalendarScreen() }
+                composable("contacts") { ContactsScreen() }
+                composable("more") { MoreScreen(nav) }
+                composable("backup") { BackupScreen(nav) }
+                composable("devices") { DevicesScreen(nav) }
             }
-            composable("list/{kind}") { NodeListScreen(nav, it.arguments!!.getString("kind")!!) }
-            composable("search") { SearchScreen(nav) }
-            composable("trash") { TrashScreen(nav) }
-            composable("calendar") { CalendarScreen() }
-            composable("contacts") { ContactsScreen() }
-            composable("more") { MoreScreen(nav) }
-            composable("backup") { BackupScreen(nav) }
-            composable("devices") { DevicesScreen(nav) }
         }
     }
 }
@@ -196,7 +306,7 @@ fun MoreScreen(nav: NavController) {
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.more)) }) }) { pad ->
-        Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+        Column(Modifier.padding(pad).fillMaxWidth().verticalScroll(rememberScrollState()).readableWidth().padding(bottom = 16.dp)) {
             val itemColors = ListItemDefaults.colors(containerColor = Color.Transparent)
             @Composable
             fun Group(content: @Composable () -> Unit) =
@@ -387,7 +497,7 @@ fun BackupScreen(nav: NavController) {
     Scaffold(topBar = {
         TopAppBar(title = { Text(stringResource(R.string.photo_backup)) }, navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
     }) { pad ->
-        Column(Modifier.padding(pad).padding(horizontal = 8.dp)) {
+        Column(Modifier.padding(pad).fillMaxWidth().verticalScroll(rememberScrollState()).readableWidth().padding(horizontal = 8.dp)) {
             ListItem(headlineContent = { Text(stringResource(R.string.backup_auto)) }, supportingContent = { Text(stringResource(R.string.backup_auto_summary)) },
                 modifier = Modifier.toggleRow(enabled) { on ->
                     if (on) {

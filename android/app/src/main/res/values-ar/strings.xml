@@ -266,6 +266,7 @@
     <string name="show_password">إظهار كلمة المرور</string>
     <string name="hide_password">إخفاء كلمة المرور</string>
     <string name="login_no_server">ليس لديك خادم بعد؟</string>
+    <string name="login_tagline">سجّل الدخول إلى خادم Cloudy الخاص بك: السحابة المستضافة ذاتيًا للملفات والتقويمات وجهات الاتصال.</string>
     <string name="section_support">الدعم</string>
     <string name="help">المساعدة</string>
     <string name="send_feedback">إرسال ملاحظات</string>

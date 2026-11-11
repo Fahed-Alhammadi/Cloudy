@@ -1,5 +1,13 @@
 package io.cloudy.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.material3.FilledTonalIconButton
 import io.cloudy.app.R
 import androidx.compose.ui.res.stringResource
 import java.io.File
@@ -160,16 +168,7 @@ fun ContactsScreen() {
 
     // After rotation the editor is restored before the address book has reloaded; open it once it has.
     val editBook = book
-    editing?.takeIf { editBook != null }?.let { c ->
-        ContactEditor(c, editBook!!.id, onClose = { editing = null }) { op ->
-            if (!saving) scope.launch {
-                saving = true
-                try { op(); editing = null; reloadKey++ } catch (e: Exception) { toast(context, e.message ?: context.getString(R.string.failed)) }
-                saving = false
-            }
-        }
-        return
-    }
+    val editorOpen = editing != null && editBook != null
 
     importResult?.let { r ->
         AlertDialog(
@@ -188,6 +187,8 @@ fun ContactsScreen() {
     }
 
     Scaffold(
+        // Under the open editor the list is not there for TalkBack.
+        modifier = if (editorOpen) Modifier.clearAndSetSemantics {} else Modifier,
         topBar = {
             TopAppBar(title = {
                 Box {
@@ -237,7 +238,7 @@ fun ContactsScreen() {
                         }
                     items(group, key = { it.uri }) { c ->
                         ListItem(
-                            modifier = Modifier.clickable { editing = c },
+                            modifier = Modifier.animateItem().clickable { editing = c },
                             leadingContent = { Avatar(c) },
                             headlineContent = { Text(c.fn, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { (c.emails.firstOrNull() ?: c.phones.firstOrNull() ?: c.org.ifEmpty { null })?.let { Text(it, maxLines = 1) } },
@@ -249,6 +250,24 @@ fun ContactsScreen() {
         }
     }
 
+    // The editor rises over the list and sinks back into it; the list underneath keeps its scroll position.
+    val shown = remember { arrayOfNulls<Contact>(1) }
+    editing?.let { shown[0] = it }
+    // The covered list gives up the keyboard (typing would go into its hidden search field).
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(editorOpen) { if (editorOpen) focus.clearFocus() }
+    AnimatedVisibility(editorOpen, enter = slideInVertically(tween(280)) { it / 8 } + fadeIn(tween(200)), exit = slideOutVertically(tween(220)) { it / 8 } + fadeOut(tween(160))) {
+        val c = shown[0]
+        if (c != null && editBook != null) androidx.compose.runtime.key(c.uri) {
+            ContactEditor(c, editBook.id, onClose = { editing = null }) { op ->
+                if (!saving) scope.launch {
+                    saving = true
+                    try { op(); editing = null; reloadKey++ } catch (e: Exception) { toast(context, e.message ?: context.getString(R.string.failed)) }
+                    saving = false
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -293,13 +312,13 @@ private fun ContactEditor(c: Contact, bookId: Long, onClose: () -> Unit, onSave:
             },
         )
     }) { pad ->
-        Column(Modifier.padding(pad).imePadding().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (!isNew) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Avatar(c, 56)
+        Column(Modifier.padding(pad).imePadding().fillMaxWidth().verticalScroll(rememberScrollState()).readableWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (!isNew) Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Avatar(c, 64)
                 // Tablets without a phone app (or phones without a mail app) have nothing to open these with.
                 fun launch(i: Intent) = runCatching { context.startActivity(i) }.onFailure { toast(context, context.getString(R.string.no_app_found)) }
-                c.phones.firstOrNull()?.let { p -> IconButton(onClick = { launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", p, null))) }) { Icon(Icons.Outlined.Call, stringResource(R.string.call)) } }
-                c.emails.firstOrNull()?.let { m -> IconButton(onClick = { launch(Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", m, null))) }) { Icon(Icons.Outlined.Email, stringResource(R.string.email)) } }
+                c.phones.firstOrNull()?.let { p -> FilledTonalIconButton(onClick = { launch(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", p, null))) }) { Icon(Icons.Outlined.Call, stringResource(R.string.call)) } }
+                c.emails.firstOrNull()?.let { m -> FilledTonalIconButton(onClick = { launch(Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", m, null))) }) { Icon(Icons.Outlined.Email, stringResource(R.string.email)) } }
             }
             OutlinedTextField(given, { given = it }, label = { Text(stringResource(R.string.first_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(family, { family = it }, label = { Text(stringResource(R.string.last_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())

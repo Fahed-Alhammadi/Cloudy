@@ -1,5 +1,9 @@
 package io.cloudy.app.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
 import android.app.Activity
 import android.content.Context
 import android.net.Uri
@@ -115,38 +119,50 @@ fun ViewActions(grid: Boolean, sort: String, onGrid: (Boolean) -> Unit, onSort: 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (FileNode) -> Unit, selected: Set<Long>? = null) {
-    LazyVerticalGrid(GridCells.Adaptive(112.dp), Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = if (selected != null) 88.dp else 8.dp),
+    // Bigger tiles on tablets (a 10-inch screen would otherwise show ten tiny columns).
+    LazyVerticalGrid(GridCells.Adaptive(if (wideWindow()) 148.dp else 112.dp), Modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 88.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(items, key = { it.id }) { node ->
             val isSelected = selected?.contains(node.id) == true
-            Column(Modifier.clip(RoundedCornerShape(18.dp))
-                .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            val isImage = node.mime.startsWith("image/") && node.size in 1..20_000_000
+            val tileColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, label = "tile")
+            Column(Modifier.animateItem().clip(RoundedCornerShape(18.dp))
+                .background(tileColor)
                 .combinedClickable(onClick = { onOpen(node) }, onLongClick = { onActions(node) })
                 // While selecting, TalkBack says whether each tile is ticked (the list rows have a checkbox for it).
                 .then(if (selected != null) Modifier.semantics { this.selected = isSelected } else Modifier)
                 .padding(4.dp)) {
-                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp)).background(iconFor(node).second.copy(alpha = 0.10f)),
+                Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
+                    .background(iconFor(node).second.forTheme().copy(alpha = if (isSystemInDarkTheme()) 0.22f else 0.12f)),
                     contentAlignment = Alignment.Center) {
                     // Thumbnails for images (Coil downsamples and caches); other types show their icon.
-                    if (node.mime.startsWith("image/") && node.size in 1..20_000_000) {
+                    if (isImage) {
                         val model: Any = Services.offline.localFile(node) ?: Services.api.downloadUrl(node.id, inline = true)
                         AsyncImage(model, node.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else FileIcon(node, Modifier.size(44.dp))
-                    Row(Modifier.align(Alignment.TopStart).padding(4.dp)) {
-                        if (node.favorite) Icon(Icons.Filled.Star, null, tint = androidx.compose.ui.graphics.Color(0xFFE5A50A), modifier = Modifier.size(16.dp))
-                        if (Services.offline.isPinned(node.id)) Icon(Icons.Outlined.CloudDone, stringResource(R.string.available_offline), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    } else FileIcon(node, Modifier.fillMaxSize(0.4f))
+                    // Badges and the ⋮ button sit on small discs, so they stay readable on any photo.
+                    val disc = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
+                    val pinned = Services.offline.isPinned(node.id)
+                    if (node.favorite || pinned) Row(Modifier.align(Alignment.TopStart).padding(6.dp).clip(CircleShape).background(disc).padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (node.favorite) Icon(Icons.Filled.Star, null, tint = FavoriteColor, modifier = Modifier.size(16.dp))
+                        if (pinned) Icon(Icons.Outlined.CloudDone, stringResource(R.string.available_offline), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                     if (selected != null) Icon(
                         if (isSelected) Icons.Filled.CheckCircle else Icons.Outlined.Circle, null,
                         tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp),
-                    ) else IconButton(onClick = { onActions(node) }, Modifier.align(Alignment.TopEnd).size(32.dp)) {
-                        Icon(Icons.Outlined.MoreVert, stringResource(R.string.actions_for, node.name))
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape).background(disc).size(24.dp),
+                    // 48 dp to tap, a 28 dp disc to look at.
+                    ) else Box(Modifier.align(Alignment.TopEnd).size(48.dp).clip(CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button) { onActions(node) },
+                        contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(if (isImage) disc else androidx.compose.ui.graphics.Color.Transparent), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.MoreVert, stringResource(R.string.actions_for, node.name), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
                 Text(node.name, Modifier.fillMaxWidth().padding(top = 4.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

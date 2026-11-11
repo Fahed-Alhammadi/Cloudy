@@ -268,6 +268,7 @@
     <string name="show_password">Show password</string>
     <string name="hide_password">Hide password</string>
     <string name="login_no_server">Don\'t have a server yet?</string>
+    <string name="login_tagline">Sign in to your own Cloudy server: the self-hosted cloud for files, calendars and contacts.</string>
     <string name="section_support">Support</string>
     <string name="help">Help</string>
     <string name="send_feedback">Send feedback</string>

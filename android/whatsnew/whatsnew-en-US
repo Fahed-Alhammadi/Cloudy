@@ -1,2 +1,6 @@
-• Updated libraries and build tools for security and stability
-• Icons for new text files and documents now face the right way in Arabic
+• Smoother movement: screens slide forward and back, tabs fade, and the Back gesture previews where you go
+• Tablets and landscape: navigation moves to the side and each tab remembers its place
+• Back from Calendar, Contacts or More returns to Files instead of closing the app
+• Calendar: swipe to change the month
+• Cleaner text editor, search, grid view, file menus and sign-in screen
+• Contacts keep their scroll position after editing

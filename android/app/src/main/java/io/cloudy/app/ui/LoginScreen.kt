@@ -1,5 +1,12 @@
 package io.cloudy.app.ui
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.background
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -128,9 +135,12 @@ fun LoginScreen() {
             verticalArrangement = Arrangement.Center,
         ) {
             Column(Modifier.widthIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp)) {
-                    Image(painterResource(R.drawable.ic_cloudy_logo), null, modifier = Modifier.size(44.dp))
-                    Text("  Cloudy", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                // The mark, the name and one line on what this is: the first thing a new user reads.
+                Column(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Image(painterResource(R.drawable.ic_cloudy_logo), null, modifier = Modifier.size(72.dp))
+                    Text("Cloudy", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                    Text(stringResource(R.string.login_tagline), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
                 }
                 OutlinedTextField(server, { server = it }, label = { Text(stringResource(R.string.login_server)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
@@ -145,9 +155,18 @@ fun LoginScreen() {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Go),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { if (!busy) submit() }))
                 }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Button(onClick = ::submit, enabled = !busy && user.isNotBlank() && password.isNotEmpty() && server.length > 8, modifier = Modifier.fillMaxWidth()) {
-                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.login_button))
+                // The error opens in place (and is announced by TalkBack) instead of making the form jump.
+                androidx.compose.animation.AnimatedVisibility(error != null) {
+                    val shown = remember { arrayOf("") }
+                    error?.let { shown[0] = it }
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(horizontal = 14.dp, vertical = 12.dp)
+                        .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(20.dp))
+                        Text(shown[0], color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 10.dp))
+                    }
+                }
+                Button(onClick = ::submit, enabled = !busy && user.isNotBlank() && password.isNotEmpty() && server.length > 8, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.login_button), style = MaterialTheme.typography.titleMedium)
                 }
                 // Password reset by email happens on the web (the link in the email opens the browser anyway).
                 TextButton(enabled = server.length > 8, onClick = {

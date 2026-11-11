@@ -266,6 +266,7 @@
     <string name="show_password">Mostrar contraseña</string>
     <string name="hide_password">Ocultar contraseña</string>
     <string name="login_no_server">¿Aún no tienes un servidor?</string>
+    <string name="login_tagline">Inicia sesión en tu propio servidor Cloudy: la nube autoalojada para archivos, calendarios y contactos.</string>
     <string name="section_support">Soporte</string>
     <string name="help">Ayuda</string>
     <string name="send_feedback">Enviar comentarios</string>

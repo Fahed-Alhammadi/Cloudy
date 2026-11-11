@@ -1,5 +1,25 @@
 package io.cloudy.app.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.outlined.People
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -297,13 +317,15 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
     val scan = rememberDocumentScanner { scanned = it }
 
     val known = listing?.node ?: ListCache.node(folderId)
-    val title = known?.let { n -> if (n.parentId == null) stringResource(R.string.tab_files) else n.name } ?: ""
+    // The Files tab keeps its title also before anything has loaded (first start without a connection).
+    val isRoot = folderId == Services.session.user.value?.rootId
+    val title = known?.let { n -> if (n.parentId == null) stringResource(R.string.tab_files) else n.name } ?: if (isRoot) stringResource(R.string.tab_files) else ""
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    if (known?.parentId != null) IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
+                    if (!isRoot) IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
                 },
                 actions = {
                     IconButton(onClick = { nav.navigate("search") }) { Icon(Icons.Outlined.Search, stringResource(R.string.search)) }
@@ -312,7 +334,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
             )
         },
         floatingActionButton = {
-            if (canEdit && !selecting) Box {
+            AnimatedVisibility(canEdit && !selecting, enter = scaleIn() + fadeIn(), exit = scaleOut() + fadeOut()) { Box {
                 FloatingActionButton(onClick = { menuOpen = true }, modifier = Modifier.sideInsets()) { Icon(Icons.Filled.Add, stringResource(R.string.add)) }
                 DropdownMenu(menuOpen, { menuOpen = false }) {
                     DropdownMenuItem({ Text(stringResource(R.string.upload_media)) }, leadingIcon = { Icon(Icons.Outlined.PhotoLibrary, null) }, onClick = {
@@ -331,7 +353,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
                         menuOpen = false; newTextFile = true
                     })
                 }
-            }
+            } }
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
@@ -339,10 +361,21 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
                 color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium)
             if (listing?.perm == "read") Text(stringResource(R.string.read_only_folder), Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium)
-            uploads.name?.let { name ->
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Text(stringResource(R.string.uploading_name, name, uploads.remaining), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    LinearProgressIndicator(progress = { uploads.progress }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            AnimatedVisibility(uploads.name != null, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                // The last name stays while the banner closes (uploads.name is already null then).
+                val last = remember { arrayOf<Any>("", 1) }
+                uploads.name?.let { last[0] = it; last[1] = uploads.remaining }
+                val lastName = last[0] as String
+                // A new file starts its bar at zero (keyed by name) instead of sweeping back from the last one's end.
+                val progress by androidx.compose.runtime.key(lastName) { animateFloatAsState(uploads.progress, label = "upload") }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)).padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.UploadFile, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text(stringResource(R.string.uploading_name, lastName, last[1] as Int), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(2.dp)), drawStopIndicator = {}, gapSize = 0.dp)
+                    }
                 }
             }
             if (sharedUris.value.isNotEmpty() && canEdit) {
@@ -360,7 +393,7 @@ fun FolderScreen(nav: NavController, folderId: Long, sharedUris: MutableState<Li
             PullToRefreshBox(isRefreshing = refreshing, onRefresh = { scope.launch { refreshing = true; load(); refreshing = false } }) {
                 val l = listing
                 when {
-                    error != null && l == null -> EmptyState(Icons.Outlined.CloudOff, error!!)
+                    error != null && l == null -> EmptyState(Icons.Outlined.CloudOff, error!!, onRetry = reload)
                     l == null -> Loading()
                     l.children.isNullOrEmpty() -> EmptyState(Icons.Outlined.FolderOpen, stringResource(if (canEdit) R.string.empty_folder_tap else R.string.empty_folder))
                     else -> NodeList(sortNodes(l.children, sort), nav, canModify = { canEdit }, reload = reload, scope = scope, grid = grid,
@@ -446,35 +479,50 @@ fun NodeList(
         }
     }
     val modifiable = selected.filter(canModify)
+    // What the bar showed last, for the moment it slides away (the selection is already empty then).
+    val lastCount = remember { IntArray(2) { 1 } }
+    if (selected.isNotEmpty()) { lastCount[0] = selected.size; lastCount[1] = if (modifiable.isEmpty()) 0 else 1 }
+    val barCanModify = lastCount[1] == 1
 
     Box(Modifier.fillMaxSize()) {
-        if (grid) NodeGrid(items, onOpen = open, onActions = { longPress(it) }, selected = if (selecting) selectedIds.toSet() else null)
-        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = if (selecting) 80.dp else 0.dp)) {
+        // Switching between list and grid cross-fades; rows glide to their new place when files come, go or are re-sorted.
+        AnimatedContent(grid, transitionSpec = { (fadeIn(tween(220, delayMillis = 60)) + scaleIn(tween(220, delayMillis = 60), initialScale = 0.98f)) togetherWith fadeOut(tween(90)) },
+            label = "list or grid") { asGrid ->
+        if (asGrid) NodeGrid(items, onOpen = open, onActions = { longPress(it) }, selected = if (selecting) selectedIds.toSet() else null)
+        // Room at the end so the last row's ⋮ is never stuck under the + button or the selection bar.
+        else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
             items(items, key = { it.id }) { node ->
                 val isSelected = node.id in selectedIds
+                val rowColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface, label = "row")
                 ListItem(
-                    modifier = Modifier.combinedClickable(onClick = { open(node) }, onLongClick = { longPress(node) }),
-                    colors = if (isSelected) ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else ListItemDefaults.colors(),
-                    leadingContent = { if (selecting) Checkbox(isSelected, onCheckedChange = { toggle(node) }) else FileTile(node) },
+                    modifier = Modifier.animateItem().combinedClickable(onClick = { open(node) }, onLongClick = { longPress(node) }),
+                    colors = ListItemDefaults.colors(containerColor = rowColor),
+                    leadingContent = {
+                        // Same footprint for the tile and the checkbox, so names don't shift when selection starts.
+                        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                            Crossfade(selecting, label = "tile or checkbox") { on -> if (on) Checkbox(isSelected, onCheckedChange = { toggle(node) }) else FileTile(node) }
+                        }
+                    },
                     headlineContent = { Text(node.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
                     supportingContent = {
                         Text(subtitle(node) ?: listOfNotNull(formatWhen(node.mtime).ifEmpty { null }, if (node.isDir) null else formatSize(node.size)).joinToString(" · "),
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     trailingContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (node.favorite) Icon(Icons.Filled.Star, null, tint = androidx.compose.ui.graphics.Color(0xFFE5A50A), modifier = Modifier.size(16.dp))
-                            if (Services.offline.isPinned(node.id)) Icon(Icons.Outlined.CloudDone, stringResource(R.string.available_offline), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                            if (node.shared) Icon(Icons.Outlined.Share, stringResource(R.string.shared), tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(16.dp))
-                            if (!selecting) IconButton(onClick = { sheetFor = node }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.actions_for, node.name)) }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (node.favorite) Icon(Icons.Filled.Star, null, tint = FavoriteColor, modifier = Modifier.size(18.dp))
+                            if (Services.offline.isPinned(node.id)) Icon(Icons.Outlined.CloudDone, stringResource(R.string.available_offline), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            if (node.shared) Icon(Icons.Outlined.People, stringResource(R.string.shared), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                            if (!selecting) IconButton(onClick = { sheetFor = node }) { Icon(Icons.Outlined.MoreVert, stringResource(R.string.actions_for, node.name), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                     },
                 )
             }
         }
-        if (selecting) SelectionBar(
-            count = selected.size,
-            modifier = Modifier.align(Alignment.BottomCenter),
+        }
+        AnimatedVisibility(selecting, Modifier.align(Alignment.BottomCenter), enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) { SelectionBar(
+            // The count stays while the bar slides away (the selection is already empty then).
+            count = selected.size.takeIf { it > 0 } ?: lastCount[0],
             onClose = { selectedIds = emptyList() },
             onSelectAll = { selectedIds = items.map { it.id } },
             onSend = {
@@ -483,9 +531,9 @@ fun NodeList(
                 else scope.launch { runCatching { sendManyToApp(context, files) }.onFailure { toast(context, it.message ?: context.getString(R.string.failed)) } }
             },
             onFavorite = { bulkAct(selected.filter { !it.favorite }) { Services.api.setFavorite(it.id, true) } },
-            onMove = if (modifiable.isEmpty()) null else ({ bulk = "move" }),
-            onDelete = if (modifiable.isEmpty()) null else ({ bulk = "delete" }),
-        )
+            onMove = if (!barCanModify) null else ({ if (modifiable.isNotEmpty()) bulk = "move" }),
+            onDelete = if (!barCanModify) null else ({ if (modifiable.isNotEmpty()) bulk = "delete" }),
+        ) }
     }
     sheetFor?.let { node -> NodeActions(node, nav, canModify(node), reload, scope, onSelect = { selectedIds = listOf(node.id) }) { sheetFor = null } }
     when (bulk) {
@@ -528,12 +576,19 @@ fun NodeActions(node: FileNode, nav: NavController, canModify: Boolean, reload: 
     }
 
     if (dialog == null) ModalBottomSheet(onDismissRequest = onClose) {
-        Text(node.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp), maxLines = 2)
-        HorizontalDivider()
+        Row(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            FileTile(node, 44.dp)
+            Column(Modifier.padding(start = 14.dp)) {
+                Text(node.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                val details = listOfNotNull(formatWhen(node.mtime).ifEmpty { null }, if (node.isDir) null else formatSize(node.size)).joinToString(" · ")
+                if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         @Composable
         fun Item(label: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, danger: Boolean = false, onClick: () -> Unit) =
             ListItem(
-                modifier = Modifier.clickable(onClick = onClick),
+                modifier = Modifier.clickable(onClick = onClick), colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                 leadingContent = { Icon(icon, null, tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) },
                 headlineContent = { Text(stringResource(label), color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface) },
             )
@@ -679,7 +734,7 @@ fun SharesDialog(node: FileNode, onDismiss: () -> Unit) {
                                 Text(listOfNotNull(
                                     if (sh.canEdit) stringResource(R.string.share_can_edit) else if (link) null else stringResource(R.string.share_read_only),
                                     if (sh.hasPassword) stringResource(R.string.share_password) else null,
-                                    sh.expiresAt?.let { stringResource(R.string.share_expires, formatDate(it)) },
+                                    sh.expiresAt?.let { stringResource(R.string.share_expires, formatWhen(it)) }, // the day is enough here
                                 ).joinToString(" · ").ifEmpty { stringResource(R.string.share_anyone) })
                             },
                             trailingContent = {
@@ -795,7 +850,7 @@ fun NodeListScreen(nav: NavController, kind: String) {
         Box(Modifier.padding(pad)) {
             val list = items
             when {
-                error != null && list == null -> EmptyState(Icons.Outlined.CloudOff, error!!)
+                error != null && list == null -> EmptyState(Icons.Outlined.CloudOff, error!!) { scope.launch { load() } }
                 list == null -> Loading()
                 list.isEmpty() -> EmptyState(Icons.Outlined.FolderOpen, stringResource(R.string.nothing_here))
                 else -> NodeList(list, nav, canModify = { it.owner == me?.id }, reload = { scope.launch { load() } }, scope = scope, subtitle = { n ->
@@ -823,6 +878,7 @@ fun SearchScreen(nav: NavController) {
     var filter by rememberSaveable { mutableStateOf(TypeFilter.ALL) }
     val me by Services.session.user.collectAsStateWithLifecycle()
     val focus = remember { FocusRequester() }
+    val filesLabel = stringResource(R.string.tab_files) // where files at the top level are
     LaunchedEffect(Unit) { focus.requestFocus() } // open the keyboard right away
     LaunchedEffect(q, reloadKey) {
         val query = q.trim()
@@ -834,7 +890,7 @@ fun SearchScreen(nav: NavController) {
     }
     Scaffold(topBar = {
         TopAppBar(
-            title = { OutlinedTextField(q, { q = it }, placeholder = { Text(stringResource(R.string.search_files)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(end = 8.dp).focusRequester(focus)) },
+            title = { SearchField(q, { q = it }, stringResource(R.string.search_files), Modifier.padding(end = 12.dp).height(48.dp).focusRequester(focus)) },
             navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
         )
     }) { pad ->
@@ -846,7 +902,8 @@ fun SearchScreen(nav: NavController) {
                 error != null && q.isNotBlank() -> EmptyState(Icons.Outlined.CloudOff, error!!)
                 q.isNotBlank() && shown.isEmpty() -> EmptyState(Icons.Outlined.Search, stringResource(R.string.no_matches))
                 // Results include files shared with you: only your own can be renamed, moved or deleted (as in Recent).
-                else -> NodeList(shown, nav, canModify = { it.owner == me?.id }, reload = { reloadKey++ }, scope = scope, subtitle = { it.path })
+                else -> NodeList(shown, nav, canModify = { it.owner == me?.id }, reload = { reloadKey++ }, scope = scope,
+                    subtitle = { it.path?.trim('/')?.ifEmpty { null } ?: filesLabel })
             }
         }
     }

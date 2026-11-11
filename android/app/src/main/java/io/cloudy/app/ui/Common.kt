@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -149,6 +153,9 @@ object TypeColor {
     val Other = Color(0xFF64748B)
 }
 
+/** The favorite star: amber that still reads on white (the iPhone app uses the same). */
+val FavoriteColor = Color(0xFFE5A50A)
+
 /** More screen icon colors (Android Settings style); the iPhone app uses the same hue per entry where it has one. */
 object SettingColor {
     val Blue = Color(0xFF1A73E8)
@@ -223,7 +230,7 @@ fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String, 
     val colors = MaterialTheme.colorScheme
     BasicTextField(value, onChange, singleLine = true, textStyle = MaterialTheme.typography.bodyLarge.copy(color = colors.onSurface),
         cursorBrush = SolidColor(colors.primary), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        modifier = modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(26.dp)).background(colors.surfaceContainerHigh),
+        modifier = modifier.fillMaxWidth().height(52.dp).clip(CircleShape).background(colors.surfaceContainerHigh),
         decorationBox = { inner ->
             Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Search, null, tint = colors.onSurfaceVariant)
@@ -247,18 +254,44 @@ fun shareText(context: Context, text: String) {
 @Composable
 fun Loading() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 
-/** Centered icon and text; [onRetry] adds a "Try again" button (for load errors). */
+/**
+ * Centered icon (on a soft brand-tinted disc) and text; [onRetry] adds a "Try again" button (for load errors).
+ * Scrolls, so it also fits a short landscape window and keeps pull-to-refresh working around it.
+ */
 @Composable
 fun EmptyState(icon: ImageVector, text: String, onRetry: (() -> Unit)? = null) =
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.outline)
-            Text(text, color = MaterialTheme.colorScheme.outline, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
-            if (onRetry != null) androidx.compose.material3.OutlinedButton(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
+            Box(Modifier.size(88.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+            Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(top = 16.dp).widthIn(max = 320.dp))
+            if (onRetry != null) androidx.compose.material3.FilledTonalButton(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
                 Text(stringResource(R.string.try_again))
             }
         }
     }
+
+// ---------------------------------------------------------------- window sizes
+
+/** The window's size in dp (the app's own window: split screen, a foldable's inner display, a desktop window). */
+@Composable
+private fun windowSize(): androidx.compose.ui.unit.DpSize {
+    val px = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize
+    return with(androidx.compose.ui.platform.LocalDensity.current) { androidx.compose.ui.unit.DpSize(px.width.toDp(), px.height.toDp()) }
+}
+
+/** Material's "medium" width and up: tablets, unfolded foldables, desktop windows. */
+@Composable
+fun wideWindow(): Boolean = windowSize().width >= 600.dp
+
+/** A phone on its side: little height, so bars at the top and bottom cost too much of it. */
+@Composable
+fun shortWindow(): Boolean = windowSize().let { it.height < 480.dp && it.width > it.height }
+
+/** Keeps forms and settings at a comfortable line length on wide windows, centered (lists of files use the full width). */
+fun Modifier.readableWidth(max: Dp = 720.dp): Modifier = wrapContentWidth(Alignment.CenterHorizontally).widthIn(max = max)
 
 @Composable
 fun TextPrompt(

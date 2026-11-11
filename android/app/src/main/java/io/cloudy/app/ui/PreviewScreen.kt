@@ -1,5 +1,7 @@
 package io.cloudy.app.ui
 
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
 import io.cloudy.app.R
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
@@ -141,9 +143,9 @@ fun PreviewScreen(nav: NavController, id: Long) {
                     "office" -> PdfView(n, preview = true)
                     "text" -> TextView(n, canEdit, onDirty = { dirty = it }) { saved -> node = saved }
                     else -> Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        FileIcon(n, Modifier.padding(16.dp))
-                        Text(n.name, style = MaterialTheme.typography.titleMedium)
-                        Text(formatSize(n.size), color = MaterialTheme.colorScheme.outline)
+                        FileTile(n, 88.dp)
+                        Text(n.name, style = MaterialTheme.typography.titleLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 20.dp))
+                        Text(formatSize(n.size), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                         Button(onClick = { scope.launch { runCatching { openExternally(context, n) }.onFailure { toast(context, it.message ?: context.getString(R.string.failed)) } } },
                             modifier = Modifier.padding(top = 16.dp)) {
                             Icon(Icons.AutoMirrored.Outlined.OpenInNew, null); Text("  " + stringResource(R.string.open_with))
@@ -316,28 +318,43 @@ private fun TextView(n: FileNode, canEdit: Boolean, onDirty: (Boolean) -> Unit, 
     when {
         failed != null -> EmptyState(Icons.Outlined.CloudOff, failed!!)
         original == null -> Loading()
-        !canEdit -> Text(original, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(16.dp))
+        !canEdit -> Text(original, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp, lineHeight = 22.sp),
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(20.dp))
         // imePadding: edge-to-edge, so the editor must shrink above the keyboard itself (adjustResize no longer does it).
+        // The page is the text itself, edge to edge; its state and Save sit in a bar at the bottom, in reach of the
+        // thumb and right above the keyboard. imePadding: edge-to-edge, so the editor shrinks above the keyboard itself.
         else -> Column(Modifier.fillMaxSize().imePadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(if (text != original) R.string.unsaved_changes else R.string.saved), Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.labelMedium)
-                Button(enabled = text != original && !saving, onClick = {
-                    saving = true
-                    scope.launch {
-                        runCatching { Services.api.saveText(n.id, text) }
-                            .onSuccess { loaded = text; onSaved(it); toast(context, context.getString(R.string.saved)) }
-                            .onFailure { toast(context, it.message ?: context.getString(R.string.save_failed)) }
-                        saving = false
-                    }
-                }) { Icon(Icons.Outlined.Save, null); Text("  " + stringResource(R.string.save)) }
-            }
-            OutlinedTextField(
+            val clear = androidx.compose.ui.graphics.Color.Transparent
+            androidx.compose.material3.TextField(
                 value = text, onValueChange = { draft = it },
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(bottom = 8.dp),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace, fontSize = 15.sp, lineHeight = 22.sp),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(focusedContainerColor = clear, unfocusedContainerColor = clear,
+                    focusedIndicatorColor = clear, unfocusedIndicatorColor = clear),
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 4.dp),
             )
+            val dirty = text != original
+            androidx.compose.material3.HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            run {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    val dot by androidx.compose.animation.animateColorAsState(if (dirty) SettingColor.Orange.forTheme() else SettingColor.Green.forTheme(), label = "state")
+                    Box(Modifier.size(8.dp).background(dot, androidx.compose.foundation.shape.CircleShape))
+                    Text(stringResource(if (dirty) R.string.unsaved_changes else R.string.saved), Modifier.weight(1f).padding(start = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                    Button(enabled = dirty && !saving, onClick = {
+                        saving = true
+                        scope.launch {
+                            runCatching { Services.api.saveText(n.id, text) }
+                                .onSuccess { loaded = text; onSaved(it); toast(context, context.getString(R.string.saved)) }
+                                .onFailure { toast(context, it.message ?: context.getString(R.string.save_failed)) }
+                            saving = false
+                        }
+                    }) {
+                        if (saving) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Outlined.Save, null, Modifier.size(18.dp))
+                        Text(stringResource(R.string.save), Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -384,7 +401,8 @@ fun TrashScreen(nav: NavController) {
                     }
                     items(list, key = { it.id }) { t ->
                         ListItem(
-                            leadingContent = { FileIcon(FileNode(t.id, t.name, t.isDir, mime = t.mime)) },
+                            modifier = Modifier.animateItem(),
+                            leadingContent = { FileTile(FileNode(t.id, t.name, t.isDir, mime = t.mime)) },
                             headlineContent = { Text(t.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { Text("${t.originalPath ?: ""} · ${formatDate(t.deletedAt)}", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             trailingContent = {
