@@ -1,6 +1,6 @@
-• Smoother movement: screens slide forward and back, tabs fade, and the Back gesture previews where you go
+• Fixed: the Back button and back swipe now slide the screen away like the arrow at the top, instead of shrinking it
+• Smoother movement: screens slide forward and back, and tabs fade
 • Tablets and landscape: navigation moves to the side and each tab remembers its place
 • Back from Calendar, Contacts or More returns to Files instead of closing the app
 • Calendar: swipe to change the month
 • Cleaner text editor, search, grid view, file menus and sign-in screen
-• Contacts keep their scroll position after editing

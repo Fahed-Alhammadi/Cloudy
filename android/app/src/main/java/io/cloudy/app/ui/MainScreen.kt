@@ -268,6 +268,10 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
                 exitTransition = { exit(rootId, back = false, tabSwitch[0]) },
                 popEnterTransition = { enter(rootId, back = true, tabSwitch[0]) },
                 popExitTransition = { exit(rootId, back = true, tabSwitch[0]) },
+                // The system Back button/gesture has its own pair in the library, which defaults to shrinking the screen
+                // away (scaleOut to 0.7); without these, only the app bar's arrow played the slide.
+                predictivePopEnterTransition = { enter(rootId, back = true, tabSwitch[0]) },
+                predictivePopExitTransition = { exit(rootId, back = true, tabSwitch[0]) },
             ) {
                 composable("files/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) {
                     FolderScreen(nav, it.arguments!!.getLong("id"), sharedUris)
