@@ -146,7 +146,7 @@ export async function notifyShare(req: IncomingMessage, sharer: User, nodeId: nu
       to: r.email, lang,
       subject: mailText(lang, 'shareSubject', vars),
       text: mailText(lang, node.is_dir ? 'shareFolder' : 'shareFile', vars),
-      action: { label: mailText(lang, 'open'), url: `${(await mailOrigin()) ?? publicOrigin(req)}/#/shared-in` },
+      action: { label: mailText(lang, 'open'), url: `${(await mailOrigin()) ?? publicOrigin(req)}/shared-in` },
     });
   }
 }
@@ -223,7 +223,9 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
         to: u.email, lang,
         subject: mailText(lang, 'resetSubject'),
         text: mailText(lang, 'resetText', { user: u.display_name || u.id, id: u.id, minutes: RESET_MINUTES }),
-        action: { label: mailText(lang, 'resetAction'), url: `${origin}/#/reset/${token}` },
+        // The token rides in the fragment: browsers never send it, so it stays out of reverse proxies' access logs.
+        // The page reads it and shows a plain /reset address.
+        action: { label: mailText(lang, 'resetAction'), url: `${origin}/reset#${token}` },
       });
     }
     noContent(res);

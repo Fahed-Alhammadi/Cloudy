@@ -1,4 +1,4 @@
-// Public link page (/s/<token>): browse, preview, download and (optionally) upload.
+// Public link page (/s/<token>, its folders /s/<token>/<id>): browse, preview, download and (optionally) upload.
 import { get, post } from './api.js';
 import { h, icon, fileIcon, formatSize, formatDate, fullDate, showError, promptDialog } from './ui.js';
 import { openViewer, kindOf } from './viewer.js';
@@ -6,7 +6,7 @@ import { uploadAll, filesFromInput, filesFromDrop } from './upload.js';
 import { t, locale, setLanguage, storedLanguage } from './i18n.js';
 
 // Only a real token goes into API paths (a crafted "/s/%2e%2e" would otherwise point them elsewhere).
-const rawToken = location.pathname.split('/').pop();
+const rawToken = location.pathname.split('/')[2] ?? '';
 const token = /^[\w-]+$/.test(rawToken) ? rawToken : '';
 const base = `/api/public/${encodeURIComponent(token)}`;
 const app = document.getElementById('app');
@@ -42,17 +42,29 @@ function passwordForm() {
   pw.focus();
 }
 
-// Folders are opened through the URL (#<id>), so the browser's Back button goes up again instead of leaving.
+// Folders get their own address (/s/<token>/<id>), so the browser's Back button goes up again instead of leaving.
 let linkInfo = null;
+const folderPath = (id) => `/s/${token}` + (id === linkInfo.node.id ? '' : `/${id}`);
+const shownFolder = () => Number(location.pathname.split('/')[3]) || linkInfo.node.id;
 const openFolder = (id) => {
-  const hash = id === linkInfo.node.id ? '' : `#${id}`;
-  if (location.hash === hash || (!hash && !location.hash)) showNode(linkInfo, id).catch(showError);
-  else location.hash = hash || '#';
+  if (location.pathname !== folderPath(id)) history.pushState(null, '', folderPath(id));
+  showNode(linkInfo, id).catch(showError);
+};
+const showTop = () => {
+  history.replaceState(null, '', folderPath(linkInfo.node.id));
+  return showNode(linkInfo, linkInfo.node.id);
+};
+window.addEventListener('popstate', () => {
+  if (linkInfo) showNode(linkInfo, shownFolder()).catch(() => showTop().catch(showError));
+});
+// Before 1.18 a folder's address was /s/<token>#<id>: such links open the folder at its own address.
+const fromOldAddress = () => {
+  const old = /^#(\d+)$/.exec(location.hash);
+  if (old) history.replaceState(null, '', folderPath(Number(old[1])));
+  return !!old;
 };
 window.addEventListener('hashchange', () => {
-  if (!linkInfo) return;
-  const id = Number(location.hash.slice(1)) || linkInfo.node.id;
-  showNode(linkInfo, id).catch(() => showNode(linkInfo, linkInfo.node.id).catch(showError));
+  if (linkInfo && fromOldAddress()) showNode(linkInfo, shownFolder()).catch(() => showTop().catch(showError));
 });
 
 async function showNode(info, id) {
@@ -69,7 +81,7 @@ async function showNode(info, id) {
   }
 
   // An upload that finishes after the visitor opened another folder must not pull them back here.
-  const reload = () => { if ((Number(location.hash.slice(1)) || info.node.id) === id) showNode(info, id).catch(showError); };
+  const reload = () => { if (shownFolder() === id) showNode(info, id).catch(showError); };
   const target = {
     parentId: id,
     startUrl: `${base}/uploads`,
@@ -136,8 +148,8 @@ async function start() {
     if (info.needsPassword) return passwordForm();
     linkInfo = info;
     document.title = `${info.node.name} – Cloudy`;
-    const first = Number(location.hash.slice(1)) || info.node.id;
-    await showNode(info, first).catch(() => showNode(info, info.node.id));
+    fromOldAddress();
+    await showNode(info, shownFolder()).catch(showTop);
   } catch (e) {
     frame(t('Link unavailable'), null, h('div', { class: 'empty' }, icon('link'), h('p', {}, t(e.message))));
   }

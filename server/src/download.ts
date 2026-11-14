@@ -92,14 +92,30 @@ function dosTime(d: Date): { time: number; date: number } {
   };
 }
 
+/** Streams a folder as a ZIP: its contents at the top of the archive. */
+export function sendZip(res: ServerResponse, root: Node): Promise<void> {
+  return sendItemsZip(res, root.name || 'files', () => children(root.id));
+}
+
+/** `name`, or `name (2)`, `name (3)`… (before the extension of a file) when the archive already has it. */
+function unusedName(name: string, isDir: boolean, taken: Set<string>): string {
+  const dot = isDir ? -1 : name.lastIndexOf('.');
+  const [base, ext] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+  let out = name;
+  for (let i = 2; taken.has(out.toLowerCase()); i++) out = `${base} (${i})${ext}`;
+  taken.add(out.toLowerCase());
+  return out;
+}
+
 /**
- * Streams a folder as an uncompressed ZIP (data descriptors, UTF-8 names).
- * Store-only keeps CPU low; most cloud content is already compressed.
+ * Streams files and folders (folders with everything in them) as an uncompressed ZIP named `<zipName>.zip`
+ * (data descriptors, UTF-8 names). Store-only keeps CPU low; most cloud content is already compressed.
+ * Items picked from several folders can share a name; those get "(2)"… so none overwrites another when unpacked.
  */
-export async function sendZip(res: ServerResponse, root: Node): Promise<void> {
+export async function sendItemsZip(res: ServerResponse, zipName: string, items: () => Promise<Node[]>): Promise<void> {
   res.writeHead(200, {
     'Content-Type': 'application/zip',
-    'Content-Disposition': contentDisposition('attachment', (root.name || 'files') + '.zip'),
+    'Content-Disposition': contentDisposition('attachment', zipName + '.zip'),
     'Cache-Control': 'no-store',
   });
   // HEAD gets the headers only: building the ZIP would read every file of the folder for nothing.
@@ -181,7 +197,12 @@ export async function sendZip(res: ServerResponse, root: Node): Promise<void> {
   };
 
   try {
-    await walk(root, '');
+    const taken = new Set<string>();
+    for (const item of await items()) {
+      const name = unusedName(item.name || 'files', item.is_dir, taken) + (item.is_dir ? '/' : ''); // '' = a root folder
+      await addEntry(name, item);
+      if (item.is_dir) await walk(item, name);
+    }
     const cd = Buffer.concat(central);
     const cdOffset = offset;
     await write(cd);

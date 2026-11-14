@@ -65,11 +65,16 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'self'", "form-action 'self'",
 ].join('; ');
 
+// The web app's pages have plain addresses (/files/12, /settings…; "#/…" before 1.18): each one is the app, which
+// reads the path itself. /app is an older address of the app. Public links: /s/<token> and its folders /s/<token>/<id>.
+const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin|forgot|reset)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
+const PUBLIC_PAGES = /^\/s\/[\w-]+(?:\/\d+)?$/;
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   let rel = url.pathname;
-  if (rel === '/' || rel === '/app' || rel.startsWith('/app/')) rel = '/index.html';
-  else if (/^\/s\/[\w-]+$/.test(rel)) rel = '/public.html';
+  if (APP_PAGES.test(rel)) rel = '/index.html';
+  else if (PUBLIC_PAGES.test(rel)) rel = '/public.html';
   let decoded: string;
   try { decoded = decodeURIComponent(rel); } catch { return false; }
   const file = path.join(config.publicDir, path.normalize(decoded).replace(/^(\.\.[\/\\])+/, ''));

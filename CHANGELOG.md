@@ -11,6 +11,24 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.18.0 (2026-11-14)
+
+Web app improvements. Nothing to do before you update.
+
+- **Clean addresses, no `#`.** The web app's pages now have plain addresses: `https://cloud.example.com/`,
+  `/files/12`, `/recent`, `/search?q=report`, `/settings`… instead of `/#/files/12`. Back, Forward and reload work
+  as before, and a page can be opened in a new tab. Public links open their folders at `/s/<token>/<id>`. Old
+  bookmarks and links with `#/…` still work and switch to the new address. Behind a reverse proxy there is nothing
+  to change, as long as it passes every path to Cloudy (the usual setup).
+- **Several items as one ZIP.** Selecting files and folders and choosing *Download* now gives one ZIP, named after
+  their folder, instead of one download per item. Selecting everything in a folder downloads that folder's ZIP.
+  Items with the same name from different folders (search results, favorites) are all kept, as `name (2)`.
+- **Select in Deleted files.** Tick some items (or click their rows) and restore or delete only those, instead of
+  one at a time or emptying the whole trash.
+- Password reset emails link to `/reset#…`: the code after `#` never reaches the server or a proxy's access log,
+  and the address bar shows just `/reset` once the page is open. Links in reset emails sent before the update
+  still work.
+
 ## 1.17.0 (2026-11-14)
 
 Shorter setup files and a hardened container. Your current `docker-compose.yml` and `.env` keep working: nothing

@@ -1,6 +1,6 @@
-// App shell: login, navigation and hash routing.
+// App shell: login, navigation and routing (plain addresses: /files/12, /settings…).
 import { get, post } from './api.js';
-import { h, icon, showError, showMenu, closeMenu, formatSize } from './ui.js';
+import { h, icon, showError, showMenu, closeMenu, formatSize, navigate, currentView } from './ui.js';
 import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash } from './files.js';
 import { renderCalendar } from './calendar.js';
 import { renderContacts } from './contacts.js';
@@ -51,7 +51,7 @@ function stopLiveUpdates() {
 
 function affectsView(ev) {
   if (!ctx.me) return false;
-  const [, view = 'files', arg] = location.hash.replace(/^#/, '').split('/');
+  const { view, arg } = currentView();
   if (view === 'files') return ev.folders.includes(Number(arg || ctx.me.rootId));
   if (view === 'shared-in') return ev.shares || ev.folders.length > 0;
   return ['recent', 'favorites', 'shared-out', 'search', 'trash'].includes(view) && ev.folders.length > 0;
@@ -85,7 +85,7 @@ function languagePicker(rerender) {
 function renderLogin(message, notice = false) {
   passkeyAbort?.abort();
   passkeyAbort = null;
-  if (/^#\/(forgot|reset\/)/.test(location.hash)) history.replaceState(null, '', location.pathname);
+  if (/^\/(forgot|reset)(\/|$)/.test(location.pathname)) history.replaceState(null, '', '/');
   const user = h('input', { type: 'text', name: 'username', autocomplete: 'username webauthn', required: true, autofocus: true, 'aria-label': t('Username') });
   const pass = h('input', { type: 'password', name: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
   // Second step for accounts with two-factor authentication; shown when the server asks for it.
@@ -93,7 +93,7 @@ function renderLogin(message, notice = false) {
   const codeField = h('label', { class: 'field', hidden: true }, h('span', {}, t('Authentication code')), code,
     h('small', { class: 'muted' }, t('From your authenticator app, or one of your recovery codes.')));
   const error = h('p', { class: notice ? 'notice' : 'error', role: 'alert' }, message || '');
-  const forgot = h('a', { class: 'forgot-link', href: '#/forgot', hidden: true, onclick: (e) => { e.preventDefault(); renderForgot(user.value.trim()); } }, t('Forgot password?'));
+  const forgot = h('a', { class: 'forgot-link', href: '/forgot', hidden: true, onclick: (e) => { e.preventDefault(); renderForgot(user.value.trim()); } }, t('Forgot password?'));
   const btn = h('button', { class: 'btn primary block', type: 'submit' }, t('Log in'));
   const passkeyLogin = async (conditional) => {
     passkeyAbort?.abort();
@@ -180,7 +180,7 @@ function renderForgot(initial = '') {
     h('p', {}, t('Enter your username or email. If your account has an email address, we will send you a link to choose a new password.')),
     h('label', { class: 'field' }, h('span', {}, t('Username or email')), login),
     msg, btn,
-    h('a', { href: '#', onclick: (e) => { e.preventDefault(); renderLogin(); } }, t('Back to login')),
+    h('a', { href: '/', onclick: (e) => { e.preventDefault(); renderLogin(); } }, t('Back to login')),
     languagePicker(() => renderForgot(login.value)));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -240,15 +240,15 @@ let nav;
 
 function renderShell() {
   search = h('input', { type: 'search', placeholder: t('Search files'), 'aria-label': t('Search files'), enterkeyhint: 'search', onkeydown: (e) => {
-    if (e.key === 'Enter' && search.value.trim()) location.hash = `#/search/${encodeURIComponent(search.value.trim())}`;
+    if (e.key === 'Enter' && search.value.trim()) navigate(`/search?q=${encodeURIComponent(search.value.trim())}`);
   } });
   nav = h('nav', { class: 'sidebar', id: 'sidebar', 'aria-label': t('Main'), onclick: (e) => { if (e.target.closest('a')) setNavOpen(false); } },
     h('ul', {}, NAV.map((item) => item === '-' ? h('li', { class: 'sep' }) : h('li', {},
-      h('a', { href: `#/${item[0]}`, 'data-view': item[0] }, icon(item[2]), h('span', {}, t(item[1])))))),
+      h('a', { href: `/${item[0]}`, 'data-view': item[0] }, icon(item[2]), h('span', {}, t(item[1])))))),
     h('div', { class: 'grow' }),
     h('ul', {},
-      h('li', {}, h('a', { href: '#/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings')))),
-      ctx.me.isAdmin && h('li', {}, h('a', { href: '#/admin', 'data-view': 'admin' }, icon('shield'), h('span', {}, t('Administration'))))),
+      h('li', {}, h('a', { href: '/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings')))),
+      ctx.me.isAdmin && h('li', {}, h('a', { href: '/admin', 'data-view': 'admin' }, icon('shield'), h('span', {}, t('Administration'))))),
     h('div', { class: 'usage' }, ctx.me.quotaBytes
       ? t('{used} of {quota} used', { used: formatSize(ctx.me.used), quota: formatSize(ctx.me.quotaBytes) })
       : t('{used} used', { used: formatSize(ctx.me.used) })),
@@ -257,10 +257,10 @@ function renderShell() {
   const header = h('header', { class: 'topbar' },
     menuToggle = h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), 'aria-controls': 'sidebar', 'aria-expanded': 'false',
       onclick: () => setNavOpen(!document.body.classList.contains('nav-open')) }, icon('menu')),
-    h('a', { class: 'brand', href: '#/files' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
+    h('a', { class: 'brand', href: '/' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
     h('div', { class: 'search' }, icon('search'), search),
     h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
-      { label: ctx.me.displayName, icon: 'contacts', onclick: () => (location.hash = '#/settings') },
+      { label: ctx.me.displayName, icon: 'contacts', onclick: () => navigate('/settings') },
       { label: t('Log out'), icon: 'logout', onclick: async () => { stopLiveUpdates(); await post('/api/logout').catch(() => {}); ctx.me = null; document.body.classList.remove('nav-open'); renderLogin(); } },
     ]) }, (ctx.me.displayName || ctx.me.id).slice(0, 1).toUpperCase()),
   );
@@ -290,7 +290,7 @@ let routeSeq = 0;
 async function route({ refresh = false } = {}) {
   if (!ctx.me || !main) return;
   const seq = ++routeSeq;
-  const [, view = 'files', arg] = location.hash.replace(/^#/, '').split('/');
+  const { view, arg } = currentView();
   if (!refresh) { setNavOpen(false); closeMenu(); }
   nav.querySelectorAll('a').forEach((a) => {
     const on = a.dataset.view === view;
@@ -312,14 +312,14 @@ async function route({ refresh = false } = {}) {
   main.setAttribute('aria-busy', 'true');
   try {
     switch (view) {
-      // Only a numeric id goes into the API path (a crafted "#/files/.." would otherwise point the request elsewhere).
-      case 'files': await renderFolder(slot, /^\d+$/.test(arg || '') ? arg : ctx.me.rootId, ctx); break;
+      // Only a numeric id goes into the API path (a crafted "/files/%2e%2e" would otherwise point the request elsewhere).
+      case 'files': await renderFolder(slot, /^\d+$/.test(arg) ? arg : ctx.me.rootId, ctx); break;
       case 'recent': await renderRecent(slot, ctx); break;
       case 'favorites': await renderFavorites(slot, ctx); break;
       case 'shared-in': await renderSharedIn(slot, ctx); break;
       case 'shared-out': await renderSharedOut(slot, ctx); break;
       case 'search': {
-        const query = decodeURIComponent(arg || '');
+        const query = new URLSearchParams(location.search).get('q') ?? '';
         if (search && document.activeElement !== search) search.value = query;
         await renderSearch(slot, ctx, query);
         break;
@@ -329,12 +329,12 @@ async function route({ refresh = false } = {}) {
       case 'contacts': await renderContacts(slot, ctx); break;
       case 'settings': await renderSettings(slot, ctx); break;
       case 'admin': await renderAdmin(slot, ctx); break;
-      default: location.hash = '#/files'; return;
+      default: navigate('/', { replace: true }); return;
     }
     if (seq === routeSeq) document.title = `${nav.querySelector('a.active span')?.textContent || t('Files')} – Cloudy`;
   } catch (e) {
     if (seq !== routeSeq) return;
-    if (e.status === 404 && view === 'files') location.hash = '#/files';
+    if (e.status === 404 && view === 'files') navigate('/files', { replace: true });
     else if (e.status !== 401) {
       showError(e);
       // A view that could not load says so (with a way to retry) instead of leaving the previous view under the new title.
@@ -349,7 +349,31 @@ async function route({ refresh = false } = {}) {
   }
 }
 
-window.addEventListener('hashchange', () => route());
+// Back/Forward, and moves made by the views (navigate() in ui.js).
+window.addEventListener('popstate', () => route());
+window.addEventListener('cloudy:navigate', () => route());
+// Links to the app's own pages open in place; a Ctrl/⌘/Shift/middle click still opens a new tab or window
+// (the server answers those addresses with the app too).
+const APP_LINK = /^\/(files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin)?(\/|$)/;
+document.addEventListener('click', (e) => {
+  if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !ctx.me) return;
+  const a = e.target.closest?.('a[href]');
+  if (!a || a.target || a.hasAttribute('download') || a.origin !== location.origin || !APP_LINK.test(a.pathname)) return;
+  e.preventDefault();
+  navigate(a.pathname + a.search);
+});
+
+/** Before 1.18 the views lived behind "#/…" (/#/files/12): such links (bookmarks, emails) open the same view at its plain address. */
+function fromOldAddress() {
+  if (!location.hash.startsWith('#/')) return false;
+  const old = location.hash.replace(/^#[\/\\]+/, ''); // one leading slash only: "//host" would leave this site
+  let path = '/' + old;
+  const search = /^search\/(.*)$/.exec(old);
+  if (search) { try { path = `/search?q=${encodeURIComponent(decodeURIComponent(search[1]))}`; } catch { path = '/search'; } }
+  try { history.replaceState(null, '', path); } catch { history.replaceState(null, '', '/'); }
+  return true;
+}
+window.addEventListener('hashchange', () => { if (fromOldAddress()) route(); });
 // Only an existing session can expire; at startup "not logged in" is handled below.
 window.addEventListener('cloudy:unauthorized', () => {
   if (!ctx.me) return;
@@ -361,7 +385,11 @@ window.addEventListener('cloudy:unauthorized', () => {
 });
 
 await setLanguage(storedLanguage());
-const startHash = location.hash;
-const resetLink = /^#\/reset\/([\w-]+)$/.exec(startHash);
-if (resetLink) renderReset(resetLink[1]);
-else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => (startHash === '#/forgot' ? renderForgot() : renderLogin()));
+fromOldAddress();
+// Reset links are /reset#<token>: browsers don't send the part after "#", so the token stays out of the access logs
+// of the server and any proxy in front of it. Once read, the address bar shows just /reset. (/reset/<token> = an old link.)
+const resetToken = location.pathname === '/reset' ? /^#([\w-]+)$/.exec(location.hash)?.[1] : /^\/reset\/([\w-]+)$/.exec(location.pathname)?.[1];
+if (resetToken) {
+  history.replaceState(null, '', '/reset');
+  renderReset(resetToken);
+} else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => (location.pathname === '/forgot' ? renderForgot() : renderLogin()));

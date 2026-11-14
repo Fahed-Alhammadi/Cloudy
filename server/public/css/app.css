@@ -386,6 +386,11 @@ progress.quota { width: 100%; height: 10px; }
 .public-file > .icon { width: 72px; height: 72px; }
 
 /* ---------- responsive ---------- */
+/* Narrow phones: a deleted file's Restore button is just its icon (the label stays for screen readers), so the name fits. */
+@media (max-width: 600px) {
+  .trash-table .col-trash-actions { width: 96px; }
+  .trash-table .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 @media (max-width: 860px) {
   .menu-toggle { display: inline-flex; }
   .topbar .brand { display: none; }

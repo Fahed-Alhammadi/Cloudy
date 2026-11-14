@@ -2,7 +2,7 @@
 import { get, post, patch, del, api } from './api.js';
 import {
   h, icon, fileIcon, formatSize, formatDate, fullDate, toast, showError, modal, confirmDialog,
-  promptDialog, showMenu, copyText,
+  promptDialog, showMenu, copyText, navigate, currentView,
 } from './ui.js';
 import { openViewer, kindOf } from './viewer.js';
 import { isOfficeFile, officePreviewUrl } from './office.js';
@@ -21,6 +21,13 @@ export function userUploadTarget(parentId) {
 }
 
 // ---------------------------------------------------------------- generic list
+
+/** A selection bar's buttons are disabled while their requests run (one call per file, as in the apps). */
+const whileBusy = (bar, fn) => async (e) => {
+  const buttons = [...bar.querySelectorAll('button')];
+  buttons.forEach((b) => { b.disabled = true; });
+  try { await fn(e); } finally { buttons.forEach((b) => { b.disabled = false; }); }
+};
 
 /**
  * Renders a file table.
@@ -48,12 +55,7 @@ function fileTable(opts) {
     ...nodeActions(item, opts),
   ];
 
-  // Bar buttons are disabled while their requests run (one call per file, as in the apps).
-  const busy = (fn) => async (e) => {
-    const buttons = [...bar.querySelectorAll('button')];
-    buttons.forEach((b) => { b.disabled = true; });
-    try { await fn(e); } finally { buttons.forEach((b) => { b.disabled = false; }); }
-  };
+  const busy = (fn) => whileBusy(bar, fn);
   const updateBar = () => {
     bar.hidden = selected.size === 0;
     table?.classList.toggle('selecting', selected.size > 0);
@@ -65,9 +67,7 @@ function fileTable(opts) {
         updateBar();
       } }, icon('x')),
       h('span', { 'aria-live': 'polite' }, t('{n} selected', { n: selected.size })),
-      h('button', { class: 'btn ghost', onclick: () => {
-        for (const it of opts.items.filter((i) => selected.has(i.id))) triggerDownload(nodeUrl(it, false), it.name + (it.isDir ? '.zip' : ''));
-      } }, icon('download'), t('Download')),
+      h('button', { class: 'btn ghost', onclick: busy(() => downloadItems(chosen, opts)) }, icon('download'), t('Download')),
       chosen.some((i) => !i.favorite) && h('button', { class: 'btn ghost', onclick: busy(async () => {
         for (const it of chosen.filter((i) => !i.favorite)) await post(`/api/nodes/${it.id}/favorite`).catch(showError);
         opts.reload();
@@ -111,7 +111,8 @@ function fileTable(opts) {
     };
     const tr = h('tr', {
       class: 'file-row', tabindex: 0, 'data-key': `node-${item.id}`, draggable: opts.canModify(item) ? 'true' : null,
-      onclick: () => {
+      onclick: (e) => {
+        if (e.target.closest('a')) return; // a link in the row (search results: the location) goes where it points
         if (selected.size > 0) { setSelected(item, !selected.has(item.id)); updateBar(); return; }
         opts.onOpen(item);
       },
@@ -232,6 +233,22 @@ function triggerDownload(url, name) {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+/**
+ * Downloads the selection: one file as itself, one folder as its ZIP, several items as one ZIP (named after their
+ * folder). Everything in a folder is simply that folder's ZIP.
+ */
+async function downloadItems(items, opts) {
+  if (!items.length) return;
+  if (items.length === 1) return triggerDownload(nodeUrl(items[0], false), items[0].name + (items[0].isDir ? '.zip' : ''));
+  if (opts.folder && items.length === opts.items.length) return triggerDownload(nodeUrl(opts.folder, false), '');
+  try {
+    const { url } = await post('/api/zip', { ids: items.map((i) => i.id) });
+    triggerDownload(url, '');
+  } catch (e) {
+    showError(e);
+  }
 }
 
 function nodeActions(item, opts) {
@@ -445,7 +462,7 @@ export async function shareDialog(item, reload) {
 // ---------------------------------------------------------------- views
 
 function openItem(item, siblings, opts) {
-  if (item.isDir) return void (location.hash = `#/files/${item.id}`);
+  if (item.isDir) return void navigate(`/files/${item.id}`);
   const files = siblings.filter((s) => !s.isDir);
   openViewer(files, Math.max(0, files.findIndex((f) => f.id === item.id)), {
     url: nodeUrl,
@@ -458,7 +475,7 @@ function openItem(item, siblings, opts) {
 export async function renderFolder(main, id, ctx) {
   const data = await get(`/api/nodes/${id}`);
   if (!data.node.isDir) {
-    location.hash = `#/files/${data.node.parentId ?? ctx.me.rootId}`;
+    navigate(`/files/${data.node.parentId ?? ctx.me.rootId}`, { replace: true });
     return;
   }
   const canEdit = data.perm !== 'read';
@@ -466,11 +483,11 @@ export async function renderFolder(main, id, ctx) {
   // view (nothing to do) or come back to this folder (a fresh render of the current route).
   const reload = () => {
     if (main.isConnected) return renderFolder(main, id, ctx).catch(showError);
-    const [, view = 'files', arg] = location.hash.replace(/^#/, '').split('/');
+    const { view, arg } = currentView();
     if (view === 'files' && String(arg || ctx.me.rootId) === String(id)) ctx.rerender();
   };
   const opts = {
-    items: data.children, me: ctx.me, reload, editable: canEdit,
+    items: data.children, me: ctx.me, reload, editable: canEdit, folder: data.node,
     canModify: () => canEdit,
     onOpen: (item) => openItem(item, data.children, opts),
     uploadInto: canEdit ? (folder, items) => uploadAll(items, userUploadTarget(folder.id), reload) : null,
@@ -484,7 +501,7 @@ export async function renderFolder(main, id, ctx) {
   const last = data.breadcrumb.length - 1;
   const crumbs = h('nav', { class: 'breadcrumb', 'aria-label': t('Folder path') },
     data.breadcrumb.map((c, i) => {
-      const a = h('a', { class: 'crumb', href: `#/files/${c.id}`, 'aria-current': i === last ? 'page' : null }, i === 0 && c.name === '' ? t('Files') : c.name);
+      const a = h('a', { class: 'crumb', href: `/files/${c.id}`, 'aria-current': i === last ? 'page' : null }, i === 0 && c.name === '' ? t('Files') : c.name);
       // Rows dragged onto a parent folder in the path move there (the only way "up" without the dialog).
       if (canEdit && i !== last) {
         a.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('application/x-cloudy')) { e.preventDefault(); a.classList.add('drop-target'); } });
@@ -594,32 +611,94 @@ export async function renderSearch(main, ctx, query) {
   const items = query ? await get(`/api/search?q=${encodeURIComponent(query)}`) : [];
   await listView(main, ctx, {
     title: t('Search: “{query}”', { query }), iconName: 'search', items, emptyText: t('No matching files'),
-    extraColumn: { title: t('Location'), render: (i) => h('a', { href: `#/files/${i.parentId}`, onclick: (e) => e.stopPropagation() }, i.path) },
+    extraColumn: { title: t('Location'), render: (i) => h('a', { href: `/files/${i.parentId}` }, i.path) },
   });
 }
 
 export async function renderTrash(main, ctx) {
   const items = await get('/api/trash');
   const reload = () => renderTrash(main, ctx).catch(showError);
-  const rows = items.map((it) => h('tr', {},
-    h('td', { class: 'col-name' }, h('div', { class: 'name-cell' }, fileIcon(it), h('span', { class: 'name', dir: 'auto' }, it.name))),
-    h('td', { class: 'col-extra muted' }, it.originalPath),
-    h('td', { class: 'col-size' }, formatSize(it.size)),
-    h('td', { class: 'col-date', title: fullDate(it.deletedAt) }, formatDate(it.deletedAt)),
-    h('td', { class: 'col-actions nowrap' },
-      h('button', { class: 'btn ghost', onclick: async (e) => { e.currentTarget.disabled = true; await post(`/api/trash/${it.id}/restore`).then(() => toast(t('"{name}" restored', { name: it.name })), showError); reload(); } }, icon('restore'), t('Restore')),
-      h('button', { class: 'icon-btn', 'aria-label': t('Delete {name} permanently', { name: it.name }), onclick: async () => {
-        if (await confirmDialog(t('Delete permanently'), t('"{name}" will be deleted forever.', { name: it.name }), t('Delete'), true)) { await del(`/api/trash/${it.id}`).catch(showError); reload(); }
-      } }, icon('trash'))),
-  ));
+
+  // Some items at once: tick them (a click on a row ticks it too; phones show the boxes once one is ticked),
+  // then restore or delete them from the bar.
+  const selected = new Set();
+  const rowOf = new Map(); // id → { tr, box }
+  const bar = h('div', { class: 'selection-bar', hidden: true });
+  const allBox = h('input', { type: 'checkbox', 'aria-label': t('Select all') });
+  let table;
+  const setSelected = (it, on) => {
+    on ? selected.add(it.id) : selected.delete(it.id);
+    const r = rowOf.get(it.id);
+    if (r) { r.box.checked = on; r.tr.classList.toggle('selected', on); }
+  };
+  const updateBar = () => {
+    bar.hidden = selected.size === 0;
+    table?.classList.toggle('selecting', selected.size > 0);
+    allBox.checked = selected.size > 0 && selected.size === items.length;
+    const chosen = items.filter((it) => selected.has(it.id));
+    bar.replaceChildren(
+      h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: () => {
+        for (const it of chosen) setSelected(it, false);
+        updateBar();
+      } }, icon('x')),
+      h('span', { 'aria-live': 'polite' }, t('{n} selected', { n: selected.size })),
+      h('button', { class: 'btn ghost', onclick: whileBusy(bar, async () => {
+        let restored = 0;
+        for (const it of chosen) await post(`/api/trash/${it.id}/restore`).then(() => { restored++; }, showError);
+        if (restored) toast(t('{n} item(s) restored', { n: restored }));
+        reload();
+      }) }, icon('restore'), t('Restore')),
+      h('button', { class: 'btn ghost danger', onclick: whileBusy(bar, async () => {
+        if (!(await confirmDialog(t('Delete permanently'), t('{n} item(s) will be deleted forever.', { n: chosen.length }), t('Delete'), true))) return;
+        for (const it of chosen) await del(`/api/trash/${it.id}`).catch(showError);
+        reload();
+      }) }, icon('trash'), t('Delete permanently')),
+    );
+  };
+  allBox.addEventListener('change', () => {
+    for (const it of items) setSelected(it, allBox.checked);
+    updateBar();
+  });
+
+  const rows = items.map((it) => {
+    const box = h('input', { type: 'checkbox', 'aria-label': t('Select {name}', { name: it.name }), onclick: (e) => e.stopPropagation(), onchange: (e) => {
+      setSelected(it, e.target.checked);
+      updateBar();
+    } });
+    const tr = h('tr', { class: 'file-row', onclick: (e) => {
+      if (e.target.closest('button')) return;
+      setSelected(it, !selected.has(it.id));
+      updateBar();
+    } },
+      h('td', { class: 'col-check' }, box),
+      h('td', { class: 'col-name' }, h('div', { class: 'name-cell' }, fileIcon(it), h('span', { class: 'name', dir: 'auto' }, it.name))),
+      h('td', { class: 'col-extra muted' }, it.originalPath),
+      h('td', { class: 'col-size' }, formatSize(it.size)),
+      h('td', { class: 'col-date', title: fullDate(it.deletedAt) }, formatDate(it.deletedAt)),
+      h('td', { class: 'col-actions nowrap' },
+        h('button', { class: 'btn ghost', onclick: async (e) => { e.currentTarget.disabled = true; await post(`/api/trash/${it.id}/restore`).then(() => toast(t('"{name}" restored', { name: it.name })), showError); reload(); } }, icon('restore'), h('span', { class: 'btn-label' }, t('Restore'))),
+        h('button', { class: 'icon-btn', 'aria-label': t('Delete {name} permanently', { name: it.name }), onclick: async () => {
+          if (await confirmDialog(t('Delete permanently'), t('"{name}" will be deleted forever.', { name: it.name }), t('Delete'), true)) { await del(`/api/trash/${it.id}`).catch(showError); reload(); }
+        } }, icon('trash'))),
+    );
+    rowOf.set(it.id, { tr, box });
+    return tr;
+  });
+  table = h('table', { class: 'file-table trash-table' },
+    h('thead', {}, h('tr', {},
+      h('th', { class: 'col-check' }, allBox),
+      h('th', { class: 'col-name' }, t('Name')),
+      h('th', { class: 'col-extra' }, t('Original location')),
+      h('th', { class: 'col-size' }, t('Size')),
+      h('th', { class: 'col-date' }, t('Deleted')),
+      h('th', { class: 'col-trash-actions' }, h('span', { class: 'sr-only' }, t('Actions'))))),
+    h('tbody', {}, rows));
   main.replaceChildren(h('section', { class: 'files-view' },
     h('div', { class: 'toolbar' }, h('h1', { class: 'view-title' }, icon('trash'), t('Deleted files')), h('div', { class: 'grow' }),
       items.length > 0 && h('button', { class: 'btn danger', onclick: async () => {
         if (await confirmDialog(t('Empty trash'), t('All deleted files will be removed permanently.'), t('Empty trash'), true)) { await del('/api/trash').catch(showError); reload(); }
       } }, t('Empty trash'))),
-    items.length
-      ? h('table', { class: 'file-table' }, h('thead', {}, h('tr', {}, h('th', { class: 'col-name' }, t('Name')), h('th', { class: 'col-extra' }, t('Original location')), h('th', { class: 'col-size' }, t('Size')), h('th', { class: 'col-date' }, t('Deleted')), h('th', { class: 'col-trash-actions' }, h('span', { class: 'sr-only' }, t('Actions'))))), h('tbody', {}, rows))
-      : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
+    items.length ? h('div', {}, bar, table) : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
     h('p', { class: 'muted small' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
   ));
 }

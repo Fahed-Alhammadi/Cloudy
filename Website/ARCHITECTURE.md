@@ -154,7 +154,8 @@ products were split (1.1.0–1.10.0, server and Android together) carry both a `
 
 ## 8. Known limits
 
-- Folder ZIP downloads have no ZIP64 support, so they must stay under 4 GB and 65,535 entries.
+- ZIP downloads (a folder, or several selected items via `POST /api/zip` → `GET /api/zip/<key>`) have no ZIP64
+  support, so they must stay under 4 GB and 65,535 entries.
 - Repeating events are edited as a whole series.
 - No server-side encryption, external storage, full-text search, or calendar sharing yet. Passkeys are web-only.
 - The desktop app syncs the user's own files (not "shared with me") and downloads every selected file; there are no
@@ -192,8 +193,8 @@ the password is never returned by the API) using `nodemailer`. Messages have a p
 and are sent in the background — failures are logged, never shown to the user who triggered them.
 - **Password reset**: `POST /api/auth/forgot {login}` (username or email, case-insensitive) always answers 204 and
   is rate-limited per IP (5/h) and per account (3/h). It stores the SHA-256 of a random token in
-  `password_resets` (60 min, one per user) and mails `<origin>/#/reset/<token>`. `POST /api/auth/reset
-  {token, password}` consumes the token, sets the password, deletes all sessions and sends a notice.
+  `password_resets` (60 min, one per user) and mails `<origin>/reset#<token>` (in the fragment, the token never
+  reaches access logs). `POST /api/auth/reset {token, password}` consumes the token, sets the password, deletes all sessions and sends a notice.
   `GET /api/auth/options` tells the login page whether to offer it.
 - **Notifications**: new user/group shares (recipients with an email and `notify_shares`, not the sharer) and
   password changes. Links use `PUBLIC_URL` or the origin of the request that caused the email.

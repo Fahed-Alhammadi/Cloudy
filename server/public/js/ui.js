@@ -23,6 +23,22 @@ export function h(tag, attrs, ...kids) {
   return el;
 }
 
+// ---------------------------------------------------------------- addresses
+// Each view has a plain address: /files/<id>, /recent, /search?q=…, /settings… (the server answers all of them
+// with the app). Moving between views changes the address without reloading; app.js redraws on 'cloudy:navigate'.
+
+/** Goes to an address inside the app. `replace` swaps the current history entry instead of adding one. */
+export function navigate(path, { replace = false } = {}) {
+  if (path !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  window.dispatchEvent(new Event('cloudy:navigate'));
+}
+
+/** The view and its argument from the address: /files/12 → { view: 'files', arg: '12' }, / → files. */
+export function currentView() {
+  const [, view, arg = ''] = location.pathname.split('/');
+  return { view: view || 'files', arg };
+}
+
 const P = {
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',

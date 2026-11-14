@@ -11,10 +11,15 @@ import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
 import { newToken, sha256 } from '../auth.ts';
 import * as F from '../files.ts';
-import { sendNodeFile, sendBlob, sendZip } from '../download.ts';
+import { sendNodeFile, sendBlob, sendZip, sendItemsZip } from '../download.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
 type Wrap = (h: Authed) => (ctx: Ctx) => Promise<void>;
+
+/** Posted ZIP selections (POST /api/zip), fetched once the browser follows the download address. In memory: one process. */
+const zipRequests = new Map<string, { user: string; ids: number[]; name: string; expires: number }>();
+const ZIP_TTL_MS = 10 * 60_000;
+const ZIP_MAX_ITEMS = 10_000;
 
 export function registerFiles(r: Router, authed: Wrap) {
   r.get('/api/nodes/:id', authed(async ({ res, params }, user) => {
@@ -91,6 +96,43 @@ export function registerFiles(r: Router, authed: Wrap) {
     const { node } = await F.requireAccess(user.id, params.id, 'read');
     if (node.is_dir) await sendZip(res, node);
     else sendNodeFile(req, res, node, url.searchParams.has('inline'));
+  }));
+
+  // Several items as one ZIP. A browser saves only what it navigates to (a GET), and the ids of a large selection
+  // don't fit in a URL: the list is posted first and answered with a short-lived download address.
+  r.post('/api/zip', authed(async ({ req, res }, user) => {
+    const { ids } = await readJson(req);
+    if (!Array.isArray(ids) || !ids.length) throw new HttpError(400, 'Nothing to download');
+    if (ids.length > ZIP_MAX_ITEMS) throw new HttpError(400, 'Too many items for one download. Download their folder instead.');
+    const nodes: F.Node[] = [];
+    for (const id of new Set(ids.map(String))) nodes.push((await F.requireAccess(user.id, id, 'read')).node);
+    // Named after the folder they come from, if they all share one the user can see (never a hidden folder's name).
+    let name = 'files';
+    const parentIds = new Set(nodes.map((n) => n.parent_id));
+    if (parentIds.size === 1) {
+      const parent = await F.getNode(nodes[0].parent_id ?? '');
+      if (parent?.name && (await F.access(user.id, parent))) name = parent.name;
+    }
+    const now = Date.now();
+    for (const [k, z] of zipRequests) if (z.expires < now) zipRequests.delete(k);
+    if (zipRequests.size >= 1000) zipRequests.delete(zipRequests.keys().next().value!); // oldest first
+    const key = newToken(18);
+    zipRequests.set(key, { user: user.id, ids: nodes.map((n) => n.id), name, expires: now + ZIP_TTL_MS });
+    json(res, { url: `/api/zip/${key}` }, 201);
+  }));
+
+  r.get('/api/zip/:key', authed(async ({ res, params }, user) => {
+    const z = zipRequests.get(params.key);
+    if (!z || z.user !== user.id || z.expires < Date.now()) throw new HttpError(404, 'Not found');
+    // Checked again: an item may have been deleted or unshared since the list was posted.
+    await sendItemsZip(res, z.name, async () => {
+      const nodes: F.Node[] = [];
+      for (const id of z.ids) {
+        const node = await F.getNode(id);
+        if (node && (await F.access(user.id, node))) nodes.push(node);
+      }
+      return nodes;
+    });
   }));
 
   r.post('/api/nodes/:id/favorite', authed(async ({ res, params }, user) => {
