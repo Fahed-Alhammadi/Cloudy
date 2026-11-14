@@ -42,6 +42,7 @@ struct MoreView: View {
                     NavigationLink(value: Route.trash) { SettingsLabel("Trash", icon: "trash.fill", color: .settingsGray) }
                 }
                 Section {
+                    NavigationLink(value: Route.password) { SettingsLabel("Change password", icon: "key.fill", color: .settingsOrange) }
                     NavigationLink(value: Route.devices) { SettingsLabel("Devices", icon: "iphone", color: .settingsIndigo) }
                     if canUseAppLock {
                         Toggle(isOn: $appLock) { SettingsLabel("App lock", icon: "faceid", color: .settingsGreen) }
@@ -196,6 +197,92 @@ private struct StorageRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// More → Change password: the current one, then the new one twice (8+ characters, as on the web). This iPhone stays
+/// signed in (its device token isn't the password); the server signs out the browsers signed in to the account.
+struct ChangePasswordView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var new = ""
+    @State private var repeated = ""
+    @State private var saving = false
+    @State private var currentWrong = false
+    @State private var error: String?
+    @State private var done = false
+
+    private var tooShort: Bool { !new.isEmpty && new.count < 8 }
+    private var mismatch: Bool { !repeated.isEmpty && repeated != new }
+    private var canSave: Bool { !current.isEmpty && new.count >= 8 && repeated == new && !saving }
+
+    var body: some View {
+        Form {
+            // Headers name the fields once they're filled in (the placeholders are gone then).
+            Section {
+                PasswordField("Current password", text: $current)
+            } header: {
+                Text("Current password")
+            } footer: {
+                if currentWrong { Text("Current password is wrong").foregroundStyle(.red) }
+            }
+            Section {
+                PasswordField("New password", text: $new, contentType: .newPassword)
+                PasswordField("Repeat new password", text: $repeated, contentType: .newPassword)
+            } header: {
+                Text("New password")
+            } footer: {
+                if mismatch { Text("The passwords do not match.").foregroundStyle(.red) }
+                else { Text("At least 8 characters").foregroundStyle(tooShort ? .red : .secondary) }
+            }
+            Section {
+                Button { Task { await save() } } label: {
+                    HStack { Text("Change password"); if saving { Spacer(); ProgressView() } }
+                }
+                .disabled(!canSave)
+            } footer: {
+                Text("Web browsers signed in to your account are signed out. This iPhone and your other devices stay signed in.")
+            }
+        }
+        .disabled(saving)
+        .onSubmit { Task { await save() } }
+        .onChange(of: current) { currentWrong = false }
+        .navigationTitle("Change password")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("Password changed", isPresented: $done) {
+            Button("OK") { dismiss() }
+        }
+        .errorAlert($error)
+        .sensoryFeedback(.success, trigger: done) { _, isDone in isDone }
+        #if DEBUG
+        // Simulator testing: CLOUDY_PASSWORD_TEST=[go:]<current>:<new>[:<repeat>] fills in the form; "go:" also submits it.
+        .task {
+            guard var v = ProcessInfo.processInfo.environment["CLOUDY_PASSWORD_TEST"] else { return }
+            let go = v.hasPrefix("go:")
+            if go { v.removeFirst(3) }
+            let p = v.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            guard p.count >= 2 else { return }
+            current = p[0]; new = p[1]; repeated = p.count > 2 ? p[2] : p[1]
+            if go { try? await Task.sleep(for: .seconds(1)); await save() }
+        }
+        #endif
+    }
+
+    private func save() async {
+        guard canSave else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            try await API.shared.changePassword(current: current, password: new)
+            current = ""; new = ""; repeated = ""
+            done = true
+        } catch let e as APIError where e.status == 403 {
+            currentWrong = true
+        } catch let e as APIError where e.status == 429 {
+            self.error = String(localized: "Too many failed attempts, try again later")
+        } catch {
+            self.error = errorText(error) // also explains offline / unreachable / certificate problems
+        }
     }
 }
 

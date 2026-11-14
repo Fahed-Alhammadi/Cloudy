@@ -275,4 +275,14 @@
     <string name="purge_confirm">« %1$s » sera supprimé définitivement.</string>
     <string name="trash_note">Les éléments supprimés sont effacés définitivement après %1$d jours.</string>
     <string name="no_app_found">Aucune application de cet appareil ne peut ouvrir ceci</string>
+    <string name="change_password">Changer le mot de passe</string>
+    <string name="current_password">Mot de passe actuel</string>
+    <string name="new_password">Nouveau mot de passe</string>
+    <string name="repeat_new_password">Répétez le nouveau mot de passe</string>
+    <string name="password_min_hint">Au moins 8 caractères</string>
+    <string name="passwords_dont_match">Les mots de passe ne correspondent pas.</string>
+    <string name="current_password_wrong">Le mot de passe actuel est incorrect</string>
+    <string name="too_many_attempts">Trop de tentatives échouées, réessayez plus tard</string>
+    <string name="password_changed">Mot de passe modifié</string>
+    <string name="change_password_note">Les navigateurs web connectés à votre compte sont déconnectés. Ce téléphone et vos autres appareils restent connectés.</string>
 </resources>

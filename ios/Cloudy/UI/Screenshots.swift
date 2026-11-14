@@ -101,7 +101,7 @@ enum Screenshots {
             case "folder": step = .files([.folder(Int64(arg) ?? 0, name)])
             case "text": step = .files([.text(FileNode(id: Int64(arg) ?? 0, name: name, isDir: false))])
             case "route":
-                let routes: [String: Route] = ["links": .links, "trash": .trash, "devices": .devices]
+                let routes: [String: Route] = ["links": .links, "trash": .trash, "devices": .devices, "password": .password]
                 step = (ListKind(rawValue: arg).map { .list($0) } ?? routes[arg]).map { .files([$0]) }
             case "pop": step = .files([])
             case "grid": step = .grid

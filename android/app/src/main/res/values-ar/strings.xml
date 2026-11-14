@@ -275,4 +275,14 @@
     <string name="purge_confirm">سيتم حذف «%1$s» نهائيًا.</string>
     <string name="trash_note">تُزال العناصر المحذوفة نهائيًا بعد %1$d يومًا.</string>
     <string name="no_app_found">لا يوجد تطبيق على هذا الجهاز يمكنه فتح هذا</string>
+    <string name="change_password">تغيير كلمة المرور</string>
+    <string name="current_password">كلمة المرور الحالية</string>
+    <string name="new_password">كلمة المرور الجديدة</string>
+    <string name="repeat_new_password">أعد كتابة كلمة المرور الجديدة</string>
+    <string name="password_min_hint">8 أحرف على الأقل</string>
+    <string name="passwords_dont_match">كلمتا المرور غير متطابقتين.</string>
+    <string name="current_password_wrong">كلمة المرور الحالية غير صحيحة</string>
+    <string name="too_many_attempts">محاولات فاشلة كثيرة، حاول لاحقًا</string>
+    <string name="password_changed">تم تغيير كلمة المرور</string>
+    <string name="change_password_note">يُسجَّل خروج متصفحات الويب المسجّل دخولها إلى حسابك. يبقى هذا الهاتف وأجهزتك الأخرى مسجّلة الدخول.</string>
 </resources>

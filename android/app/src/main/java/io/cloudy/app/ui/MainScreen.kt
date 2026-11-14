@@ -56,6 +56,7 @@ import io.cloudy.app.data.Office
 import io.cloudy.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Language
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -287,6 +288,7 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
                 composable("more") { MoreScreen(nav) }
                 composable("backup") { BackupScreen(nav) }
                 composable("devices") { DevicesScreen(nav) }
+                composable("password") { ChangePasswordScreen(nav) }
             }
         }
     }
@@ -381,6 +383,7 @@ fun MoreScreen(nav: NavController) {
                     supportingContent = { Text(stringResource(if (lockAvailable || lockOn) R.string.app_lock_summary else R.string.app_lock_unavailable)) },
                     trailingContent = { Switch(lockOn, onCheckedChange = null, enabled = lockAvailable || lockOn) },
                 )
+                Entry(R.string.change_password, Icons.Outlined.Password, SettingColor.Orange, "password")
                 Entry(R.string.devices, Icons.Outlined.Devices, SettingColor.Indigo, "devices")
             }
             Text(stringResource(R.string.section_support), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),

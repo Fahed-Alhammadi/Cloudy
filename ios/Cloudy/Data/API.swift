@@ -116,6 +116,10 @@ final class API: @unchecked Sendable {
         _ = try? await send("POST", "/api/auth/revoke", headers: ["Authorization": "Bearer \(token)"])
     }
     func me() async throws -> User { try await get("/api/me") }
+    /// Changes the account password. This device's token stays valid; the server signs out the account's browsers.
+    func changePassword(current: String, password: String) async throws {
+        try await sendJSON("POST", "/api/me/password", ["current": current, "password": password])
+    }
     /// Deletes the account and all its data on the server for good (needs the account password).
     func deleteAccount(password: String) async throws { try await sendJSON("POST", "/api/me/delete", ["password": password]) }
     func appPasswords() async throws -> [AppPassword] { try await get("/api/me/app-passwords") }

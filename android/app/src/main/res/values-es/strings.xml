@@ -275,4 +275,14 @@
     <string name="purge_confirm">«%1$s» se eliminará para siempre.</string>
     <string name="trash_note">Los elementos eliminados se borran definitivamente tras %1$d días.</string>
     <string name="no_app_found">Ninguna app de este dispositivo puede abrir esto</string>
+    <string name="change_password">Cambiar contraseña</string>
+    <string name="current_password">Contraseña actual</string>
+    <string name="new_password">Contraseña nueva</string>
+    <string name="repeat_new_password">Repite la contraseña nueva</string>
+    <string name="password_min_hint">Al menos 8 caracteres</string>
+    <string name="passwords_dont_match">Las contraseñas no coinciden.</string>
+    <string name="current_password_wrong">La contraseña actual es incorrecta</string>
+    <string name="too_many_attempts">Demasiados intentos fallidos, inténtalo más tarde</string>
+    <string name="password_changed">Contraseña cambiada</string>
+    <string name="change_password_note">Se cierra la sesión en los navegadores web conectados a tu cuenta. Este teléfono y tus otros dispositivos siguen conectados.</string>
 </resources>

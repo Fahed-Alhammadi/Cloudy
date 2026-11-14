@@ -277,4 +277,14 @@
     <string name="purge_confirm">\"%1$s\" will be deleted forever.</string>
     <string name="trash_note">Deleted items are removed permanently after %1$d days.</string>
     <string name="no_app_found">No app on this device can open this</string>
+    <string name="change_password">Change password</string>
+    <string name="current_password">Current password</string>
+    <string name="new_password">New password</string>
+    <string name="repeat_new_password">Repeat new password</string>
+    <string name="password_min_hint">At least 8 characters</string>
+    <string name="passwords_dont_match">The passwords do not match.</string>
+    <string name="current_password_wrong">Current password is wrong</string>
+    <string name="too_many_attempts">Too many failed attempts, try again later</string>
+    <string name="password_changed">Password changed</string>
+    <string name="change_password_note">Web browsers signed in to your account are signed out. This phone and your other devices stay signed in.</string>
 </resources>

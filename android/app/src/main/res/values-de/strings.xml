@@ -275,4 +275,14 @@
     <string name="purge_confirm">„%1$s“ wird endgültig gelöscht.</string>
     <string name="trash_note">Gelöschte Elemente werden nach %1$d Tagen endgültig entfernt.</string>
     <string name="no_app_found">Keine App auf diesem Gerät kann das öffnen</string>
+    <string name="change_password">Passwort ändern</string>
+    <string name="current_password">Aktuelles Passwort</string>
+    <string name="new_password">Neues Passwort</string>
+    <string name="repeat_new_password">Neues Passwort wiederholen</string>
+    <string name="password_min_hint">Mindestens 8 Zeichen</string>
+    <string name="passwords_dont_match">Die Passwörter stimmen nicht überein.</string>
+    <string name="current_password_wrong">Das aktuelle Passwort ist falsch</string>
+    <string name="too_many_attempts">Zu viele Fehlversuche, versuche es später erneut</string>
+    <string name="password_changed">Passwort geändert</string>
+    <string name="change_password_note">Webbrowser, die bei deinem Konto angemeldet sind, werden abgemeldet. Dieses Telefon und deine anderen Geräte bleiben angemeldet.</string>
 </resources>

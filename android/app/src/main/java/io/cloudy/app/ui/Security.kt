@@ -7,11 +7,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,17 +41,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import androidx.navigation.NavController
 import io.cloudy.app.R
 import io.cloudy.app.Services
+import io.cloudy.app.data.ApiException
 import io.cloudy.app.data.AppLock
 import io.cloudy.app.data.AppPassword
 import io.cloudy.app.data.Lang
@@ -117,6 +124,66 @@ fun LanguageDialog(onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
+}
+
+/**
+ * More → Change password: the current one, then the new one twice (8+ characters, as on the web). This phone stays
+ * signed in (its device token isn't the password); the server signs out the browsers signed in to the account.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChangePasswordScreen(nav: NavController) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var current by rememberSaveable { mutableStateOf("") }
+    var new by rememberSaveable { mutableStateOf("") }
+    var repeat by rememberSaveable { mutableStateOf("") }
+    var currentError by rememberSaveable { mutableStateOf<String?>(null) }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val tooShort = new.isNotEmpty() && new.length < 8
+    val mismatch = repeat.isNotEmpty() && repeat != new
+    val canSave = current.isNotEmpty() && new.length >= 8 && repeat == new && !busy
+    fun save() {
+        if (!canSave) return
+        busy = true; error = null; currentError = null
+        scope.launch {
+            try {
+                Services.api.changePassword(current, new)
+                toast(context, context.getString(R.string.password_changed))
+                nav.popBackStack()
+            } catch (e: Exception) {
+                when ((e as? ApiException)?.status) {
+                    403 -> currentError = context.getString(R.string.current_password_wrong)
+                    429 -> error = context.getString(R.string.too_many_attempts)
+                    else -> error = e.message ?: context.getString(R.string.failed)
+                }
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    Scaffold(topBar = {
+        TopAppBar(title = { Text(stringResource(R.string.change_password)) },
+            navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
+    }) { pad ->
+        Column(Modifier.padding(pad).imePadding().fillMaxWidth().verticalScroll(rememberScrollState()).readableWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PasswordField(current, { current = it; currentError = null; error = null }, stringResource(R.string.current_password), Modifier.fillMaxWidth(),
+                enabled = !busy, isError = currentError != null, supportingText = currentError?.let { { Text(it) } }, imeAction = ImeAction.Next)
+            PasswordField(new, { new = it; error = null }, stringResource(R.string.new_password), Modifier.fillMaxWidth(),
+                enabled = !busy, isError = tooShort, supportingText = { Text(stringResource(R.string.password_min_hint)) }, imeAction = ImeAction.Next)
+            PasswordField(repeat, { repeat = it; error = null }, stringResource(R.string.repeat_new_password), Modifier.fillMaxWidth(),
+                enabled = !busy, isError = mismatch, supportingText = if (mismatch) { { Text(stringResource(R.string.passwords_dont_match)) } } else null,
+                imeAction = ImeAction.Done, keyboardActions = KeyboardActions(onDone = { save() }))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
+            Text(stringResource(R.string.change_password_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            Button(onClick = { save() }, enabled = canSave, modifier = Modifier.align(Alignment.End)) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text(stringResource(R.string.change_password))
+            }
+        }
+    }
 }
 
 /** More → Devices & app passwords: every token signed in to the account, revocable (except this phone's). */
