@@ -7,6 +7,11 @@ import type { Node } from './files.ts';
 
 /** Types the browser may render inline (never HTML/SVG: those could run script on our origin). */
 const INLINE_SAFE = /^(image\/(png|jpeg|gif|webp|avif|bmp|x-icon)|video\/|audio\/|application\/pdf$|text\/)/;
+/**
+ * Types a page could load as script, style or document from our origin (<script src="…/download">): downloads of these
+ * are sent as plain bytes, so an uploaded file can never act as the app's own code.
+ */
+const ACTIVE = /^(text\/(javascript|ecmascript|css|html|xml)|application\/(x-)?(javascript|ecmascript)|application\/(xhtml\+)?xml|image\/svg\+xml)/i;
 
 export function contentDisposition(kind: 'inline' | 'attachment', name: string): string {
   const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');
@@ -23,7 +28,8 @@ export function sendBlob(
   const etag = `"${opts.etag}"`;
   const inline = !!opts.inline && INLINE_SAFE.test(opts.mime);
   // Text is always delivered as plain text so it cannot execute.
-  const type = inline && opts.mime.startsWith('text/') ? 'text/plain; charset=utf-8' : opts.mime;
+  const type = inline && opts.mime.startsWith('text/') ? 'text/plain; charset=utf-8'
+    : !inline && ACTIVE.test(opts.mime) ? 'application/octet-stream' : opts.mime;
   const headers: Record<string, string | number> = {
     'Content-Type': type,
     'Accept-Ranges': 'bytes',

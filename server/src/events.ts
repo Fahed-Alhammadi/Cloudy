@@ -22,7 +22,11 @@ function write(res: ServerResponse, data: string): void {
   if (!res.writableEnded && !res.destroyed) res.write(data);
 }
 
-export function openStream(userId: string, res: ServerResponse): void {
+/**
+ * `stillValid` is asked at every ping: a stream whose session was signed out (or whose device token was revoked, or
+ * whose account was disabled) ends instead of reporting folder changes for ever.
+ */
+export function openStream(userId: string, res: ServerResponse, stillValid?: () => Promise<boolean>): void {
   const set = clients.get(userId) ?? new Set();
   if (set.size >= MAX_STREAMS_PER_USER) {
     const oldest = set.values().next().value;
@@ -37,7 +41,10 @@ export function openStream(userId: string, res: ServerResponse): void {
   res.write('retry: 5000\n\n');
   set.add(res);
   clients.set(userId, set);
-  const ping = setInterval(() => write(res, ': ping\n\n'), 25_000);
+  const ping = setInterval(() => {
+    write(res, ': ping\n\n');
+    stillValid?.().then((ok) => { if (!ok) res.end(); }, () => {});
+  }, 25_000);
   res.on('close', () => {
     clearInterval(ping);
     set.delete(res);

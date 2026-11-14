@@ -67,7 +67,7 @@ export async function renderSettings(main, ctx) {
   const pct = me.quotaBytes ? Math.min(100, (me.used / me.quotaBytes) * 100) : 0;
 
   const urlRow = (label, url) => h('div', { class: 'url-row' }, h('span', { class: 'muted' }, label),
-    h('code', {}, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
+    h('code', { dir: 'ltr' }, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
 
   main.replaceChildren(h('section', { class: 'settings-view' },
     h('h1', { class: 'view-title' }, icon('settings'), t('Settings')),
@@ -144,7 +144,7 @@ export async function renderSettings(main, ctx) {
         if (!r?.password) return;
         await modal({ title: t('App password created'), body: h('div', {},
           h('p', {}, t('Copy it now — it will not be shown again.')),
-          h('div', { class: 'url-row' }, h('code', { class: 'secret' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
+          h('div', { class: 'url-row' }, h('code', { class: 'secret', dir: 'ltr' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
         rerender();
       } }, icon('plus'), t('Create app password'))),
 
@@ -264,7 +264,7 @@ function twoFactorCard(me, rerender) {
       body: h('div', { class: 'twofa-setup' },
         h('p', {}, t('1. Scan this QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…).')),
         h('img', { class: 'qr', alt: t('QR code for your authenticator app'), src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(setup.qrSvg) }),
-        h('p', { class: 'muted small' }, t("Can't scan? Enter this key manually:"), ' ', h('code', { class: 'secret' }, setup.secret.replace(/(.{4})/g, '$1 ').trim())),
+        h('p', { class: 'muted small' }, t("Can't scan? Enter this key manually:"), ' ', h('code', { class: 'secret', dir: 'ltr' }, setup.secret.replace(/(.{4})/g, '$1 ').trim())),
         h('label', { class: 'field' }, h('span', {}, t('2. Enter the 6-digit code the app shows')), code), codeError),
       buttons: [{ label: t('Cancel'), value: null }, { label: t('Turn on'), value: 'ok', primary: true }],
       onSubmit: async () => {
@@ -308,11 +308,11 @@ const GB = 1024 ** 3;
 async function userDialog(user, groups, rerender) {
   const isNew = !user;
   const f = {
-    id: h('input', { type: 'text', required: true, value: user?.id ?? '', disabled: !isNew, pattern: '[A-Za-z0-9._@-]+' }),
+    id: h('input', { type: 'text', required: true, value: user?.id ?? '', disabled: !isNew, pattern: '[A-Za-z0-9._@\\-]{1,64}', maxlength: 64 }),
     displayName: h('input', { type: 'text', value: user?.displayName ?? '' }),
     email: h('input', { type: 'email', value: user?.email ?? '' }),
     password: h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: isNew, placeholder: isNew ? '' : t('Leave empty to keep') }),
-    quota: h('input', { type: 'number', min: 0, step: 0.5, value: user?.quotaBytes ? +(user.quotaBytes / GB).toFixed(2) : '', placeholder: t('Unlimited') }),
+    quota: h('input', { type: 'number', min: 0, step: 0.5, value: user?.quotaBytes ? +(user.quotaBytes / GB).toFixed(2) : '', placeholder: t('Unlimited'), title: t('Empty or 0 = unlimited') }),
     isAdmin: h('input', { type: 'checkbox', checked: !!user?.isAdmin }),
     disabled: h('input', { type: 'checkbox', checked: !!user?.disabled }),
     resetTwoFactor: h('input', { type: 'checkbox' }),

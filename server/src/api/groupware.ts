@@ -33,9 +33,12 @@ function timeIn(value: unknown, allDay: boolean): Time {
   return ICAL.Time.fromJSDate(d, true);
 }
 
+/** Control characters other than tab and line breaks: invisible, and not valid in the XML that DAV clients read. */
+const cleanText = (s: string) => s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\ufffe\uffff]/g, '').trim();
+
 function setText(comp: Comp, name: string, value: unknown) {
   comp.removeAllProperties(name);
-  if (typeof value === 'string' && value.trim()) comp.addPropertyWithValue(name, value.trim());
+  if (typeof value === 'string' && cleanText(value)) comp.addPropertyWithValue(name, cleanText(value));
 }
 
 // ---------------------------------------------------------------- events
@@ -360,7 +363,7 @@ export function registerGroupware(r: Router, authed: Wrap) {
   // All contacts of an address book as one .vcf file.
   r.get('/api/addressbooks/:id/export', authed(async ({ res, params }, user) => {
     const c = await G.collectionById(G.CARD, user.id, params.id);
-    const body = (await G.listObjects(G.CARD, c.id)).map((o) => o.data.replace(/\s*$/, '\r\n')).join('');
+    const body = (await G.listObjects(G.CARD, c.id)).map((o) => o.data.trimEnd() + '\r\n').join('');
     res.writeHead(200, {
       'Content-Type': 'text/vcard; charset=utf-8',
       'Content-Disposition': contentDisposition('attachment', `${c.name || 'Contacts'}.vcf`),

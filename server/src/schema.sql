@@ -261,3 +261,7 @@ CREATE TABLE IF NOT EXISTS blob_hashes (
   blob text PRIMARY KEY,
   sha256 text NOT NULL
 );
+
+-- 1.18.1: a quota of 0 means unlimited (the admin form's "empty or 0"). Accounts saved with 0 before were refused every
+-- upload while every screen showed "no quota"; they get what the screens promised.
+UPDATE users SET quota_bytes = NULL WHERE quota_bytes = 0;

@@ -443,8 +443,14 @@ async function groupware(req: IncomingMessage, res: ServerResponse, user: User, 
 function mergeCalendars(objs: DavObject[]): string {
   const inner: string[] = [];
   for (const o of objs) {
-    const m = /BEGIN:VCALENDAR\r?\n([\s\S]*?)END:VCALENDAR/.exec(o.data);
-    if (m) inner.push(m[1].replace(/^(VERSION|PRODID|CALSCALE|METHOD):.*\r?\n/gm, '').trim());
+    // Plain searches for the two markers (a lazy [\s\S]*? between them took minutes on a crafted 20 MB object).
+    const begin = /BEGIN:VCALENDAR\r?\n/i.exec(o.data);
+    if (!begin) continue;
+    const endRe = /END:VCALENDAR/gi;
+    endRe.lastIndex = begin.index + begin[0].length;
+    const end = endRe.exec(o.data);
+    if (!end) continue;
+    inner.push(o.data.slice(begin.index + begin[0].length, end.index).replace(/^(VERSION|PRODID|CALSCALE|METHOD):.*\r?\n/gim, '').trim());
   }
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Cloudy//EN', ...inner, 'END:VCALENDAR', ''].join('\r\n');
 }

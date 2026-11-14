@@ -1,11 +1,11 @@
 import { createWriteStream } from 'node:fs';
-import { writeFile as fsWriteFile, truncate, rm } from 'node:fs/promises';
+import { writeFile as fsWriteFile, truncate, rm, stat } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Hash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Router, Ctx } from '../http.ts';
-import { json, noContent, readJson, checkName, numId, HttpError } from '../http.ts';
+import { json, noContent, readJson, checkName, numId, HttpError, watchIdle } from '../http.ts';
 import { config } from '../config.ts';
 import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
@@ -47,7 +47,7 @@ export function registerFiles(r: Router, authed: Wrap) {
     if (await F.childByName(node.id, name)) throw new HttpError(409, 'An item with that name already exists');
     const file = F.tmpPath(randomUUID());
     const content = Buffer.from(String(b.content ?? ''), 'utf8');
-    await fsWriteFile(file, content);
+    await fsWriteFile(file, content, { flush: true });
     const sha256 = createHash('sha256').update(content).digest('hex');
     const { node: created } = await F.writeFile(node, name, file, content.length, { sha256 });
     json(res, (await F.toJson([created], user.id))[0], 201);
@@ -115,7 +115,10 @@ export function registerFiles(r: Router, authed: Wrap) {
     }
     const now = Date.now();
     for (const [k, z] of zipRequests) if (z.expires < now) zipRequests.delete(k);
-    if (zipRequests.size >= 1000) zipRequests.delete(zipRequests.keys().next().value!); // oldest first
+    // At most 20 waiting per user (one user could otherwise push everyone else's out), 1000 in all; oldest first.
+    const mine = [...zipRequests].filter(([, z]) => z.user === user.id);
+    if (mine.length >= 20) zipRequests.delete(mine[0][0]);
+    if (zipRequests.size >= 1000) zipRequests.delete(zipRequests.keys().next().value!);
     const key = newToken(18);
     zipRequests.set(key, { user: user.id, ids: nodes.map((n) => n.id), name, expires: now + ZIP_TTL_MS });
     json(res, { url: `/api/zip/${key}` }, 201);
@@ -147,8 +150,10 @@ export function registerFiles(r: Router, authed: Wrap) {
   }));
 
   // ---------------------------------------------------------------- versions
+  // Older versions need edit rights: a read-only share shows the file as it is now, not what the owner replaced
+  // before sharing it.
   r.get('/api/nodes/:id/versions', authed(async ({ res, params }, user) => {
-    const { node } = await F.requireAccess(user.id, params.id, 'read');
+    const { node } = await F.requireAccess(user.id, params.id, 'edit');
     json(res, (await F.listVersions(node.id)).map((v) => ({ id: v.id, size: v.size, mtime: v.mtime })));
   }));
 
@@ -158,7 +163,7 @@ export function registerFiles(r: Router, authed: Wrap) {
   }));
 
   r.get('/api/nodes/:id/versions/:vid/download', authed(async ({ req, res, params }, user) => {
-    const { node } = await F.requireAccess(user.id, params.id, 'read');
+    const { node } = await F.requireAccess(user.id, params.id, 'edit');
     const v = (await F.listVersions(node.id)).find((x) => String(x.id) === params.vid);
     if (!v) throw new HttpError(404, 'Version not found');
     sendBlob(req, res, v.blob, { size: v.size, mime: node.mime, etag: sha256(v.blob).slice(0, 32), mtime: v.mtime, name: node.name });
@@ -166,7 +171,7 @@ export function registerFiles(r: Router, authed: Wrap) {
 
   // ---------------------------------------------------------------- views
   r.get('/api/search', authed(async ({ res, url }, user) => {
-    const text = (url.searchParams.get('q') ?? '').trim();
+    const text = (url.searchParams.get('q') ?? '').replace(/\0/g, '').trim().slice(0, 255);
     if (!text) return json(res, []);
     const nodes = await F.searchNodes(user.id, text);
     const out = await F.toJson(nodes, user.id);
@@ -231,7 +236,7 @@ export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unk
   await fsWriteFile(F.uploadPath(id), '');
   await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null]);
-  return { id, chunkSize: config.chunkSize, received: 0, size };
+  return { id, chunkSize: config.chunkSize, received: 0, size, name };
 }
 
 // newToken(24) → 32 base64url characters. Anything else never names an upload (and never reaches the file system).
@@ -249,7 +254,8 @@ async function stillAllowed(u: { parent_id: number; user_id: string | null; shar
   }
   if (u.share_id) {
     const s = await one<{ node_id: number }>(
-      `SELECT node_id FROM shares WHERE id = $1 AND type = 'link' AND can_edit AND (expires_at IS NULL OR expires_at > now())`, [u.share_id]);
+      `SELECT node_id FROM shares WHERE id = $1 AND type = 'link' AND can_edit AND (expires_at IS NULL OR expires_at > now())
+          AND NOT EXISTS (SELECT 1 FROM users o WHERE o.id = shares.owner AND o.disabled)`, [u.share_id]);
     return !!s && (await F.ancestors(parent.id)).some((n) => n.id === s.node_id);
   }
   return true; // rows from before this column existed
@@ -279,12 +285,24 @@ export function registerUploadChunks(r: Router) {
     const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null }>(
       `SELECT id, parent_id, name, size, received, user_id, share_id FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
+    const file = F.uploadPath(u.id);
+    // After a power cut the part file can be shorter than what was confirmed (writes not yet on disk). Continuing at
+    // `received` would fill the gap with zeros; instead the client is told the real offset and sends the rest again.
+    // (Before the busy check: between that check and busy.add there must be no await, or two parallel chunks both pass.)
+    const onDisk = (await stat(file).catch(() => null))?.size;
+    if (onDisk !== undefined && onDisk < u.received && !busy.has(u.id)) {
+      await q(`UPDATE uploads SET received = $2 WHERE id = $1`, [u.id, onDisk]);
+      uploadHashes.delete(u.id);
+      return json(res, { error: 'Offset mismatch', received: onDisk }, 409);
+    }
     if (busy.has(u.id)) throw new HttpError(409, 'Chunk already in progress');
     const offset = Number(req.headers['upload-offset'] ?? u.received);
     if (offset !== u.received) return json(res, { error: 'Offset mismatch', received: u.received }, 409);
 
     busy.add(u.id);
-    const file = F.uploadPath(u.id);
+    // A chunk whose sender vanished (a phone that left the Wi-Fi sends no goodbye) is cut off after a minute without
+    // data; it used to keep the session "in progress" until a restart, so every retry got 409.
+    const stopWatch = watchIdle(req);
     let received = u.received;
     // Continue from the hash of the bytes saved so far; a copy, so a failed chunk leaves the saved state untouched.
     const prev = uploadHashes.get(u.id);
@@ -303,7 +321,7 @@ export function registerUploadChunks(r: Router) {
       await truncate(file, u.received).catch((e) => {
         throw e?.code === 'ENOENT' ? new HttpError(404, 'Upload not found') : e;
       });
-      await pipeline(req, limit, createWriteStream(file, { flags: 'r+', start: u.received }));
+      await pipeline(req, limit, createWriteStream(file, { flags: 'r+', start: u.received, flush: true }));
       // Still ours? DELETE /api/uploads/:id (cancel) may have run while the chunk streamed in.
       const row = await one(`UPDATE uploads SET received = $2, updated_at = now() WHERE id = $1 RETURNING id`, [u.id, received]);
       if (!row) throw new HttpError(404, 'Upload not found');
@@ -313,6 +331,7 @@ export function registerUploadChunks(r: Router) {
       await truncate(file, u.received).catch(() => {});
       throw e instanceof HttpError ? e : new HttpError(400, 'Upload interrupted');
     } finally {
+      stopWatch();
       // Only after `received` is saved: a retried chunk arriving in between would read the old offset and be appended twice.
       busy.delete(u.id);
     }

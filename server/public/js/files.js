@@ -61,7 +61,7 @@ function fileTable(opts) {
     table?.classList.toggle('selecting', selected.size > 0);
     allBox.checked = selected.size > 0 && selected.size === opts.items.length;
     const chosen = opts.items.filter((i) => selected.has(i.id));
-    bar.replaceChildren(
+    bar.replaceChildren(...[
       h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: () => {
         for (const it of chosen) setSelected(it, false);
         updateBar();
@@ -81,7 +81,7 @@ function fileTable(opts) {
         if (list.length > failed) toast(t('{n} item(s) moved to trash', { n: list.length - failed }));
         opts.reload();
       }) }, icon('trash'), t('Delete')),
-    );
+    ].filter(Boolean));
   };
   allBox.addEventListener('change', () => {
     for (const it of opts.items) setSelected(it, allBox.checked);
@@ -261,7 +261,7 @@ function nodeActions(item, opts) {
     opts.canModify(item) && { label: t('Move or copy'), icon: 'move', onclick: () => moveCopy([item], opts) },
     !opts.canModify(item) && { label: t('Copy to my files'), icon: 'copy', onclick: () => moveCopy([item], { ...opts, copyOnly: true }) },
     isOwner && { label: t('Share'), icon: 'share', onclick: () => shareDialog(item, opts.reload) },
-    !item.isDir && { label: t('Versions'), icon: 'history', onclick: () => versionsDialog(item, opts) },
+    !item.isDir && (opts.canModify(item) || isOwner || item.canEdit) && { label: t('Versions'), icon: 'history', onclick: () => versionsDialog(item, opts) },
     { label: item.favorite ? t('Remove from favorites') : t('Add to favorites'), icon: 'star', onclick: async () => {
       await (item.favorite ? del : post)(`/api/nodes/${item.id}/favorite`).catch(showError);
       opts.reload();
@@ -297,20 +297,27 @@ async function rename(item, reload) {
 async function moveCopy(items, opts) {
   let current = opts.me.rootId;
   const list = h('ul', { class: 'picker-list' });
-  const crumbs = h('nav', { class: 'breadcrumb small' });
+  const crumbs = h('nav', { class: 'breadcrumb small', 'aria-label': t('Folder path') });
   const go = (id) => load(id).catch(showError);
   const load = async (id) => {
     const data = await get(`/api/nodes/${id}`);
     current = id;
-    crumbs.replaceChildren(...data.breadcrumb.map((c, i) => [
-      i ? h('span', { class: 'sep' }, '/') : null,
-      h('button', { type: 'button', class: 'crumb', 'aria-current': i === data.breadcrumb.length - 1 ? 'location' : null, onclick: () => go(c.id) }, c.name || t('Files')),
-    ]));
+    const path = data.breadcrumb;
+    const crumb = (c, i) => h('button', { type: 'button', class: 'crumb', dir: 'auto', 'aria-current': i === path.length - 1 ? 'location' : null, onclick: () => go(c.id) },
+      c.id === opts.me.rootId ? t('Files') : c.name);
+    crumbs.replaceChildren(...[
+      // Inside a folder shared with you the path starts there: your own files stay one click away.
+      path[0]?.id !== opts.me.rootId && h('button', { type: 'button', class: 'crumb', onclick: () => go(opts.me.rootId) }, t('Files')),
+      path[0]?.id !== opts.me.rootId && h('span', { class: 'sep' }, icon('right')),
+      ...path.flatMap((c, i) => [i ? h('span', { class: 'sep' }, icon('right')) : null, crumb(c, i)]),
+    ].filter(Boolean));
     const dirs = data.children.filter((c) => c.isDir && !items.some((i) => i.id === c.id));
     list.replaceChildren(...(dirs.length ? dirs.map((d) => h('li', {},
       h('button', { type: 'button', onclick: () => go(d.id) }, icon('folder', 'ic-folder'), h('span', { class: 'grow' }, d.name), icon('right', 'muted')))) : [h('li', { class: 'muted' }, t('No subfolders'))]));
   };
-  await load(current);
+  // Start in the folder the items are in (falls back to your files when that folder is not visible to you).
+  const startAt = items.every((i) => i.parentId === items[0].parentId) ? items[0].parentId : null;
+  await (startAt ? load(startAt).catch(() => load(current)) : load(current));
   const buttons = [{ label: t('Cancel'), value: null }, { label: t('Copy here'), value: 'copy', primary: !!opts.copyOnly }];
   if (!opts.copyOnly) buttons.push({ label: t('Move here'), value: 'move', primary: true });
   const what = items.length === 1 ? `"${items[0].name}"` : t('{n} items', { n: items.length });
@@ -318,7 +325,10 @@ async function moveCopy(items, opts) {
   const choice = await modal({ title, body: h('div', {}, crumbs, list), buttons });
   if (!choice) return;
   let done = 0;
-  for (const it of items) {
+  // Moving an item to the folder it is already in does nothing (it used to say "Moved").
+  const todo = choice === 'move' ? items.filter((it) => it.parentId !== current) : items;
+  if (!todo.length) return void toast(t('Already in this folder'));
+  for (const it of todo) {
     try {
       if (choice === 'move') await patch(`/api/nodes/${it.id}`, { parentId: current });
       else await post(`/api/nodes/${it.id}/copy`, { parentId: current });
@@ -326,7 +336,7 @@ async function moveCopy(items, opts) {
     } catch (e) { showError(e); }
   }
   // Only claim success for what worked (each failure has its own error message).
-  if (done) toast(choice === 'move' ? t('Moved') : t('Copied'));
+  if (done) toast(choice === 'move' ? t('Moved') : t('Copied'), 'info', { label: t('Show'), onclick: () => navigate(`/files/${current}`) });
   opts.reload();
 }
 
@@ -419,7 +429,7 @@ export async function shareDialog(item, reload) {
     pw.addEventListener('input', () => { setPassword.disabled = !pw.value; });
     pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); if (pw.value) setPassword.click(); } });
     return h('li', { class: 'link-card' },
-      h('div', { class: 'link-row' }, icon('link'), h('input', { type: 'text', readonly: true, value: url, 'aria-label': t('Link URL'), onclick: (e) => e.target.select() }),
+      h('div', { class: 'link-row' }, icon('link'), h('input', { type: 'text', readonly: true, value: url, dir: 'ltr', 'aria-label': t('Link URL'), onclick: (e) => e.target.select() }),
         h('button', { type: 'button', class: 'btn', onclick: () => copyText(url) }, icon('copy'), t('Copy')),
         h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Delete link'), onclick: async () => {
           if (!(await confirmDialog(t('Delete link'), t('People who have this link can no longer open it.'), t('Delete'), true))) return;
@@ -611,7 +621,7 @@ export async function renderSearch(main, ctx, query) {
   const items = query ? await get(`/api/search?q=${encodeURIComponent(query)}`) : [];
   await listView(main, ctx, {
     title: t('Search: “{query}”', { query }), iconName: 'search', items, emptyText: t('No matching files'),
-    extraColumn: { title: t('Location'), render: (i) => h('a', { href: `/files/${i.parentId}` }, i.path) },
+    extraColumn: { title: t('Location'), render: (i) => h('a', { href: `/files/${i.parentId}`, dir: 'auto' }, i.path) },
   });
 }
 
@@ -676,7 +686,12 @@ export async function renderTrash(main, ctx) {
       h('td', { class: 'col-size' }, formatSize(it.size)),
       h('td', { class: 'col-date', title: fullDate(it.deletedAt) }, formatDate(it.deletedAt)),
       h('td', { class: 'col-actions nowrap' },
-        h('button', { class: 'btn ghost', onclick: async (e) => { e.currentTarget.disabled = true; await post(`/api/trash/${it.id}/restore`).then(() => toast(t('"{name}" restored', { name: it.name })), showError); reload(); } }, icon('restore'), h('span', { class: 'btn-label' }, t('Restore'))),
+        h('button', { class: 'btn ghost', onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          await post(`/api/trash/${it.id}/restore`).then((r) => toast(r.name !== it.name ? t('Restored as "{name}"', { name: r.name }) : t('"{name}" restored', { name: it.name }),
+            'info', { label: t('Show'), onclick: () => navigate(`/files/${r.parentId}`) }), showError);
+          reload();
+        } }, icon('restore'), h('span', { class: 'btn-label' }, t('Restore'))),
         h('button', { class: 'icon-btn', 'aria-label': t('Delete {name} permanently', { name: it.name }), onclick: async () => {
           if (await confirmDialog(t('Delete permanently'), t('"{name}" will be deleted forever.', { name: it.name }), t('Delete'), true)) { await del(`/api/trash/${it.id}`).catch(showError); reload(); }
         } }, icon('trash'))),

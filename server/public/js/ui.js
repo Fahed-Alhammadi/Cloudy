@@ -132,15 +132,28 @@ export function clear(el) {
 
 // ---------------------------------------------------------------- toasts
 
-export function toast(message, kind = 'info') {
-  let host = document.getElementById('toasts');
-  if (!host) document.body.append((host = h('div', { id: 'toasts', role: 'status', 'aria-live': 'polite' })));
-  const t = h('div', { class: `toast ${kind}` }, message);
-  host.append(t);
-  // Errors stay a little longer: they usually need reading.
-  const ms = kind === 'error' ? 6000 : 3500;
-  setTimeout(() => t.classList.add('hide'), ms);
-  setTimeout(() => t.remove(), ms + 500);
+/** The dialog on top, if one is open (modal dialogs cover everything else, and make it inert). */
+export function topDialog() {
+  const open = [...document.querySelectorAll('dialog[open]')];
+  return open[open.length - 1] ?? null;
+}
+
+/**
+ * A short message at the bottom of the screen. `action` ({label, onclick}) adds a button such as "Show" or "Undo".
+ * Messages go into the dialog on top when one is open: under a modal dialog (the viewer, the editor) they used to be
+ * drawn behind it, so "Saved" and, worse, every failed save were invisible.
+ */
+export function toast(message, kind = 'info', action) {
+  const parent = topDialog() ?? document.body;
+  let host = parent.querySelector(':scope > .toasts');
+  if (!host) parent.append((host = h('div', { class: 'toasts', id: parent === document.body ? 'toasts' : null, role: 'status', 'aria-live': 'polite' })));
+  const el = h('div', { class: `toast ${kind}` }, h('span', {}, message),
+    action && h('button', { type: 'button', class: 'toast-action', onclick: () => { el.remove(); action.onclick(); } }, action.label));
+  host.append(el);
+  // Errors stay a little longer: they usually need reading; a message with a button longer still.
+  const ms = action ? 8000 : kind === 'error' ? 6000 : 3500;
+  setTimeout(() => el.classList.add('hide'), ms);
+  setTimeout(() => el.remove(), ms + 500);
 }
 
 // Server messages are English; the ones in the dictionary are shown translated.
@@ -162,7 +175,8 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     const titleId = `dlg-title-${++dialogSeq}`;
     const form = h('form', { method: 'dialog', class: 'dialog-form' });
     const dlg = h('dialog', { class: `modal ${wide ? 'wide' : ''}`, 'aria-labelledby': titleId },
-      h('header', {}, h('h2', { id: titleId }, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Close'), onclick: () => dlg.close('') }, icon('x'))),
+      // Like Escape, the ✕ waits for a running request (closing then lost its answer, e.g. a new app password).
+      h('header', {}, h('h2', { id: titleId }, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Close'), onclick: () => { if (!busy) dlg.close(''); } }, icon('x'))),
     );
     form.append(h('div', { class: 'modal-body' }, body));
     const footer = h('footer', {});
@@ -318,5 +332,19 @@ export function showMenu(anchor, items) {
 }
 
 export function copyText(text) {
-  navigator.clipboard?.writeText(text).then(() => toast(t('Copied to clipboard')), () => promptDialog(t('Copy this'), t('Text'), text));
+  const done = () => toast(t('Copied to clipboard'));
+  // Plain http:// addresses other than localhost (most home servers) have no clipboard API: the older copy command
+  // works there; if that fails too, the text is shown to copy by hand. (Copy used to do nothing at all.)
+  const fallback = () => {
+    const area = h('textarea', { readonly: true, 'aria-hidden': 'true', style: { position: 'fixed', top: '-1000px', opacity: '0' } }, text);
+    (topDialog() ?? document.body).append(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    if (ok) done();
+    else promptDialog(t('Copy this'), t('Text'), text);
+  };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
 }

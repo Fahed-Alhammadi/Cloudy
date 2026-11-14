@@ -61,7 +61,7 @@ export async function getCollection(k: Kind, owner: string, uri: string): Promis
 }
 
 export async function collectionById(k: Kind, owner: string, id: string | number): Promise<Collection> {
-  const c = /^\d+$/.test(String(id)) ? await one<Collection>(`SELECT * FROM ${k.coll} WHERE owner = $1 AND id = $2`, [owner, id]) : undefined;
+  const c = /^\d{1,18}$/.test(String(id)) ? await one<Collection>(`SELECT * FROM ${k.coll} WHERE owner = $1 AND id = $2`, [owner, id]) : undefined;
   if (!c) throw new HttpError(404, 'Not found');
   return c;
 }

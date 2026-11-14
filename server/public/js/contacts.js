@@ -61,7 +61,7 @@ export async function renderContacts(main, ctx) {
     list.replaceChildren(...(shown.length ? shown.map((c) => h('li', {},
       h('button', { class: `contact-item ${c.uri === currentUri ? 'active' : ''}`, 'aria-current': c.uri === currentUri ? 'true' : null, onclick: () => { currentUri = c.uri; drawList(); drawDetail(c, true); } },
         h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(c)),
-        h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, displayName(c)), h('small', { class: 'muted' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
+        h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, displayName(c)), h('small', { class: 'muted', dir: c.emails[0] || c.phones[0] ? 'ltr' : 'auto' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
   };
   search.addEventListener('input', () => { filter = search.value; drawList(); });
 
@@ -74,8 +74,8 @@ export async function renderContacts(main, ctx) {
       familyName: h('input', { type: 'text', value: c.familyName, autocomplete: 'off' }),
       org: h('input', { type: 'text', value: c.org }),
       title: h('input', { type: 'text', value: c.title }),
-      emails: h('textarea', { rows: 2, value: c.emails.join('\n'), placeholder: t('One per line') }),
-      phones: h('textarea', { rows: 2, value: c.phones.join('\n'), placeholder: t('One per line') }),
+      emails: h('textarea', { rows: 2, value: c.emails.join('\n'), placeholder: t('One per line'), dir: 'ltr' }),
+      phones: h('textarea', { rows: 2, value: c.phones.join('\n'), placeholder: t('One per line'), dir: 'ltr' }),
       address: h('input', { type: 'text', value: c.address }),
       birthday: h('input', { type: 'date', value: /^\d{4}-\d{2}-\d{2}/.test(c.birthday) ? c.birthday.slice(0, 10) : '' }),
       note: h('textarea', { rows: 3, value: c.note }),

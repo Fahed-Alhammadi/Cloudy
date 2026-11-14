@@ -94,7 +94,7 @@ export async function renderCalendar(main, ctx) {
     style: ev.allDay ? { background: colorOf[ev.calendarId], color: textOn(colorOf[ev.calendarId]) } : { '--cal': colorOf[ev.calendarId] },
     title: ev.summary,
     onclick: (e) => { e.stopPropagation(); onOpen(ev); },
-  }, !ev.allDay && h('span', { class: 'time' }, hm(new Date(ev.start))), ev.summary || t('(no title)'));
+  }, !ev.allDay && h('span', { class: 'time', dir: 'ltr' }, hm(new Date(ev.start))), h('span', { class: 'ev-title', dir: 'auto' }, ev.summary || t('(no title)')));
   const openEvent = (ev) => eventDialog(ev, calendars, rerender);
   let week;
   for (let i = 0; i < 42; i++) {

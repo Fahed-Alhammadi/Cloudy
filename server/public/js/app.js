@@ -31,15 +31,41 @@ async function startSession() {
 // user is busy (a dialog, the editor or a selection is open) the reload waits until they are done.
 let events = null;
 let refreshTimer = null;
+let reconnectTimer = null;
+let reconnectDelay = 5000;
+let missedUpdates = false;
 
 function startLiveUpdates() {
   events?.close();
+  clearTimeout(reconnectTimer);
   if (!window.EventSource) return;
-  events = new EventSource('/api/events');
-  events.addEventListener('change', (e) => {
+  const source = (events = new EventSource('/api/events'));
+  source.addEventListener('change', (e) => {
     let ev;
     try { ev = JSON.parse(e.data); } catch { return; }
     if (affectsView(ev)) scheduleRefresh(300);
+  });
+  source.addEventListener('open', () => {
+    reconnectDelay = 5000;
+    // Back after a gap: file lists may have missed changes and are reloaded once. Never other pages: the contact
+    // editor and the settings forms are not dialogs, and reloading them would throw away what is being typed.
+    if (missedUpdates) {
+      missedUpdates = false;
+      if (['files', 'recent', 'favorites', 'shared-in', 'shared-out', 'search', 'trash'].includes(currentView().view)) scheduleRefresh(0);
+    }
+  });
+  // The browser reconnects by itself after network errors, but gives up for good after an answer other than 200 (a
+  // proxy's 502 while the server restarts): live updates then stopped until a reload. Start again, a little later
+  // each time.
+  source.addEventListener('error', () => {
+    if (events !== source) return;
+    missedUpdates = true;
+    if (source.readyState !== EventSource.CLOSED) return;
+    reconnectTimer = setTimeout(() => {
+      if (!ctx.me || events !== source) return;
+      startLiveUpdates();
+    }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
   });
 }
 
@@ -47,6 +73,8 @@ function stopLiveUpdates() {
   events?.close();
   events = null;
   clearTimeout(refreshTimer);
+  clearTimeout(reconnectTimer);
+  refreshTimer = null;
 }
 
 function affectsView(ev) {
@@ -59,17 +87,33 @@ function affectsView(ev) {
 
 const userIsBusy = () => !!document.querySelector('dialog[open], .menu') || !!main?.querySelector('.selection-bar:not([hidden])');
 
+// One refresh at a time. A change that arrives while one is waiting or running does not push it back (while changes
+// kept arriving, e.g. another device uploading many files, the view used to wait for a quiet moment that never came
+// and showed none of them); it only asks for one more pass once the current one is done.
+let refreshAgain = false;
 function scheduleRefresh(delay) {
-  clearTimeout(refreshTimer);
+  if (refreshTimer) { refreshAgain = true; return; }
+  refreshAgain = false;
   refreshTimer = setTimeout(async () => {
-    if (!ctx.me || !main) return;
-    if (userIsBusy()) return scheduleRefresh(1500);
+    const done = () => {
+      refreshTimer = null;
+      if (refreshAgain && ctx.me) scheduleRefresh(300);
+    };
+    if (!ctx.me || !main) return done();
+    if (userIsBusy()) {
+      refreshTimer = null;
+      return scheduleRefresh(1500);
+    }
     // The page (not <main>) scrolls; keep its position and the focused row, so keyboard users don't lose their place.
     const scroll = window.scrollY;
     const focusKey = main.contains(document.activeElement) ? document.activeElement.closest('[data-key]')?.dataset.key : null;
-    await route({ refresh: true });
-    window.scrollTo(0, scroll);
-    if (focusKey) main.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+    try {
+      await route({ refresh: true });
+      window.scrollTo(0, scroll);
+      if (focusKey) main.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+    } finally {
+      done();
+    }
   }, delay);
 }
 
@@ -249,7 +293,7 @@ function renderShell() {
     h('ul', {},
       h('li', {}, h('a', { href: '/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings')))),
       ctx.me.isAdmin && h('li', {}, h('a', { href: '/admin', 'data-view': 'admin' }, icon('shield'), h('span', {}, t('Administration'))))),
-    h('div', { class: 'usage' }, ctx.me.quotaBytes
+    h('div', { class: 'usage' }, ctx.me.quotaBytes != null
       ? t('{used} of {quota} used', { used: formatSize(ctx.me.used), quota: formatSize(ctx.me.quotaBytes) })
       : t('{used} used', { used: formatSize(ctx.me.used) })),
   );
@@ -331,7 +375,7 @@ async function route({ refresh = false } = {}) {
       case 'admin': await renderAdmin(slot, ctx); break;
       default: navigate('/', { replace: true }); return;
     }
-    if (seq === routeSeq) document.title = `${nav.querySelector('a.active span')?.textContent || t('Files')} – Cloudy`;
+    if (seq === routeSeq) document.title = `${nav.querySelector('a.active span:not(.icon)')?.textContent || t('Files')} – Cloudy`;
   } catch (e) {
     if (seq !== routeSeq) return;
     if (e.status === 404 && view === 'files') navigate('/files', { replace: true });

@@ -77,13 +77,44 @@ export function noContent(res: ServerResponse): void {
   res.end();
 }
 
+/** How long a request body may stall (no bytes at all) before the connection is cut. */
+export const BODY_IDLE_MS = 60_000;
+
+/**
+ * Cuts the connection when the request body stalls for `ms` (requestTimeout is 0 so big uploads can take hours; without
+ * this a client that stops sending mid-body holds the connection, its buffered bytes and, for uploads, the upload
+ * session for ever). Returns the function that ends the watch once the body is read.
+ */
+export function watchIdle(req: IncomingMessage, ms = BODY_IDLE_MS): () => void {
+  let watching = true;
+  const onTimeout = () => req.destroy(new HttpError(408, 'Request body timed out'));
+  // Ends when the body has arrived, not when the handler is done: writing it to a slow disk (the final flush) is not
+  // the client stalling, and with the timer still set the connection was cut after a complete upload.
+  const done = () => {
+    if (!watching) return;
+    watching = false;
+    req.removeListener('timeout', onTimeout);
+    req.removeListener('end', done);
+    req.socket?.setTimeout(0); // the connection may carry other requests (a live-update stream) next
+  };
+  if (req.readableEnded) return done;
+  req.setTimeout(ms, onTimeout);
+  req.once('end', done);
+  return done;
+}
+
 export async function readBuffer(req: IncomingMessage, limit = 10 * 1024 * 1024): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > limit) throw new HttpError(413, 'Request body too large');
-    chunks.push(chunk);
+  const stop = watchIdle(req);
+  try {
+    for await (const chunk of req) {
+      total += chunk.length;
+      if (total > limit) throw new HttpError(413, 'Request body too large');
+      chunks.push(chunk);
+    }
+  } finally {
+    stop();
   }
   return Buffer.concat(chunks);
 }
@@ -92,14 +123,18 @@ export async function readText(req: IncomingMessage, limit?: number): Promise<st
   return (await readBuffer(req, limit)).toString('utf8');
 }
 
-export async function readJson<T = any>(req: IncomingMessage): Promise<T> {
-  const text = await readText(req, 1024 * 1024);
+/** A JSON object body (`{}` when empty). `null`, arrays and plain values are a 400, not a crash in the handler. */
+export async function readJson<T = any>(req: IncomingMessage, limit = 1024 * 1024): Promise<T> {
+  const text = await readText(req, limit);
   if (!text) return {} as T;
+  let value: unknown;
   try {
-    return JSON.parse(text);
+    value = JSON.parse(text);
   } catch {
     throw new HttpError(400, 'Invalid JSON');
   }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new HttpError(400, 'Invalid JSON');
+  return value as T;
 }
 
 export function parseCookies(req: IncomingMessage): Record<string, string> {
@@ -131,7 +166,9 @@ export function setCookie(
     'SameSite=Lax',
     `Max-Age=${maxAgeSec}`,
   ];
-  if (isHttps(req)) parts.push('Secure');
+  // Also when an untrusted hop says https (a proxy without TRUST_PROXY): a client that claims it falsely only locks
+  // itself out of its own cookie.
+  if (isHttps(req) || req.headers['x-forwarded-proto'] === 'https') parts.push('Secure');
   const prev = res.getHeader('Set-Cookie');
   const list = Array.isArray(prev) ? prev : prev ? [String(prev)] : [];
   res.setHeader('Set-Cookie', [...list, parts.join('; ')]);
@@ -145,7 +182,11 @@ export function publicOrigin(req: IncomingMessage): string {
   if (config.publicUrl) return new URL(config.publicUrl).origin;
   const fwd = viaProxy(req) ? String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim() : '';
   const host = fwd || req.headers.host || 'localhost';
-  return new URL(`${isHttps(req) ? 'https' : 'http'}://${host}`).origin;
+  try {
+    return new URL(`${isHttps(req) ? 'https' : 'http'}://${host}`).origin;
+  } catch {
+    throw new HttpError(400, 'Invalid Host header');
+  }
 }
 
 // Private, loopback, link-local, carrier-grade NAT and unique-local addresses: where proxies live.
@@ -214,8 +255,16 @@ export function viaProxy(req: IncomingMessage): boolean {
  * lands left of that address, so it can't be used to dodge the rate limit from the internet. When every
  * address is a proxy (visitors on the home network with TRUST_PROXY=true), the leftmost one is used.
  */
+let proxyHintShown = false;
+
 export function clientIp(req: IncomingMessage): string {
   const socket = normalizeIp(req.socket.remoteAddress || '');
+  if (!config.trustProxy && !proxyHintShown && req.headers['x-forwarded-for'] && isLocalIp(socket)) {
+    proxyHintShown = true;
+    console.warn(`Requests arrive through a reverse proxy (${socket}) but TRUST_PROXY is not set: every visitor counts as `
+      + `the proxy's address, so ten wrong passwords from anyone block sign-in for everyone for 15 minutes. Set TRUST_PROXY `
+      + `in .env to the proxy's address or range (for example ${socket.includes(':') ? 'fd00::/8' : '172.16.0.0/12'}).`);
+  }
   if (!viaProxy(req)) return socket || 'unknown';
   const chain = [
     ...String(req.headers['x-forwarded-for'] ?? '').split(',').map(normalizeIp).filter((ip) => isIP(ip)),
@@ -239,6 +288,23 @@ export function clientNet(req: IncomingMessage): string {
   return full.slice(0, 4).map((x) => (parseInt(x, 16) || 0).toString(16)).join(':') + '::/64';
 }
 
+/**
+ * The request's path and query. The target is a path ("/files/12"): read as a URL relative to a base, a target that
+ * starts with "//" names a host instead ("//x/api/…" was routed as "/api/…") and an empty host ("//", "/\\") threw
+ * outside any handler, which stopped the whole server. Absolute targets ("http://host/path", for proxies) and
+ * "OPTIONS *" are allowed by HTTP/1.1 and kept working.
+ */
+export function requestUrl(target: string): URL | null {
+  try {
+    if (target.startsWith('/')) return new URL('http://localhost' + target);
+    if (target === '*') return new URL('http://localhost/');
+    const abs = new URL(target);
+    return /^https?:$/.test(abs.protocol) ? new URL('http://localhost' + abs.pathname + abs.search) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** `decodeURIComponent` that answers 400 instead of crashing the request on `%ZZ`. */
 export function decodePath(s: string): string {
   try {
@@ -260,7 +326,8 @@ export function checkName(name: unknown): string {
   const n = name.trim();
   // Control characters XML 1.0 cannot carry (not even escaped) would break every PROPFIND of the folder for its DAV
   // clients. Tab, LF and CR are valid XML and stay allowed inside a name (at the ends the trim check below says no).
-  if (!n || n === '.' || n === '..' || n.length > 255 || /[\/\\\0-\x08\x0b\x0c\x0e-\x1f]/.test(n)) {
+  // U+FFFE/U+FFFF and unpaired surrogates are not XML characters either.
+  if (!n || n === '.' || n === '..' || n.length > 255 || /[\/\\\0-\x08\x0b\x0c\x0e-\x1f￾￿]/.test(n) || !n.isWellFormed()) {
     throw new HttpError(400, 'Invalid name');
   }
   // Stored under a different name than asked for, a DAV client (Finder, Explorer, rclone) sees its PUT "fail" and

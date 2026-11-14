@@ -276,7 +276,7 @@ function parseCsvContacts(text: string): ParsedFile {
       else if (role === 'title') c.title = values[0];
       else if (role === 'note') c.note = values.join('\n');
       else if (role === 'birthday') c.birthday = normalizeBirthday(values[0]);
-      else if (role === 'address') c.address ??= values[0].replace(/\s*\n\s*/g, ', ');
+      else if (role === 'address') c.address ??= values[0].split('\n').map((s) => s.trim()).filter(Boolean).join(', ');
       else if (role.startsWith('adr:')) {
         const [, where, part] = role.split(':');
         (adr[where] ??= {})[part] = values[0];
@@ -298,6 +298,6 @@ function parseCsvContacts(text: string): ParsedFile {
 /** Detects the format and parses an uploaded contacts file. */
 export function parseContactsFile(buf: Buffer): ParsedFile {
   const text = decodeText(buf).replace(/^﻿/, '');
-  if (/^\s*BEGIN:VCARD/im.test(text)) return parseVcards(text);
+  if (/(?:^|[\r\n])[ \t]*BEGIN:VCARD/i.test(text)) return parseVcards(text);
   return parseCsvContacts(text);
 }

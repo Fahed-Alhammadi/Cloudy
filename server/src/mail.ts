@@ -30,7 +30,9 @@ export interface MailConfig {
 }
 
 const RESET_MINUTES = 60;
-export const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]+$/;
+const EMAIL_PATTERN = /^[^\s@<>()",;:]+@(?:[^\s@<>()",;:.]+\.)+[^\s@<>()",;:.]+$/;
+/** An email address (at most 254 characters). Linear: the old pattern backtracked for minutes on a long run of dots. */
+export const validEmail = (s: string) => s.length <= 254 && EMAIL_PATTERN.test(s);
 
 /**
  * Origin for links in emails. The Host header of an unauthenticated request (password reset) must not decide
@@ -203,7 +205,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
 
   // Step 1: always answers 204, whether or not the account exists, so it can't be used to find accounts.
   r.post('/api/auth/forgot', async ({ req, res }) => {
-    const login = String((await readJson(req)).login ?? '').trim();
+    const login = String((await readJson(req, 64 * 1024)).login ?? '').trim().slice(0, 254);
     if (!login || !(await mailEnabled())) return noContent(res);
     if (!allowReset(`ip:${clientNet(req)}`, 5, 3600_000)) throw new HttpError(429, 'Too many requests, try again later');
     const origin = await mailOrigin();
@@ -211,9 +213,13 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
       console.warn('Password reset requested but neither PUBLIC_URL nor the email settings know the address of this server: set PUBLIC_URL or save the email settings again.');
       return noContent(res);
     }
-    const u = await one<{ id: string; email: string; display_name: string; language: string | null }>(
-      `SELECT id, email, display_name, language FROM users WHERE (id = $1 OR lower(email) = lower($1)) AND NOT disabled AND email <> '' LIMIT 1`, [login]);
-    if (u && allowReset(`user:${u.id}`, 3, 3600_000)) {
+    // The username first; otherwise every account using that address (a family may share one) gets its own link.
+    const byId = await q<{ id: string; email: string; display_name: string; language: string | null }>(
+      `SELECT id, email, display_name, language FROM users WHERE id = $1 AND NOT disabled AND email <> ''`, [login]);
+    const matches = byId.length ? byId : await q<{ id: string; email: string; display_name: string; language: string | null }>(
+      `SELECT id, email, display_name, language FROM users WHERE lower(email) = lower($1) AND NOT disabled ORDER BY id LIMIT 5`, [login]);
+    for (const u of matches) {
+      if (!allowReset(`user:${u.id}`, 3, 3600_000)) continue;
       const token = newToken(32);
       await q(`DELETE FROM password_resets WHERE user_id = $1`, [u.id]);
       await q(`INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))`,
@@ -233,7 +239,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
 
   // Step 2: the link's token + a new password. Signs the account out everywhere.
   r.post('/api/auth/reset', async ({ req, res }) => {
-    const b = await readJson(req);
+    const b = await readJson(req, 64 * 1024);
     const password = checkPasswordStrength(b.password);
     const row = await one<{ user_id: string }>(
       `DELETE FROM password_resets WHERE token_hash = $1 AND expires_at > now() RETURNING user_id`, [sha256(String(b.token ?? ''))]);
@@ -242,6 +248,8 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     await q(`DELETE FROM sessions WHERE user_id = $1`, [row.user_id]);
     // Device tokens are app passwords: whoever had the account (the reason for a reset) loses those too.
     await q(`DELETE FROM app_passwords WHERE user_id = $1`, [row.user_id]);
+    // And passkeys: whoever had the password could have added one, and a passkey signs in without the password.
+    await q(`DELETE FROM passkeys WHERE user_id = $1`, [row.user_id]);
     forgetBasicCache();
     await notifyPasswordChanged(req, row.user_id);
     noContent(res);
@@ -265,7 +273,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     const port = Number(b.port) || (security === 'tls' ? 465 : 587);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new HttpError(400, 'Invalid port');
     const fromEmail = String(b.fromEmail ?? '').trim();
-    if (!EMAIL_RE.test(fromEmail)) throw new HttpError(400, 'Enter the sender address (From email)');
+    if (!validEmail(fromEmail)) throw new HttpError(400, 'Enter the sender address (From email)');
     const prev = await mailConfig();
     await saveConfig({
       host, port, security,
@@ -280,7 +288,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
 
   r.post('/api/admin/mail/test', admin(async ({ req, res }, me) => {
     const to = String((await readJson(req)).to ?? '').trim() || me.email;
-    if (!EMAIL_RE.test(to)) throw new HttpError(400, 'Enter an address to send the test to (or add an email to your profile)');
+    if (!validEmail(to)) throw new HttpError(400, 'Enter an address to send the test to (or add an email to your profile)');
     try {
       const lang = pickLanguage(me.language, req);
       await sendMailNow({

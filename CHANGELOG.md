@@ -11,6 +11,64 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.18.1 (2026-11-15)
+
+Security and reliability fixes from a full review of the server and the web app. **Update soon**: one of them lets
+anyone who can reach the server stop it. Nothing to do before you update.
+
+**Security and availability**
+
+- A malformed request could stop the server, without signing in. It now gets an error answer.
+- The limit on wrong passwords (10 per address, 30 per account in 15 minutes) could be outrun by sending many
+  guesses at the same moment. Each guess now counts as it starts. The same applies to two-factor codes, link
+  passwords and WebDAV/CalDAV/CardDAV sign-ins.
+- A calendar or contacts app still holding an old password no longer locks the household out: its repeated failures
+  count once, not once per sync. Confirming your password in Settings no longer counts failures from such apps.
+- Some crafted inputs (a contacts import, an email address, a calendar object) could keep the server busy for
+  minutes or longer, so nobody else was served. They are handled at once now.
+- Copying a big folder no longer makes other people wait: copies of files are made instantly (hard links; the
+  storage folder is one filesystem) instead of byte by byte while holding the folder lock.
+- A request body that stops arriving is cut off after a minute. An upload chunk interrupted this way (a phone
+  leaving the Wi-Fi) no longer stays "in progress" until a restart, so the retry works.
+- Uploaded files are flushed to disk before they are listed. An upload resumed after a power cut continues from
+  what actually reached the disk.
+- Public links of a disabled account stop working while the account is disabled.
+- A password reset by email now also removes the account's passkeys, as it already did its sessions and app
+  passwords (whoever had the password could have added one). An administrator's reset leaves them, as before; the
+  dialog's "Remove all passkeys" does that.
+- People with a read-only share no longer see a file's older versions (which could hold what the owner removed
+  before sharing it).
+- Downloaded `.js`, `.css`, `.html`, `.svg` and `.xml` files are sent as plain files. Opening and previewing them
+  works as before.
+- LibreOffice (office previews) no longer receives the server's settings, such as the admin password and the
+  database address, and does not load images linked from documents.
+- Requests from a reverse proxy while `TRUST_PROXY` is not set are noted once in the log, with what to set.
+
+**Fixes**
+
+- *Move or copy* shows the folder path again (it showed `[object HTMLButtonElement]`), so you can go back up. It
+  opens in the item's own folder, and inside a folder shared with you it offers your own files too.
+- The selection bar stays in view below the top bar when you scroll, and no longer shows the word "false".
+- Messages ("Saved", errors) are visible while the viewer or the editor is open. A failed save looked like a
+  successful one.
+- *Copy* (share links, WebDAV addresses) works on plain `http://` addresses other than `localhost`.
+- Word, Excel and PowerPoint files on public links no longer open as unreadable text.
+- Restoring an item whose name was taken meanwhile works (it failed with "Internal server error"); it comes back
+  as `name (2)`, and the message says where it went.
+- An upload whose last answer was lost on the network is no longer reported as failed (the file was stored).
+- Live updates start again by themselves after the server or the proxy was briefly unavailable, and a folder that
+  keeps changing (another device uploading many files) now refreshes while it changes.
+- Arabic: phone numbers, email addresses, WebDAV addresses and codes read left to right; calendar entries are cut
+  at the end of the title, not the start.
+- Each page has its own tab title (it was "Files – Cloudy" everywhere).
+- A storage quota of 0 means unlimited, as an empty field does. Accounts saved with 0 before could not upload
+  anything although every screen said "no quota"; they become unlimited when you update (if you set 0 through the
+  API to stop an account from uploading, disable the account instead).
+- `PUBLIC_URL` without `http://` or `https://` in front is ignored, with a note in the log saying how to write it
+  (passkeys, the email settings and password changes failed with it).
+- Requests with invalid input (an empty JSON body, an over-long id, an unknown group for a new user) get a clear
+  error instead of "Internal server error"; a failing hourly cleanup step no longer stops the others.
+
 ## 1.18.0 (2026-11-14)
 
 Web app improvements. Nothing to do before you update.

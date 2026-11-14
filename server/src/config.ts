@@ -11,6 +11,26 @@ function trustProxy(raw: string): boolean | string[] {
   return v.split(/[\s,]+/).filter(Boolean);
 }
 
+/**
+ * PUBLIC_URL as an origin with its scheme. A value without http:// or https:// ("cloud.example.com") is ignored with a
+ * note in the log (it used to make passkeys, the email settings and password changes answer 500; guessing https would
+ * break sign-in on plain-http installs), as is anything that is no address at all.
+ */
+function publicUrl(raw: string): string {
+  const v = raw.trim().replace(/\/+$/, '');
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) {
+    console.warn(`PUBLIC_URL "${v}" is ignored: write it with http:// or https:// in front (for example https://${v}).`);
+    return '';
+  }
+  try {
+    return new URL(v).origin;
+  } catch {
+    console.warn(`PUBLIC_URL "${raw}" is not a web address; it is ignored (addresses come from each request instead).`);
+    return '';
+  }
+}
+
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 export const config = {
@@ -27,7 +47,7 @@ export const config = {
   /** Honor X-Forwarded-For / -Proto / -Host. Enable only when a reverse proxy sets them (http.ts). */
   trustProxy: trustProxy(env.TRUST_PROXY ?? ''),
   /** Address users open Cloudy at (e.g. https://cloud.example.com); passkeys are bound to it. Empty = from the request. */
-  publicUrl: (env.PUBLIC_URL ?? '').trim().replace(/\/+$/, ''),
+  publicUrl: publicUrl(env.PUBLIC_URL ?? ''),
   chunkSize: 8 * 1024 * 1024,
   version: (env.APP_VERSION || pkg.version) as string,
   publicDir: fileURLToPath(new URL('../public/', import.meta.url)),

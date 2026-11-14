@@ -85,8 +85,15 @@ export function descendant(el: XEl | null | undefined, ns: string, name: string)
   return undefined;
 }
 
+/**
+ * Escapes text for XML. Characters XML 1.0 cannot carry at all, not even escaped (control characters other than tab,
+ * LF and CR; U+FFFE/U+FFFF), are dropped: one vertical tab pasted into a contact's note made the whole address
+ * book's sync answer ill-formed, and strict clients stopped syncing it.
+ */
 export const esc = (s: unknown) =>
-  String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]!);
+  String(s)
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]/g, '')
+    .replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]!);
 
 /** Renders `{ns}name` with content, using our prefixes or an inline xmlns for unknown namespaces. */
 export function el(k: string, content = ''): string {

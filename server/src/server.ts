@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.ts';
 import { migrate, q } from './db.ts';
-import { Router, HttpError, json } from './http.ts';
+import { Router, HttpError, json, requestUrl } from './http.ts';
 import type { Ctx } from './http.ts';
 import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
@@ -46,7 +46,13 @@ registerOffice(router, authed);
 registerMail(router, authed, admin);
 registerLimits(router, admin);
 // Live updates (Server-Sent Events): {folders, shares} whenever something the user can see changes.
-router.get('/api/events', authed(async ({ res }, user) => openStream(user.id, res)));
+router.get('/api/events', authed(async ({ req, res }, user) => {
+  if (req.method === 'HEAD') { // the stream itself never ends; HEAD only asks whether it is there
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' });
+    return void res.end();
+  }
+  openStream(user.id, res, async () => ((await bearerUser(req)) ?? (await sessionUser(req)))?.id === user.id);
+}));
 router.get('/status', async ({ res }) => {
   await q('SELECT 1');
   json(res, { ok: true, version: config.version });
@@ -104,7 +110,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL):
 // ---------------------------------------------------------------- dispatch
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url ?? '/', 'http://localhost');
+  const url = requestUrl(req.url ?? '/');
+  if (!url) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', Connection: 'close' });
+    return void res.end('Bad request\n');
+  }
   try {
     if (await handleDav(req, res, url)) return;
     if (url.pathname.startsWith('/api/')) {
@@ -131,20 +141,25 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 }
 
+/** Hourly housekeeping. Each step on its own: one that fails (a full disk, a database hiccup) no longer skips the rest. */
 async function jobs(): Promise<void> {
-  try {
-    await q(`DELETE FROM sessions WHERE expires_at < now()`);
-    await expireUploads();
-    await cleanStorage();
-    await pruneOfficeCache();
-    await expirePasswordResets();
-    const n = await expireTrash();
-    if (n) console.log(`purged ${n} expired trash item(s)`);
-    await gcHashes();
-    backfillHashes(); // runs on in the background, one blob at a time
-  } catch (e) {
-    console.error('background job failed', e);
+  const steps: [string, () => Promise<unknown>][] = [
+    ['sessions', () => q(`DELETE FROM sessions WHERE expires_at < now()`)],
+    ['uploads', expireUploads],
+    ['storage', cleanStorage],
+    ['office previews', pruneOfficeCache],
+    ['password resets', expirePasswordResets],
+    ['trash', async () => { const n = await expireTrash(); if (n) console.log(`purged ${n} expired trash item(s)`); }],
+    ['hashes', gcHashes],
+  ];
+  for (const [name, step] of steps) {
+    try {
+      await step();
+    } catch (e) {
+      console.error(`background job "${name}" failed`, e);
+    }
   }
+  backfillHashes(); // runs on in the background, one blob at a time
 }
 
 try {
@@ -157,8 +172,16 @@ await migrate();
 await loadLimits();
 await ensureAdmin();
 await startLiveUpdates();
-const server = createServer((req, res) => void handle(req, res));
-server.requestTimeout = 0; // large uploads/downloads
+// A request that fails outside its own error handling is answered and logged; it never takes the process with it.
+process.on('unhandledRejection', (e) => console.error('unhandled rejection', e));
+// keepAlive: TCP probes find peers that vanished (a phone that left the Wi-Fi sends no goodbye) on idle connections.
+const server = createServer({ keepAlive: true, keepAliveInitialDelay: 30_000 }, (req, res) => {
+  handle(req, res).catch((e) => {
+    console.error(e);
+    res.destroy();
+  });
+});
+server.requestTimeout = 0; // large uploads/downloads (stalled bodies are cut by http.ts watchIdle instead)
 server.headersTimeout = 60_000;
 server.listen(config.port, () => console.log(`Cloudy ${config.version} listening on :${config.port}`));
 setInterval(jobs, 60 * 60 * 1000).unref();

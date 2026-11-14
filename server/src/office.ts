@@ -31,6 +31,14 @@ export const isOffice = (name: string) => OFFICE.has(ext(name));
 const cacheDir = () => path.join(config.dataDir, 'cache', 'previews');
 const SOFFICE = process.env.SOFFICE_PATH || 'soffice';
 
+/** The converter's environment: what LibreOffice needs, not the server's secrets (admin password, database URL). */
+function converterEnv(): NodeJS.ProcessEnv {
+  const keep = ['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TMPDIR', 'SAL_USE_VCLPLUGIN'];
+  const env: NodeJS.ProcessEnv = { HOME: process.env.TMPDIR || '/tmp' };
+  for (const k of keep) if (process.env[k] !== undefined) env[k] = process.env[k];
+  return env;
+}
+
 // ---------------------------------------------------------------- conversion queue
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -56,6 +64,7 @@ async function prepareProfile(): Promise<void> {
     + item('/org.openoffice.Office.Common/Security/Scripting', 'MacroSecurityLevel', 3)
     + item('/org.openoffice.Office.Writer/Content/Update', 'Link', 0) // never
     + item('/org.openoffice.Office.Calc/Content/Update', 'Link', 1) // never
+    + item('/org.openoffice.Office.Common/Security/Scripting', 'BlockUntrustedRefererLinks', 'true')
     + `\n</oor:items>\n`);
   profileReady = true;
 }
@@ -70,7 +79,7 @@ function runSoffice(input: string, outDir: string): Promise<void> {
     // util-linux's prlimit (in the image) caps the memory of the whole conversion; absent on a dev Mac.
     const limited = existsSync('/usr/bin/prlimit');
     const p = spawn(limited ? '/usr/bin/prlimit' : SOFFICE, limited ? [`--as=${MAX_MEMORY}`, SOFFICE, ...args] : args,
-      { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, HOME: process.env.TMPDIR || '/tmp' }, detached: true });
+      { stdio: ['ignore', 'ignore', 'pipe'], env: converterEnv(), detached: true });
     let err = '';
     p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
     // Kill the whole process group: soffice is a wrapper around soffice.bin, which would otherwise live on.

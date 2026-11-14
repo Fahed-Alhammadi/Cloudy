@@ -12,7 +12,7 @@ import { createUser, deleteUser, setGroups, userJson, quotaValue, USER_ID_RE } f
 import { rootOf } from '../files.ts';
 import { newSecret, otpauthUri, verifyTotp, newRecoveryCodes, normalizeRecoveryCode } from '../totp.ts';
 import QRCode from 'qrcode';
-import { notifyPasswordChanged, notifyEmailChanged, EMAIL_RE } from '../mail.ts';
+import { notifyPasswordChanged, notifyEmailChanged, validEmail } from '../mail.ts';
 import { isLanguage } from '../i18n.ts';
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
@@ -32,7 +32,7 @@ type Authed = (ctx: Ctx, user: User) => Promise<void>;
 
 export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => Promise<void>, admin: (h: Authed) => (ctx: Ctx) => Promise<void>) {
   r.post('/api/login', async ({ req, res }) => {
-    const body = await readJson(req);
+    const body = await readJson(req, 64 * 1024);
     const user = await login(req, String(body.user ?? ''), String(body.password ?? ''), body.code == null ? undefined : String(body.code));
     await createSession(req, res, user.id);
     json(res, await userJson(user));
@@ -40,7 +40,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   // Native apps: exchange credentials for a long-lived device token (an app password).
   r.post('/api/auth/token', async ({ req, res }) => {
-    const body = await readJson(req);
+    const body = await readJson(req, 64 * 1024);
     const user = await login(req, String(body.user ?? ''), String(body.password ?? ''), body.code == null ? undefined : String(body.code));
     const device = String(body.deviceName ?? '').trim().slice(0, 60) || 'Mobile device';
     const token = await createAppToken(user.id, `App: ${device}`);
@@ -65,7 +65,8 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
-    if (typeof b.email === 'string' && b.email.trim() && !EMAIL_RE.test(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    if (typeof b.email === 'string' && b.email.trim() && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    if (typeof b.displayName === 'string' && b.displayName.trim().length > 100) throw new HttpError(400, 'Display name is too long (max 100)');
     // The email receives password reset links: changing it needs the password (a stolen session must not be able to
     // take the account over). Saving the profile with the same address, or only the language (Android), does not.
     const emailChanged = typeof b.email === 'string' && b.email.trim() !== user.email;
@@ -189,22 +190,26 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   r.post('/api/admin/users', admin(async ({ req, res }) => {
     const b = await readJson(req);
+    if (typeof b.email === 'string' && b.email.trim() && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
     await createUser({
       id: String(b.id ?? '').trim(), password: b.password, displayName: b.displayName, email: b.email,
       isAdmin: !!b.isAdmin, quotaBytes: b.quotaBytes ?? null, groups: Array.isArray(b.groups) ? b.groups : undefined,
     });
+    forgetBasicCache();
     noContent(res);
   }));
 
   r.patch('/api/admin/users/:id', admin(async ({ req, res, params }, me) => {
     const b = await readJson(req);
-    const target = await one(`SELECT id FROM users WHERE id = $1`, [params.id]);
+    const target = await one<{ id: string; email: string }>(`SELECT id, email FROM users WHERE id = $1`, [params.id]);
     if (!target) throw new HttpError(404, 'No such user');
     if (params.id === me.id && (b.isAdmin === false || b.disabled === true)) {
       throw new HttpError(400, 'You cannot remove your own admin rights or disable yourself');
     }
-    if (typeof b.displayName === 'string') await q(`UPDATE users SET display_name = $2 WHERE id = $1`, [params.id, b.displayName]);
-    if (typeof b.email === 'string') await q(`UPDATE users SET email = $2 WHERE id = $1`, [params.id, b.email]);
+    if (typeof b.displayName === 'string' && b.displayName.trim().length > 100) throw new HttpError(400, 'Display name is too long (max 100)');
+    if (typeof b.email === 'string' && b.email.trim() && b.email.trim() !== target.email && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    if (typeof b.displayName === 'string') await q(`UPDATE users SET display_name = $2 WHERE id = $1`, [params.id, b.displayName.trim() || params.id]);
+    if (typeof b.email === 'string') await q(`UPDATE users SET email = $2 WHERE id = $1`, [params.id, b.email.trim()]);
     if (typeof b.isAdmin === 'boolean') await q(`UPDATE users SET is_admin = $2 WHERE id = $1`, [params.id, b.isAdmin]);
     if (typeof b.disabled === 'boolean') {
       await q(`UPDATE users SET disabled = $2 WHERE id = $1`, [params.id, b.disabled]);

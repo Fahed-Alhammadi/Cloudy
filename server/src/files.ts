@@ -1,5 +1,5 @@
 import { createWriteStream, createReadStream } from 'node:fs';
-import { mkdir, rename, rm, copyFile, writeFile as fsWriteFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, copyFile, link, writeFile as fsWriteFile, readdir, stat } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { Transform } from 'node:stream';
@@ -9,7 +9,8 @@ import { config } from './config.ts';
 import { limits } from './limits.ts';
 import { pool, q, one, tx } from './db.ts';
 import type { Db } from './db.ts';
-import { HttpError } from './http.ts';
+import { HttpError, watchIdle } from './http.ts';
+import type { IncomingMessage } from 'node:http';
 
 export interface Node {
   id: number;
@@ -69,10 +70,21 @@ async function adoptBlob(file: string): Promise<string> {
   return id;
 }
 
+/**
+ * A second blob with the same bytes. Blobs are never changed once written, so a hard link is a full copy at no cost
+ * (all of /data is one filesystem); copying the bytes is the fallback where links are not possible. A copy of a big
+ * folder used to copy every byte while holding the lock on the user's whole tree, and with ten writes waiting behind it
+ * every request of every user waited too.
+ */
 async function duplicateBlob(blob: string): Promise<string> {
   const id = randomUUID();
   await mkdir(path.dirname(blobPath(id)), { recursive: true });
-  await copyFile(blobPath(blob), blobPath(id));
+  try {
+    await link(blobPath(blob), blobPath(id));
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') throw e;
+    await copyFile(blobPath(blob), blobPath(id));
+  }
   return id;
 }
 
@@ -99,11 +111,16 @@ export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ 
       cb(null, chunk);
     },
   });
+  // A request body that stalls is cut off (it used to hold the connection and the temporary file for ever).
+  const stop = 'socket' in stream ? watchIdle(stream as IncomingMessage) : () => {};
   try {
-    await pipeline(stream, counter, createWriteStream(file));
+    // flush: the bytes are on disk before the database says the file exists (a power cut could leave it empty).
+    await pipeline(stream, counter, createWriteStream(file, { flush: true }));
   } catch (e) {
     await rm(file, { force: true });
     throw e;
+  } finally {
+    stop();
   }
   return { file, size, sha256: hash.digest('hex') };
 }
@@ -211,13 +228,13 @@ const MIME: Record<string, string> = {
 
 export function mimeOf(name: string): string {
   const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
-  return MIME[ext] ?? 'application/octet-stream';
+  return Object.hasOwn(MIME, ext) ? MIME[ext] : 'application/octet-stream';
 }
 
 // ---------------------------------------------------------------- lookup
 
 export async function getNode(id: number | string, db: Db = pool): Promise<Node | undefined> {
-  if (!/^\d+$/.test(String(id))) return undefined;
+  if (!/^\d{1,18}$/.test(String(id))) return undefined;
   return one<Node>(`SELECT ${COLS} FROM nodes WHERE id = $1`, [id], db);
 }
 
@@ -418,7 +435,11 @@ export async function usage(owner: string, db: Db = pool): Promise<number> {
 export async function remainingQuota(owner: string): Promise<number> {
   const u = await one<{ quota_bytes: number | null }>(`SELECT quota_bytes FROM users WHERE id = $1`, [owner]);
   if (u?.quota_bytes == null) return Infinity;
-  const pending = await one<{ n: number }>(`SELECT COALESCE(sum(size), 0)::bigint AS n FROM uploads WHERE owner = $1`, [owner]);
+  // Running uploads reserve their full size; one without a chunk for 15 minutes only what it has received (an
+  // interrupted 15 GB upload used to block the retry with "quota exceeded" for a whole day).
+  const pending = await one<{ n: number }>(
+    `SELECT COALESCE(sum(CASE WHEN updated_at > now() - interval '15 minutes' THEN size ELSE received END), 0)::bigint AS n
+       FROM uploads WHERE owner = $1`, [owner]);
   return Math.max(0, Number(u.quota_bytes) - (await usage(owner)) - Number(pending?.n ?? 0));
 }
 
@@ -572,6 +593,11 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
     const out = await tx(async (db) => {
       await lockChain(db, dest.id, node.id);
       await assertLive(db, dest.id, node.id);
+      // Again under the lock: a parallel move could have put the destination inside the folder since the check above,
+      // and the copy would then copy its own output without end.
+      if (node.is_dir && (await ancestors(dest.id, db)).some((n) => n.id === node.id)) {
+        throw new HttpError(400, 'Cannot copy a folder into itself');
+      }
       const src = await current(db, node.id); // its content now (blob, size), not the caller's copy
       const size = await sizeOf(db, node.id);
       await checkQuota(db, dest.owner, size);
@@ -637,17 +663,19 @@ export async function restoreNode(node: Node): Promise<Node> {
     let target = node.parent_id ? await getNode(node.parent_id, db) : undefined;
     if (!target || target.deleted_at) target = await rootOf(node.owner, db);
     const name = await uniqueName(target.id, node.name, db);
+    // The item's contents first; the item itself comes back in one statement with its (possibly new) name and place.
+    // Undeleting it under its old name first failed (500) whenever another item had taken that name meanwhile.
     await q(
       `WITH RECURSIVE s AS (
          SELECT id FROM nodes WHERE id = $1
          UNION ALL SELECT n.id FROM nodes n JOIN s ON n.parent_id = s.id
           WHERE n.deleted_at = (SELECT deleted_at FROM nodes WHERE id = $1) AND NOT n.trashed_root)
-       UPDATE nodes SET deleted_at = NULL WHERE id IN (SELECT id FROM s)`,
+       UPDATE nodes SET deleted_at = NULL WHERE id IN (SELECT id FROM s) AND id <> $1`,
       [node.id],
       db,
     );
     const restored = (await one<Node>(
-      `UPDATE nodes SET trashed_root = false, trash_path = NULL, parent_id = $2, name = $3
+      `UPDATE nodes SET deleted_at = NULL, trashed_root = false, trash_path = NULL, parent_id = $2, name = $3
         WHERE id = $1 RETURNING ${COLS}`,
       [node.id, target.id, name],
       db,

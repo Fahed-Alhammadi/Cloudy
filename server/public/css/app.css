@@ -21,6 +21,7 @@
   --topbar: 56px;
   --sidebar: 240px;
   --folder: #3d8ef0;
+  --toast-action: #8cc4ff; /* on the dark message background */
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 15px;
   line-height: 1.45;
@@ -44,6 +45,7 @@
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 40px rgba(0, 0, 0, 0.45);
     --folder: #5aa4f5;
+    --toast-action: #0b5cad; /* on the light message background */
   }
 }
 
@@ -191,7 +193,7 @@ progress { accent-color: var(--accent); }
 .contacts-view.dragging::after { z-index: 2; }
 .breadcrumb .crumb.drop-target { background: var(--accent-soft); outline: 2px solid var(--accent); }
 .selection-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 10px; margin-bottom: 8px; background: var(--accent-soft); border-radius: 8px;
-                 position: sticky; top: 0; z-index: 5; }
+                 position: sticky; top: calc(var(--topbar) + 4px); z-index: 15; box-shadow: 0 0 0 4px var(--bg); }
 .selection-bar > span { font-weight: 600; margin-inline-end: 8px; }
 
 .file-table, .data-table { width: 100%; border-collapse: collapse; }
@@ -264,8 +266,10 @@ dialog.modal footer { display: flex; justify-content: flex-end; gap: 8px; paddin
 .link-opts { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 0.9rem; }
 .link-opts input[type=password] { width: 150px; }
 
-#toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; gap: 8px; align-items: center; }
-.toast { background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px; box-shadow: var(--shadow); transition: opacity 0.4s; max-width: 90vw; }
+.toasts { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast { display: flex; align-items: center; gap: 14px; background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px; box-shadow: var(--shadow); transition: opacity 0.4s; max-width: 90vw; pointer-events: auto; }
+.toast-action { font: inherit; font-weight: 700; color: var(--toast-action); background: none; border: none; padding: 4px 6px; margin: -4px -6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+.toast-action:hover, .toast-action:focus-visible { text-decoration: underline; }
 .toast.error { background: var(--danger-fill); color: #fff; }
 .toast.hide { opacity: 0; }
 
@@ -323,12 +327,14 @@ dialog.viewer .icon-btn:hover, dialog.viewer .btn.ghost:hover { background: rgba
 .day-num { font-size: 0.85rem; font-weight: 600; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
 .day.today .day-num { background: var(--accent); color: var(--accent-text); }
 .event {
-  display: block; width: 100%; text-align: start; border: none; border-radius: 4px; padding: 1px 6px; font: inherit; font-size: 0.8rem;
-  cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text);
+  display: flex; align-items: baseline; gap: 4px; width: 100%; text-align: start; border: none; border-radius: 4px; padding: 1px 6px; font: inherit; font-size: 0.8rem;
+  cursor: pointer; overflow: hidden; white-space: nowrap; color: var(--text);
   background: color-mix(in srgb, var(--cal, var(--accent)) 16%, transparent); border-inline-start: 3px solid var(--cal, var(--accent));
 }
+.event .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: start; }
+.event .time { flex: none; }
 .event.all-day { color: #fff; border-inline-start: none; }
-.event .time { color: var(--muted); margin-inline-end: 4px; }
+.event .time { color: var(--muted); }
 .more-events { font: inherit; font-size: 0.75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent); background: none; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; text-align: start; min-height: 24px; }
 .more-events:hover { background: var(--bg-active); }
 .day-events { display: flex; flex-direction: column; gap: 6px; }

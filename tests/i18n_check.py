@@ -48,6 +48,13 @@ for f in glob.glob(os.path.join(WEB, 'js/*.js')):
         keys.add((m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'").replace('\\"', '"'))
     # Labels kept in tables and translated where they are drawn, e.g. NAV in app.js.
     keys.update(re.findall(r"\['[\w-]+', '([^']+)', '\w+'\]", src))
+# Server error messages: the web app shows them translated (showError → t(message)). WebDAV/CalDAV/CardDAV-only
+# messages (src/dav/) go to DAV clients, not to people, and messages built at run time cannot be looked up.
+server_messages = re.compile(r"""HttpError\(\d{3},\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\s*[,)]""")
+for f in glob.glob(os.path.join(ROOT, 'server/src/**/*.ts'), recursive=True):
+    if os.sep + 'dav' + os.sep in f: continue
+    for m in server_messages.finditer(open(f).read()):
+        keys.add((m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'").replace('\\"', '"'))
 ph = lambda s: sorted(re.findall(r'\{\w+\}', s))
 for lang in translated:
     path = os.path.join(WEB, f'i18n/{lang}.json')

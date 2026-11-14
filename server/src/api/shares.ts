@@ -3,7 +3,7 @@ import type { Router, Ctx } from '../http.ts';
 import { json, noContent, readJson, checkName, parseCookies, setCookie, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
-import { newToken, hashPassword, verifyPassword, sign, checkRate, recordFailure } from '../auth.ts';
+import { newToken, hashPassword, verifyPassword, sign, checkRate, attempt } from '../auth.ts';
 import * as F from '../files.ts';
 import { sendNodeFile, sendZip } from '../download.ts';
 import { notifyShare } from '../mail.ts';
@@ -162,7 +162,8 @@ export function registerShares(r: Router, authed: Wrap) {
 
   async function loadLink(token: string): Promise<Share> {
     const s = await one<Share>(
-      `SELECT * FROM shares WHERE token = $1 AND type = 'link' AND (expires_at IS NULL OR expires_at > now())`,
+      `SELECT * FROM shares WHERE token = $1 AND type = 'link' AND (expires_at IS NULL OR expires_at > now())
+          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = shares.owner AND u.disabled)`,
       [token],
     );
     const node = s && (await F.getNode(s.node_id));
@@ -198,14 +199,11 @@ export function registerShares(r: Router, authed: Wrap) {
   r.post('/api/public/:token/auth', async ({ req, res, params }) => {
     checkRate(req);
     const s = await loadLink(params.token);
+    const { password } = await readJson(req, 64 * 1024);
     // Also per link: guesses spread over many addresses add up (the account-style counter, keyed by the share).
-    const counter = `link:${s.id}`;
-    checkRate(req, counter);
-    const { password } = await readJson(req);
-    if (s.password_hash && !(await verifyPassword(String(password ?? ''), s.password_hash))) {
-      recordFailure(req, counter);
-      throw new HttpError(403, 'Wrong password');
-    }
+    const guess = attempt(req, `link:${s.id}`);
+    if (s.password_hash && !(await verifyPassword(String(password ?? ''), s.password_hash))) throw new HttpError(403, 'Wrong password');
+    guess.succeeded();
     setCookie(req, res, cookieName(s), await cookieValue(s), 86400);
     noContent(res);
   });

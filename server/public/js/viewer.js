@@ -11,7 +11,7 @@ export function kindOf(node) {
   if (m.startsWith('video/')) return 'video';
   if (m.startsWith('audio/')) return 'audio';
   if (m === 'application/pdf') return 'pdf';
-  if (m.startsWith('text/') || /json|xml|javascript|yaml/.test(m)) return 'text';
+  if (m.startsWith('text/') || /^application\/((.+\+)?(json|xml)|(x-)?(javascript|yaml|sh)|sql|toml)$/.test(m)) return 'text';
   return null;
 }
 

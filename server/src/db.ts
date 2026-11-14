@@ -22,6 +22,15 @@ export async function one<T = any>(sql: string, params: unknown[] = [], db: Db =
 
 export async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
   const c = await pool.connect();
+  // While a client is checked out the pool does not listen to its errors: a connection lost in the middle of a
+  // transaction (database restart) would be an unhandled 'error' event and end the process. The query that was running
+  // fails on its own; this only keeps the event from being fatal, and the broken client is discarded on release.
+  let broken: Error | undefined;
+  const onError = (e: Error) => {
+    broken = e;
+    console.error('database connection lost during a transaction', e.message);
+  };
+  c.on('error', onError);
   try {
     await c.query('BEGIN');
     const out = await fn(c);
@@ -31,7 +40,8 @@ export async function tx<T>(fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
     await c.query('ROLLBACK').catch(() => {});
     throw e;
   } finally {
-    c.release();
+    c.removeListener('error', onError);
+    c.release(broken);
   }
 }
 

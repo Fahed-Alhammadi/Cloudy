@@ -110,7 +110,7 @@ export async function uploadAll(items, target, onFinished) {
     try {
       if (row.cancelled) throw new ApiError(-1, 'Cancelled');
       const parentId = await folderFor(row.path);
-      await uploadOne(row, target.startUrl, parentId);
+      await uploadOne(row, target.startUrl, parentId, target.listChildren);
       row.bar.value = 100;
       row.status.textContent = t('Done');
       row.li.classList.add('done');
@@ -137,7 +137,7 @@ export async function uploadAll(items, target, onFinished) {
   if (!active) setTimeout(() => { if (!active && panel) panel.querySelectorAll('li.done').forEach((li) => li.remove()); }, 4000);
 }
 
-async function uploadOne(row, startUrl, parentId) {
+async function uploadOne(row, startUrl, parentId, listChildren) {
   const { file } = row;
   const session = await api('POST', startUrl, { parentId, name: file.name, size: file.size });
   let offset = 0;
@@ -158,14 +158,26 @@ async function uploadOne(row, startUrl, parentId) {
       });
     } catch (e) {
       if (row.cancelled) continue;
-      const fatal = e.status >= 400 && e.status < 500 && e.status !== 409 && e.status !== 408;
-      if (fatal || ++errors > 6) throw e;
+      // Final answers from Cloudy end the upload (a deleted folder, a full quota, a name taken by a folder…); only a
+      // lost answer, a proxy's 502–504, "Offset mismatch" and "Chunk already in progress" are tried again.
+      const resumable = e.status === 409 && /Offset mismatch|Chunk already in progress/.test(e.message);
+      const final = e.status === 507 || (e.status >= 400 && e.status < 500 && e.status !== 408 && !resumable);
+      if (final || ++errors > 6) throw e;
+      const noAnswer = [0, 408, 502, 503, 504].includes(e.status);
       row.status.textContent = t('Retrying…');
       await sleep(1000 * 2 ** errors);
       // Still offline? That is one more failed attempt, not the end of the upload.
       try {
         offset = (await api('GET', `/api/uploads/${session.id}`)).received;
       } catch (e2) {
+        // The answer to the last chunk was lost and the upload is gone: the server finishes an upload by removing
+        // it, so the file may well be stored. It counts as done only when it is there with its size (a failure
+        // that also removes the upload, such as a deleted folder, is not reported as done).
+        if (e2.status === 404 && noAnswer && offset + chunk.size >= file.size) {
+          const name = session.name ?? file.name;
+          const there = await listChildren?.(parentId).then((list) => list.some((c) => c.name === name && !c.isDir && c.size === file.size), () => false);
+          if (there) return null;
+        }
         if (e2.status >= 400 && e2.status < 500 && e2.status !== 408) throw e2;
       }
       continue;

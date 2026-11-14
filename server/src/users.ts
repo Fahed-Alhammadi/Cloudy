@@ -23,12 +23,19 @@ export function quotaValue(v: unknown): number | null {
   if (v == null || v === '') return null;
   const n = Number(v);
   if (!Number.isSafeInteger(n) || n < 0) throw new HttpError(400, 'Invalid quota');
-  return n;
+  return n === 0 ? null : n;
 }
 
 export async function createUser(u: NewUser): Promise<void> {
   if (!USER_ID_RE.test(u.id ?? '')) throw new HttpError(400, 'Username may contain letters, digits and . _ @ - (max 64)');
   checkPasswordStrength(u.password);
+  if ((u.displayName ?? '').length > 100) throw new HttpError(400, 'Display name is too long (max 100)');
+  // Unknown groups are refused before the account exists (they used to fail after it was created).
+  if (u.groups?.length) {
+    const known = new Set((await q<{ id: string }>(`SELECT id FROM groups WHERE id = ANY($1)`, [u.groups])).map((g) => g.id));
+    const missing = u.groups.filter((g) => !known.has(g));
+    if (missing.length) throw new HttpError(400, `Unknown group: ${missing.join(', ')}`);
+  }
   const hash = await hashPassword(u.password);
   await tx(async (db) => {
     if (await one(`SELECT 1 FROM users WHERE lower(id) = lower($1)`, [u.id], db)) {
