@@ -151,7 +151,7 @@ fi
 node --disable-warning=ExperimentalWarning /app/src/server.ts &
 app_pid=$!
 
-# shellcheck disable=SC2329 # called by the trap below
+# shellcheck disable=SC2317,SC2329 # called by the trap below (older shellcheck: SC2317, newer: SC2329)
 shutdown() {
   log "stopping"
   kill -TERM "$app_pid" 2>/dev/null || true
@@ -171,6 +171,6 @@ while kill -0 "$app_pid" 2>/dev/null && { [ -z "$pg_pid" ] || kill -0 "$pg_pid" 
 done
 log "a process exited unexpectedly"
 kill -TERM "$app_pid" 2>/dev/null || true
-[ -n "$pg_pid" ] && kill -INT "$pg_pid" 2>/dev/null || true
+if [ -n "$pg_pid" ]; then kill -INT "$pg_pid" 2>/dev/null || true; fi
 wait 2>/dev/null || true
 exit 1
