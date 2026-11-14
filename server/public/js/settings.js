@@ -354,7 +354,7 @@ async function userDialog(user, groups, rerender) {
 }
 
 export async function renderAdmin(main, ctx) {
-  const [users, groups, mail] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/mail')]);
+  const [users, groups, mail, limits] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/mail'), get('/api/admin/limits')]);
   const rerender = () => renderAdmin(main, ctx).catch(showError);
   main.replaceChildren(h('section', { class: 'settings-view' },
     h('div', { class: 'toolbar' }, h('h1', { class: 'view-title' }, icon('shield'), t('Administration')), h('div', { class: 'grow' }),
@@ -386,8 +386,40 @@ export async function renderAdmin(main, ctx) {
         const id = await promptDialog(t('New group'), t('Group name'), '', t('Create'));
         if (id) await post('/api/admin/groups', { id }).then(rerender, showError);
       } }, icon('plus'), t('New group'))),
+    limitsCard(limits, ctx, rerender),
     mailCard(mail, ctx, rerender),
   ));
+}
+
+// ---------------------------------------------------------------- limits (trash, versions, sign-in)
+
+function limitsCard(limits, ctx, rerender) {
+  const num = (value, min, max) => h('input', { type: 'number', min, max, step: 1, required: true, value });
+  const f = {
+    trashDays: num(limits.trashDays, 0, 3650),
+    maxVersions: num(limits.maxVersions, 0, 1000),
+    sessionDays: num(limits.sessionDays, 1, 365),
+  };
+  return h('form', { class: 'card form-grid', onsubmit: async (e) => {
+    e.preventDefault();
+    const next = { trashDays: Number(f.trashDays.value), maxVersions: Number(f.maxVersions.value), sessionDays: Number(f.sessionDays.value) };
+    // Lower limits delete data for good: older trash within the hour, extra versions when a file is next saved.
+    if ((next.trashDays < limits.trashDays || next.maxVersions < limits.maxVersions)
+      && !(await confirmDialog(t('Lower the limits?'), t('Items that have been in the trash longer than the new number of days are deleted within the hour, and versions beyond the new number are deleted when each file is next saved. This cannot be undone.'), t('Save'), true))) return;
+    try {
+      const saved = await put('/api/admin/limits', next);
+      if (ctx.me) ctx.me.trashDays = saved.trashDays;
+      toast(t('Limits saved'));
+      rerender();
+    } catch (err) { showError(err); }
+  } },
+    h('h2', { class: 'wide' }, t('Limits')),
+    h('p', { class: 'muted wide' }, t('Apply to everyone right away. A new sign-in length applies from the next sign-in.')),
+    h('label', { class: 'field' }, h('span', {}, t('Days in the trash')), f.trashDays),
+    h('label', { class: 'field' }, h('span', {}, t('Versions kept per file')), f.maxVersions),
+    h('label', { class: 'field' }, h('span', {}, t('Days a browser sign-in lasts')), f.sessionDays),
+    h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save'))),
+  );
 }
 
 // ---------------------------------------------------------------- email (SMTP)

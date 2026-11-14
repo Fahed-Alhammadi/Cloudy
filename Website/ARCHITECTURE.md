@@ -26,13 +26,15 @@ WebDAV / CalDAV  │                                                            
 ```
 
 **Container layout.**
-- `tini` runs as process 1 and starts `cloudy-entrypoint`.
-- The entrypoint, still as root, does the setup:
-  - creates a named user for `APP_USER` (uid:gid);
-  - fixes ownership of the database folder;
-  - runs `initdb` the first time.
-- It then drops to `APP_USER` and starts PostgreSQL 17, which listens only on the Unix socket
-  `/run/cloudy`, with trust authentication and no TCP port.
+- `cloudy-entrypoint` starts as root and only prepares:
+  - creates a named user for `PUID:PGID` (`APP_USER=uid:gid` from older `.env` files still works);
+  - gives the socket, files and database folders to that user, skipping folders it already owns;
+  - restarts itself as `PUID:PGID` with `setpriv`, under `tini` as process 1. The switch clears every
+    capability, and `no-new-privileges` keeps them from coming back. Root needs only `CHOWN`, `SETUID` and
+    `SETGID` for this (the compose files drop all others) and stops with a clear error when they are missing.
+- Everything else runs as `PUID:PGID`, so `tini` and the script can signal both processes without `CAP_KILL`:
+  `initdb` the first time, then PostgreSQL 17, which listens only on the Unix socket `/run/cloudy`, with trust
+  authentication and no TCP port.
 - Once the database answers, it starts the Node server.
 - If either process exits, the other is stopped and the container exits, so Docker's restart policy restarts
   both together.
@@ -57,12 +59,12 @@ versions(node_id, blob, size, mtime)   ← the previous blob on each overwrite
 
 - **The folder tree lives only in the database.** Rename and move change one row and never touch the disk.
 - **File contents are immutable blobs.** Saving a file writes a new blob, and the old one becomes a version at
-  no copying cost. Each file keeps `MAX_VERSIONS` versions.
+  no copying cost. Each file keeps as many versions as *Administration → Limits* says (default 20).
 - **Size and etag propagate up the tree.** Every change updates the size and etag of all parent folders, inside
   the same transaction. Clients detect changes by comparing one folder's etag.
 - **Trash** marks a whole subtree with one `deleted_at` timestamp and remembers the original path. Restore brings
-  back exactly that subtree. Items trashed earlier inside it stay in the trash. Trash is emptied after
-  `TRASH_RETENTION_DAYS`.
+  back exactly that subtree. Items trashed earlier inside it stay in the trash. Trash is emptied after the
+  days set under *Administration → Limits* (default 30).
 - **Quota** counts live files, trash and versions.
 - **Uploads** are resumable. The client opens an upload session, sends 8 MB chunks with an `Upload-Offset`
   header, and resumes from the server's offset after a network error.
@@ -118,9 +120,12 @@ what changed since their last sync.
   - Registering one needs the account password; `user.id` is an HMAC of the username, not the username.
 - Device tokens are app passwords. Users see them, and can revoke them, under *Settings → App passwords*.
 - Passwords are hashed with scrypt. Tokens are stored as SHA-256 hashes.
-- Failed sign-ins are rate-limited per client IP. Behind a proxy, `TRUST_PROXY=true` makes the real client IP
-  visible: Cloudy takes the right-most public address in `X-Forwarded-For` (proxies on local addresses are skipped,
-  so Traefik → nginx → Cloudy works; addresses a client forges itself sit further left and are ignored).
+- Failed sign-ins are rate-limited per client IP. Behind a proxy, `TRUST_PROXY` makes the real client IP
+  visible. Set to the proxies' addresses or CIDR ranges, forwarded headers count only on connections from them,
+  and Cloudy takes the right-most address in `X-Forwarded-For` that is not one of them. `TRUST_PROXY=true`
+  believes the headers from any peer and treats every local address as a proxy, so Traefik → nginx → Cloudy
+  works; it is only safe when nothing but the proxy can reach the port. Addresses a client forges itself
+  sit further left and are ignored.
 - Every state-changing `/api` call must carry the `X-Cloudy-Request: 1` header. A cross-site form can't send it, so
   this blocks CSRF.
 
@@ -193,7 +198,13 @@ and are sent in the background — failures are logged, never shown to the user 
 - **Notifications**: new user/group shares (recipients with an email and `notify_shares`, not the sharer) and
   password changes. Links use `PUBLIC_URL` or the origin of the request that caused the email.
 
-## 12. Contacts import and export
+## 12. Limits
+
+The limits (days in the trash, versions per file, sign-in length) live in `limits.ts`: `settings` key `limits`,
+kept in memory and replaced when an admin saves them, so they apply without a restart. The first start stores the
+values of the old `TRASH_RETENTION_DAYS` / `MAX_VERSIONS` / `SESSION_DAYS` variables (or the defaults).
+
+## 13. Contacts import and export
 
 `POST /api/addressbooks/:id/import` takes the raw file (20 MB, 20,000 contacts at most); `contacts-import.ts`
 detects the format and encoding (UTF-8, UTF-16 with BOM, else Windows-1252).
@@ -206,7 +217,7 @@ detects the format and encoding (UTF-8, UTF-16 with BOM, else Windows-1252).
   email or phone (last 9 digits) is skipped. The response counts `imported`, `updated`, `duplicates`, `skipped`.
 - `GET /api/addressbooks/:id/export` returns every card as one `text/vcard` file.
 
-## 13. Desktop sync
+## 14. Desktop sync
 
 The desktop app (`desktop/src/main/sync.ts`) keeps one local folder in sync with the user's files. Each pass compares
 three trees by relative path: the **local folder**, the **server** (`GET /api/nodes/:id`, with each folder's listing

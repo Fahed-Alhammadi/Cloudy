@@ -91,9 +91,10 @@ export async function ensureAdmin(): Promise<void> {
   const any = await one(`SELECT 1 FROM users LIMIT 1`);
   if (any) return;
   let password = config.adminPassword;
-  if (password.length < 8) {
+  // The examples from .env.example (now and before 1.17) are public: never use them as the real password.
+  if (password.length < 8 || password === 'change-me-to-a-long-password' || password === 'change-me-admin-password') {
     password = newToken(12);
-    console.log(`\n  ADMIN_PASSWORD not set (or < 8 chars). Generated admin password: ${password}\n`);
+    console.log(`\n  CLOUDY_ADMIN_PASSWORD not set, shorter than 8 characters or still the example. Generated admin password: ${password}\n`);
   }
   await createUser({ id: config.adminUser, password, displayName: 'Administrator', isAdmin: true });
   console.log(`created admin user "${config.adminUser}"`);

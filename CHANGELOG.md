@@ -11,6 +11,32 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.17.0 (2026-11-14)
+
+Shorter setup files and a hardened container. Your current `docker-compose.yml` and `.env` keep working: nothing
+to do before you update. If you later switch to the new files, rename the old ones first and copy your changes
+over (see the README link below): a new `docker-compose.yml` doesn't read `DATA_PATH`, `DB_PATH` or `APP_PORT`.
+
+- **Two short files.** `docker-compose.yml` now has only the lines you might change (port, where your files and the
+  database live). `.env` has who Cloudy runs as and the first administrator:
+  `PUID`, `PGID`, `CLOUDY_ADMIN_USERNAME`, `CLOUDY_ADMIN_PASSWORD`. To switch, follow
+  [Moving to the short compose and .env files](README.md#moving-to-the-short-compose-and-env-files-server-117).
+  The old names (`APP_USER`, `ADMIN_USER`, `ADMIN_PASSWORD`) still work.
+- **Hardened container.** The new `docker-compose.yml` drops every capability except `CHOWN`, `SETUID` and
+  `SETGID` and sets `no-new-privileges`. The container uses them only at startup to give its folders to
+  `PUID:PGID`, then runs everything as that user with no capabilities left, under `tini` as process 1. If they
+  are missing, it stops with a message saying which line to add.
+- **Limits in the web app.** Days in the trash, versions kept per file and how long a browser sign-in lasts are
+  now under *Administration → Limits* and apply at once, without a restart. On its first start, 1.17 copies your
+  `TRASH_RETENTION_DAYS`, `MAX_VERSIONS` and `SESSION_DAYS` values there (values outside 0–3650 days, 0–1000
+  versions or 1–365 days are brought to the nearest end and logged). After that, change them in the web app: the
+  variables no longer have an effect. Lowering a limit asks for confirmation, because it deletes older data.
+- **`TRUST_PROXY` accepts addresses and CIDR ranges**, e.g. `TRUST_PROXY=172.16.0.0/12`. Forwarded headers then
+  count only on connections from those addresses. `true` keeps working as before: it believes those headers from
+  any client, so use it only when nothing but the proxy can reach the port.
+- **The example admin password is never used.** If `CLOUDY_ADMIN_PASSWORD` is empty or still the example from
+  `.env.example`, the first start generates a random password and prints it to the log.
+
 ## 1.16.2 (2026-11-11)
 
 Security hardening in the web app, no changes to the API or the data.

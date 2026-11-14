@@ -1,5 +1,6 @@
 # Server (container image). Runs when server files change.
-#   - every push / pull request: type-check + end-to-end tests against the built container
+#   - every push / pull request: type-check, compose files + entrypoint lint, end-to-end tests against the built container
+#     (started from .env.example with the hardened flags), container smoke test (tests/docker_smoke.sh)
 #   - tag server-X.Y.Z (scripts/version.py bump X.Y.Z server, CHANGELOG.md section, commit, tag, push): the tests, then
 #     image ghcr.io/<owner>/cloudy:X.Y.Z and :latest. No GitHub release: what changed for admins is in CHANGELOG.md.
 #     The tag must match server/package.json (scripts/version.py check). An image that is already there is not rebuilt.
@@ -13,7 +14,9 @@ on:
       - 'server/**'
       - 'deploy/**'
       - 'docker-compose.yml'
+      - '.env.example'
       - 'tests/e2e.py'
+      - 'tests/docker_smoke.sh'
       - 'scripts/version.py'
       - 'scripts/published.mjs'
       - '.github/workflows/server.yml'
@@ -41,21 +44,29 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: server/package-lock.json
-      - name: Type-check
+      - name: Type-check and unit tests
         working-directory: server
-        run: npm ci && npm run typecheck
-      - name: Start stack
+        run: npm ci && npm run typecheck && npm test
+      - name: Compose files and entrypoint
         run: |
-          printf 'ADMIN_USER=admin\nADMIN_PASSWORD=ci-admin-password\n' > .env
-          docker compose -f deploy/docker-compose.yml --env-file .env up -d --build --wait
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f deploy/docker-compose.yml config -q
+          shellcheck server/docker/entrypoint.sh tests/docker_smoke.sh
+      - name: Start stack (.env.example with a real admin password, hardened flags)
+        run: |
+          sed -i 's/^CLOUDY_ADMIN_PASSWORD=.*/CLOUDY_ADMIN_PASSWORD=ci-admin-password/' .env
+          docker compose -f deploy/docker-compose.yml up -d --build --wait
       - name: End-to-end tests
         run: |
           # The email tests run a fake SMTP server on this machine; the container reaches it via its network gateway.
           export CLOUDY_TEST_SMTP_HOST=$(docker inspect cloudy -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}')
           python3 tests/e2e.py http://localhost:8080 admin ci-admin-password
+      - name: Container smoke test (PUID, capabilities, restart, stop, old .env files)
+        run: tests/docker_smoke.sh cloudy:local
       - name: Logs on failure
         if: failure()
-        run: docker compose -f deploy/docker-compose.yml --env-file .env logs cloudy
+        run: docker compose -f deploy/docker-compose.yml logs cloudy
 
   publish:
     needs: test

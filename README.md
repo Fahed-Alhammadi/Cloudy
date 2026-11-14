@@ -99,32 +99,39 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
 You need Docker with the Compose plugin. Three steps:
 
 ```sh
-# 1. Get the compose file
+# 1. Get the two files
 mkdir cloudy && cd cloudy
 curl -fsSLO https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/.env.example
 
-# 2. Set the admin password (and anything else you want to change)
-nano docker-compose.yml        # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-your-password-here}
+# 2. Choose the admin password
+nano .env
 
 # 3. Start
 docker compose up -d
 ```
 
-Open http://localhost:8080 (or `http://<server-ip>:8080`) and sign in as `admin` with your password.
+Open http://localhost:8080 (or `http://<server-ip>:8080`) and sign in with `CLOUDY_ADMIN_USERNAME` and
+`CLOUDY_ADMIN_PASSWORD` from `.env`.
 
-Every setting is in `docker-compose.yml` with its default, written as `${NAME:-default}`. To change one, edit
-the part after `:-`. For example, to store files on your NFS mount and use port 9000:
+The two files are all you edit:
 
-```yaml
-      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-9000}:8080"
-      - ${DATA_PATH:-/mnt/cloudy}:/data
-```
+- **[`.env`](.env.example)**: who Cloudy runs as (`PUID`/`PGID`, the owner of the files it writes) and the first
+  administrator. The optional settings below them are commented out, one line each.
+- **[`docker-compose.yml`](docker-compose.yml)**: the port, and where your files and the database live. The
+  lines you might change have a comment. By default both are Docker volumes; a host folder works too, e.g.
+  `/mnt/cloudy:/data`.
 
-If you'd rather not touch the compose file, put the same names in a `.env` file next to it (see
-[`.env.example`](.env.example)). Values in `.env` override the defaults in the file.
+Days in the trash, versions kept per file and how long a sign-in lasts are under *Administration → Limits* in
+the web app, and apply at once.
 
-If you leave `ADMIN_PASSWORD` empty, a random password is generated on first start. Read it with
+The admin account is created on the first start only; change its password later under *Settings*. If you leave
+`CLOUDY_ADMIN_PASSWORD` empty or keep the example, a random password is generated on first start. Read it with
 `docker logs cloudy | grep "admin password"`.
+
+The container starts as root only to give its folders to `PUID:PGID`. It then runs everything as that user with
+no capabilities left (`cap_drop: [ALL]`, `no-new-privileges`). Changing `PUID` later on an existing install needs one
+manual step; the log names the command.
 
 **Just trying it out?** One command, no files needed:
 
@@ -141,20 +148,25 @@ The image contains Cloudy and its own PostgreSQL 17. The database is reachable o
 **Build from source instead** (development or your own changes), from a clone of this repository:
 
 ```sh
-docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+cp .env.example .env    # then set the admin password
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 Both compose files use the same project name and volumes, so switching between them keeps your data.
 
 ## Production
 
-Cloudy serves plain HTTP on `APP_PORT` (default 8080). Put it behind your reverse proxy for TLS, and set
-`TRUST_PROXY` to `true`. The proxy must:
+Cloudy serves plain HTTP on port 8080. Put it behind your reverse proxy for TLS, and set `TRUST_PROXY` in `.env`
+to the proxy's address or range, e.g. `TRUST_PROXY=172.16.0.0/12` for a proxy in another container or on the
+Docker host. Use the narrowest range that holds your proxy. Cloudy then reads the visitor's address and HTTPS from the
+forwarded headers, but only on connections from those addresses. `TRUST_PROXY=true` (the old setting) believes those
+headers from any client, so use it only when nothing but the proxy can reach the port. Either way, don't publish the
+port to the internet. The proxy must:
 - forward `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`;
 - allow unlimited request bodies and long timeouts (uploads arrive in 8 MB chunks; downloads stream);
 - pass all HTTP methods through (WebDAV uses PROPFIND, MKCOL, MOVE, COPY, LOCK, REPORT…).
 
-Set `APP_BIND` to `127.0.0.1` if the proxy runs on the same host.
+If the proxy runs on the same host, publish the port only there: `"127.0.0.1:8080:8080"` in `docker-compose.yml`.
 
 Example nginx location:
 
@@ -171,32 +183,59 @@ location / {
 }
 ```
 
-**Back up** the database (`DB_PATH`) and the user files (`DATA_PATH`) together. For a consistent database dump
+**Back up** the database (the `db-data` volume, or your folder) and your files (`app-data`) together. For a
+consistent database dump
 while Cloudy runs:
 
 ```sh
 docker exec -u node cloudy pg_dump -h /run/cloudy -U cloudy cloudy > cloudy.sql
 ```
 
-(Use your `APP_USER` uid instead of `node` if you changed it.)
+(Use your `PUID` instead of `node` if you changed it, e.g. `-u 1001`.)
 
 ### Storing files on NFS or another disk
 
-User files live wherever `DATA_PATH` points. That folder holds uploads in progress, versions and trash
-too, so everything moves together. To use an NFS share:
+Your files live wherever the `/data` line in `docker-compose.yml` points. That folder holds uploads in
+progress, versions and trash too, so everything moves together. To use an NFS share:
 
 1. Mount the share on the host, e.g. `/mnt/cloudy` (add it to `/etc/fstab` so it mounts before Docker
    starts).
-2. Make it writable by the user Cloudy runs as: `sudo chown 1000:1000 /mnt/cloudy`, or match the NFS
-   export's owner with `APP_USER`.
-3. Set `DATA_PATH` to `/mnt/cloudy` (and `APP_USER` if the owner isn't 1000:1000), in `docker-compose.yml`
-   or `.env`. Keep `DB_PATH` (the database) on a local disk; databases on NFS risk corruption.
+2. Make it writable by the user Cloudy runs as: `sudo chown 1000:1000 /mnt/cloudy`, or set `PUID`/`PGID` in
+   `.env` to the NFS export's owner.
+3. In `docker-compose.yml`, change the files line to `- /mnt/cloudy:/data`. Keep the database line on a local
+   disk; databases on NFS risk corruption.
 4. Run `docker compose up -d`.
 
 If the folder isn't writable, the app refuses to start and logs exactly which uid:gid needs access.
 Moving an existing install: stop the stack, copy the contents of the old storage (for the default volume:
-`docker run --rm -v cloudy_app-data:/from -v /mnt/cloudy:/to alpine cp -a /from/. /to/`), set
-`DATA_PATH`, and start again.
+`docker run --rm -v cloudy_app-data:/from -v /mnt/cloudy:/to alpine cp -a /from/. /to/`), change the line,
+and start again.
+
+### Moving to the short compose and .env files (server 1.17)
+
+Older `docker-compose.yml` and `.env` files keep working, so this is optional. Switch in the **same folder**: the
+project name and volume names are unchanged, so Cloudy finds your data. Keep the old files to copy from:
+
+```sh
+mv docker-compose.yml docker-compose.yml.old && mv .env .env.old
+curl -fsSLO https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/docker-compose.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/.env.example
+```
+
+Then carry over what you had changed, in either old file:
+
+| Old setting | New place |
+|---|---|
+| `APP_PORT=9000`, `APP_BIND=127.0.0.1` | ports line in `docker-compose.yml`: `"127.0.0.1:9000:8080"` |
+| `DATA_PATH=/mnt/cloudy` | files line in `docker-compose.yml`: `/mnt/cloudy:/data` |
+| `DB_PATH=/srv/cloudy-db` | database line in `docker-compose.yml`: `/srv/cloudy-db:/var/lib/cloudy/db` |
+| `APP_USER=1000:1000` | `PUID=1000` and `PGID=1000` in `.env` |
+| `ADMIN_USER`, `ADMIN_PASSWORD` | `CLOUDY_ADMIN_USERNAME`, `CLOUDY_ADMIN_PASSWORD` in `.env` (used on the first start only) |
+| `TRUST_PROXY`, `PUBLIC_URL`, `DATABASE_URL` | same names in `.env` |
+| `TRASH_RETENTION_DAYS`, `MAX_VERSIONS`, `SESSION_DAYS` | *Administration → Limits* (server 1.17 copies your values there on its first start) |
+
+Then run `docker compose up -d`. If `.env` still sets a custom `DATA_PATH` or `DB_PATH`, Cloudy stops with a
+message instead of starting on empty storage.
 
 ## Updates
 
@@ -276,20 +315,19 @@ Create an app password under *Settings → Connect apps and devices*, then use:
 
 ## Configuration
 
-Set these in `docker-compose.yml` (the value after `:-`) or in a `.env` file next to it.
+| Setting | Where | Default | Purpose |
+|---|---|---|---|
+| `PUID` / `PGID` | `.env` | `1000` / `1000` | User and group Cloudy runs as (owner of the files it writes) |
+| `CLOUDY_ADMIN_USERNAME` / `CLOUDY_ADMIN_PASSWORD` | `.env` | `admin` / generated | First administrator, created on the first start |
+| `TRUST_PROXY` | `.env` | off | Your reverse proxy's addresses or CIDR ranges; enables real client IPs and HTTPS-only cookies (`true` believes any client) |
+| `PUBLIC_URL` | `.env` | from each request | Address people open Cloudy at; passkeys and links in emails use it |
+| `DATABASE_URL` | `.env` | built-in | External PostgreSQL instead of the built-in one |
+| Port | `docker-compose.yml` | `8080` | `"127.0.0.1:8080:8080"` behind a reverse proxy on the same host |
+| Files | `docker-compose.yml` | `app-data` volume | A host folder works too, e.g. `/mnt/cloudy:/data` (NFS is fine) |
+| Database | `docker-compose.yml` | `db-data` volume | Keep it on a local disk |
+| Days in the trash, versions per file, sign-in length | *Administration → Limits* | `30` / `20` / `14` | Applied at once, no restart |
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / random | First administrator (created on first start) |
-| `APP_PORT` / `APP_BIND` | `8080` / `0.0.0.0` | Published port and interface |
-| `APP_USER` | `1000:1000` | uid:gid the server runs as |
-| `DATA_PATH` | `app-data` (volume) | Where user files are stored: a volume name or a host folder |
-| `DB_PATH` | `db-data` (volume) | Where the built-in database is stored (local disk) |
-| `DATABASE_URL` | built-in | External PostgreSQL instead of the built-in one |
-| `TRUST_PROXY` | `false` | Honor `X-Forwarded-*` headers (only behind a proxy) |
-| `TRASH_RETENTION_DAYS` | `30` | Days before trashed items are deleted |
-| `MAX_VERSIONS` | `20` | Versions kept per file |
-| `SESSION_DAYS` | `14` | How long a browser login lasts |
+Names from older `.env` files still work; see [Moving to the short compose and .env files](#moving-to-the-short-compose-and-env-files-server-117).
 
 ## Development
 
@@ -297,6 +335,7 @@ Set these in `docker-compose.yml` (the value after `:-`) or in a `.env` file nex
 |---|---|
 | Type-check the server | `cd server && npm install && npm run typecheck` |
 | End-to-end tests (stack running) | `python3 tests/e2e.py http://localhost:8080 admin '<admin password>'` |
+| Container smoke test (PUID, capabilities, restart, stop) | `tests/docker_smoke.sh cloudy:local` |
 | Android debug build | `cd android && ./gradlew assembleDebug` (JDK 17+, Android SDK 36) |
 | iOS simulator build | `ios/build.sh` (Xcode 16+, `brew install xcodegen`) |
 | Desktop app | `cd desktop && npm install && npm start` (tests and packages: [desktop/README.md](desktop/README.md)) |

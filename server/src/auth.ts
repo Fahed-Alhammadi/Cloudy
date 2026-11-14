@@ -1,6 +1,7 @@
 import { randomBytes, scrypt as scryptCb, timingSafeEqual, createHash, createHmac } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { config } from './config.ts';
+import { limits } from './limits.ts';
 import { q, one } from './db.ts';
 import { HttpError, parseCookies, setCookie, clientNet } from './http.ts';
 import { verifyTotp, normalizeRecoveryCode } from './totp.ts';
@@ -188,9 +189,9 @@ export async function createSession(req: IncomingMessage, res: ServerResponse, u
   const token = newToken();
   await q(
     `INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(days => $3))`,
-    [sha256(token), userId, config.sessionDays],
+    [sha256(token), userId, limits().sessionDays],
   );
-  setCookie(req, res, SESSION_COOKIE, token, config.sessionDays * 86400);
+  setCookie(req, res, SESSION_COOKIE, token, limits().sessionDays * 86400);
 }
 
 /** Signs the user out everywhere except the browser making this request (after a password change). */

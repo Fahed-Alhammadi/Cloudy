@@ -6,6 +6,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Readable } from 'node:stream';
 import { config } from './config.ts';
+import { limits } from './limits.ts';
 import { pool, q, one, tx } from './db.ts';
 import type { Db } from './db.ts';
 import { HttpError } from './http.ts';
@@ -55,8 +56,8 @@ export async function ensureDirs(): Promise<void> {
     const gid = process.getgid?.() ?? '?';
     throw new Error(
       `Storage at ${config.dataDir} is not writable by uid:gid ${uid}:${gid} (${e.code ?? e.message}). ` +
-      `Give DATA_PATH to that user (e.g. "chown -R ${uid}:${gid} <path>" or the NFS export's anonuid/anongid), ` +
-      `or set APP_USER in .env to the owner of the storage.`,
+      `Give the folder on the /data line of docker-compose.yml to that user (e.g. "chown -R ${uid}:${gid} <path>" or the ` +
+      `NFS export's anonuid/anongid), or set PUID and PGID in .env to the owner of the storage.`,
     );
   }
 }
@@ -522,7 +523,7 @@ async function saveHash(db: Db, blob: string, sha256: string | undefined): Promi
 async function pruneVersions(db: Db, nodeId: number): Promise<string[]> {
   const old = await q<{ id: number; blob: string }>(
     `SELECT id, blob FROM versions WHERE node_id = $1 ORDER BY created_at DESC OFFSET $2`,
-    [nodeId, config.maxVersions],
+    [nodeId, limits().maxVersions],
     db,
   );
   if (old.length) await q(`DELETE FROM versions WHERE id = ANY($1)`, [old.map((v) => v.id)], db);
@@ -718,7 +719,7 @@ export async function listTrash(owner: string): Promise<Node[]> {
 export async function expireTrash(): Promise<number> {
   const old = await q<{ id: number }>(
     `SELECT id FROM nodes WHERE trashed_root AND deleted_at < now() - make_interval(days => $1)`,
-    [config.trashDays],
+    [limits().trashDays],
   );
   for (const n of old) await purgeNode(n.id);
   return old.length;

@@ -20,6 +20,7 @@ import { registerGroupware } from './api/groupware.ts';
 import { openStream, startLiveUpdates, closeStreams } from './events.ts';
 import { registerOffice, pruneOfficeCache } from './office.ts';
 import { registerMail, expirePasswordResets } from './mail.ts';
+import { registerLimits, loadLimits } from './limits.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
 
@@ -43,6 +44,7 @@ registerShares(router, authed);
 registerGroupware(router, authed);
 registerOffice(router, authed);
 registerMail(router, authed, admin);
+registerLimits(router, admin);
 // Live updates (Server-Sent Events): {folders, shares} whenever something the user can see changes.
 router.get('/api/events', authed(async ({ res }, user) => openStream(user.id, res)));
 router.get('/status', async ({ res }) => {
@@ -147,6 +149,7 @@ try {
   process.exit(1);
 }
 await migrate();
+await loadLimits();
 await ensureAdmin();
 await startLiveUpdates();
 const server = createServer((req, res) => void handle(req, res));

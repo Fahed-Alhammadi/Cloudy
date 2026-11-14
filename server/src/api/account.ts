@@ -1,5 +1,6 @@
 import type { Router, Ctx } from '../http.ts';
 import { config } from '../config.ts';
+import { limits } from '../limits.ts';
 import { json, noContent, readJson, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import {
@@ -59,7 +60,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   });
 
   r.get('/api/me', authed(async ({ res }, user) => {
-    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: config.trashDays });
+    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: limits().trashDays });
   }));
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {

@@ -113,7 +113,7 @@ export function parseCookies(req: IncomingMessage): Record<string, string> {
 
 export function isHttps(req: IncomingMessage): boolean {
   if (config.publicUrl.startsWith('https://')) return true; // the address users open: cookies must be Secure
-  if (config.trustProxy) return req.headers['x-forwarded-proto'] === 'https';
+  if (viaProxy(req)) return req.headers['x-forwarded-proto'] === 'https';
   return 'encrypted' in req.socket && !!req.socket.encrypted;
 }
 
@@ -143,7 +143,7 @@ export function setCookie(
  */
 export function publicOrigin(req: IncomingMessage): string {
   if (config.publicUrl) return new URL(config.publicUrl).origin;
-  const fwd = config.trustProxy ? String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim() : '';
+  const fwd = viaProxy(req) ? String(req.headers['x-forwarded-host'] ?? '').split(',')[0].trim() : '';
   const host = fwd || req.headers.host || 'localhost';
   return new URL(`${isHttps(req) ? 'https' : 'http'}://${host}`).origin;
 }
@@ -162,27 +162,66 @@ function normalizeIp(raw: string): string {
   return ip.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '');
 }
 
-export function isLocalIp(ip: string): boolean {
+function inList(list: BlockList, ip: string): boolean {
   const v = isIP(ip);
-  return v === 4 ? LOCAL.check(ip, 'ipv4') : v === 6 ? LOCAL.check(ip, 'ipv6') : false;
+  return v === 4 ? list.check(ip, 'ipv4') : v === 6 ? list.check(ip, 'ipv6') : false;
+}
+
+export function isLocalIp(ip: string): boolean {
+  return inList(LOCAL, ip);
+}
+
+/** TRUST_PROXY as addresses / CIDR ranges ("172.16.0.0/12, fd00::/8"); null for true/false. Bad entries stop the start. */
+const PROXIES = Array.isArray(config.trustProxy) ? proxyList(config.trustProxy) : null;
+
+function proxyList(entries: string[]): BlockList {
+  const list = new BlockList();
+  for (const entry of entries) {
+    const [addr, bits, extra] = entry.split('/');
+    const ip = normalizeIp(addr);
+    const v = isIP(ip);
+    const max = v === 6 ? 128 : 32;
+    const prefix = bits === undefined ? max : /^\d{1,3}$/.test(bits) ? Number(bits) : NaN;
+    if (!v || extra !== undefined || !(prefix >= 0 && prefix <= max)) {
+      console.error(`FATAL: TRUST_PROXY: "${entry}" is not an IP address or a CIDR range (for example 172.16.0.0/12), or true/false.`);
+      process.exit(1);
+    }
+    list.addSubnet(ip, prefix, v === 6 ? 'ipv6' : 'ipv4');
+  }
+  return list;
+}
+
+/** A hop that may set forwarded headers: any local address with TRUST_PROXY=true, else the listed proxies. */
+function isProxy(ip: string): boolean {
+  return PROXIES ? inList(PROXIES, ip) : isLocalIp(ip);
+}
+
+/**
+ * Whether this request's forwarded headers count: TRUST_PROXY=true trusts them from any peer (as before 1.17),
+ * a list of ranges only when the connection comes from one of them.
+ */
+export function viaProxy(req: IncomingMessage): boolean {
+  if (!config.trustProxy) return false;
+  return !PROXIES || inList(PROXIES, normalizeIp(req.socket.remoteAddress || ''));
 }
 
 /**
  * Client IP for rate limiting. Forwarded headers are spoofable, so they're only used with TRUST_PROXY.
  * The chain is X-Forwarded-For plus the connecting address. Going from the right (the hop nearest to us),
- * local addresses are proxies (Traefik, nginx, Docker) and are skipped while a public address is further
- * left; the first public address is the visitor, as recorded by the first proxy. Anything a client puts
- * in X-Forwarded-For itself lands left of that address, so it can't be used to dodge the rate limit from
- * the internet. When every address is local (visitors on the home network), the leftmost one is used.
+ * proxies are skipped while another address is further left (TRUST_PROXY=true: every local address counts as
+ * a proxy, e.g. Traefik, nginx, Docker; TRUST_PROXY=<ranges>: only addresses in those ranges). The first other
+ * address is the visitor, as recorded by the first proxy. Anything a client puts in X-Forwarded-For itself
+ * lands left of that address, so it can't be used to dodge the rate limit from the internet. When every
+ * address is a proxy (visitors on the home network with TRUST_PROXY=true), the leftmost one is used.
  */
 export function clientIp(req: IncomingMessage): string {
   const socket = normalizeIp(req.socket.remoteAddress || '');
-  if (!config.trustProxy) return socket || 'unknown';
+  if (!viaProxy(req)) return socket || 'unknown';
   const chain = [
     ...String(req.headers['x-forwarded-for'] ?? '').split(',').map(normalizeIp).filter((ip) => isIP(ip)),
     socket,
   ].filter(Boolean);
-  for (let i = chain.length - 1; i >= 0; i--) if (!isLocalIp(chain[i])) return chain[i];
+  for (let i = chain.length - 1; i >= 0; i--) if (!isProxy(chain[i])) return chain[i];
   return chain[0] || 'unknown';
 }
 

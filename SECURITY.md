@@ -69,9 +69,15 @@ Out of scope:
 Cloudy is self-hosted, so the admin's setup matters as much as the code:
 
 - **Use HTTPS.** Put Cloudy behind a reverse proxy with TLS (see *Production* in the [README](README.md)), set
-  `PUBLIC_URL` to the `https://` address, and set `TRUST_PROXY=true` only when that proxy is in front.
-- **Don't expose the HTTP port directly.** With the proxy on the same host, set `APP_BIND=127.0.0.1`.
-- **Set a strong `ADMIN_PASSWORD`** before the first start (otherwise a random one is printed once to the logs).
+  `PUBLIC_URL` to the `https://` address, and set `TRUST_PROXY` to that proxy's address or narrowest range (e.g. the
+  Docker network it shares with Cloudy). `TRUST_PROXY=true` believes forwarded headers from any client, so use it only
+  when nothing but the proxy can reach the port.
+- **Don't expose the HTTP port directly.** With the proxy on the same host, publish it only there:
+  `"127.0.0.1:8080:8080"` in the ports line of `docker-compose.yml`.
+- **Set a strong `CLOUDY_ADMIN_PASSWORD`** in `.env` before the first start (otherwise, or if it is still the example,
+  a random one is printed once to the logs).
+- **Keep the hardened container settings** from `docker-compose.yml` (`cap_drop: [ALL]`, the three `cap_add`
+  capabilities, `no-new-privileges`).
 - **Turn on two-factor authentication or passkeys** for the admin account.
 - **Keep the server updated**, and read the changelog before you update.
 - **Back up** the database and the files together, and keep the backups private: they contain everyone's data.

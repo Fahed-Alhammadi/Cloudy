@@ -1,6 +1,6 @@
 {
   "name": "cloudy",
-  "version": "1.16.2",
+  "version": "1.17.0",
   "private": true,
   "type": "module",
   "description": "Self-hosted file cloud with sharing, WebDAV, CalDAV and CardDAV — Node.js server with an HTML5 web app.",
@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node src/server.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "test": "node --test test/"
   },
   "dependencies": {
     "fast-xml-parser": "5.12.0",

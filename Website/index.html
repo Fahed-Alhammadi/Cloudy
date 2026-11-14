@@ -136,21 +136,22 @@
         <h2>Run your own server</h2>
         <p class="lead">Cloudy is one container with its database, the web app and office previews inside. It runs on any machine with Docker.</p>
         <ol class="steps">
-          <li><b>Download the compose file</b> on a machine with Docker.</li>
-          <li><b>Choose the admin password</b> and where your files should live, or keep the defaults.</li>
+          <li><b>Download the two files</b>, <code>docker-compose.yml</code> and <code>.env</code>, on a machine with Docker.</li>
+          <li><b>Choose the admin password</b> in <code>.env</code>, and where your files live in <code>docker-compose.yml</code>, or keep the defaults.</li>
           <li><b>Start Cloudy</b> and open <code>http://&lt;server&gt;:8080</code> in your browser.</li>
           <li><b>Put it behind HTTPS</b> with your reverse proxy to use it from anywhere.</li>
         </ol>
         <p class="more"><a href="https://github.com/Fahed-Alhammadi/Cloudy#install">Read the install guide</a> · <a href="https://github.com/Fahed-Alhammadi/Cloudy/blob/main/CHANGELOG.md">What's new</a></p>
       </div>
-      <pre class="terminal" tabindex="0" role="region" aria-label="Install commands"><code><span class="c"># 1. get the compose file</span>
+      <pre class="terminal" tabindex="0" role="region" aria-label="Install commands"><code><span class="c"># 1. get the two files</span>
 mkdir cloudy &amp;&amp; cd cloudy
 curl -fsSLO \
   https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/docker-compose.yml
+curl -fsSL -o .env \
+  https://raw.githubusercontent.com/Fahed-Alhammadi/Cloudy/main/.env.example
 
-<span class="c"># 2. optional: your admin password after ADMIN_PASSWORD: ${ADMIN_PASSWORD:-</span>
-<span class="c">#    (left empty, one is generated and shown in docker logs cloudy)</span>
-nano docker-compose.yml
+<span class="c"># 2. your admin password: CLOUDY_ADMIN_PASSWORD</span>
+nano .env
 
 <span class="c"># 3. start, then open http://localhost:8080</span>
 docker compose up -d</code></pre>

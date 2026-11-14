@@ -1,10 +1,3 @@
-# Cloudy — one container (server + built-in PostgreSQL), run from the published image.
-# Put this file and your .env in one folder, then:
-#   docker compose up -d                              # start
-#   docker compose pull && docker compose up -d       # update to the latest image
-# All settings live in .env (see .env.example). To build from source instead, see deploy/docker-compose.yml.
-# The app listens on APP_PORT (default 8080). In production put it behind your reverse proxy
-# (TLS termination) and set TRUST_PROXY=true.
 name: cloudy
 
 services:
@@ -12,32 +5,15 @@ services:
     image: ghcr.io/fahed-alhammadi/cloudy:latest
     container_name: cloudy
     restart: unless-stopped
-    # Settings: edit the defaults here, or set them in a .env file next to this file
-    # (Compose reads .env automatically and its values win). See .env.example.
-    environment:
-      # First administrator, created on first start. Empty password = generated and printed in the log.
-      ADMIN_USER: ${ADMIN_USER:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # uid:gid the server and database run as (owns the files it writes).
-      APP_USER: ${APP_USER:-1000:1000}
-      # true when behind a reverse proxy (real client IPs, HTTPS-only cookies).
-      TRUST_PROXY: ${TRUST_PROXY:-false}
-      # Address users open Cloudy at (passkeys are bound to it). Empty = taken from each request's Host.
-      PUBLIC_URL: ${PUBLIC_URL:-}
-      # Days before trashed items are deleted; versions kept per file; days a browser login lasts.
-      TRASH_RETENTION_DAYS: ${TRASH_RETENTION_DAYS:-30}
-      MAX_VERSIONS: ${MAX_VERSIONS:-20}
-      SESSION_DAYS: ${SESSION_DAYS:-14}
-      # Leave empty to use the built-in PostgreSQL; or postgres://user:pass@host:5432/cloudy
-      DATABASE_URL: ${DATABASE_URL:-}
     ports:
-      # APP_BIND=127.0.0.1 keeps it reachable only from this machine (reverse proxy on the same host).
-      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8080}:8080"
+      - "8080:8080"                 # behind a reverse proxy on this host: "127.0.0.1:8080:8080"
+    env_file: .env
     volumes:
-      # User files (DATA_PATH): the app-data volume, or an absolute host folder such as your NFS mount.
-      - ${DATA_PATH:-app-data}:/data
-      # Database (DB_PATH): the db-data volume or an absolute host folder — keep it on a local disk, not NFS.
-      - ${DB_PATH:-db-data}:/var/lib/cloudy/db
+      - app-data:/data              # your files; or a host folder, e.g. /mnt/cloudy:/data (NFS is fine)
+      - db-data:/var/lib/cloudy/db  # the database; or a host folder on a local disk (not NFS)
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]  # used only at startup to switch to PUID/PGID
 
 volumes:
   app-data:
