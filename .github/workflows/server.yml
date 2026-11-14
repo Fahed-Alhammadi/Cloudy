@@ -66,7 +66,7 @@ jobs:
         run: tests/docker_smoke.sh cloudy:local
       - name: Logs on failure
         if: failure()
-        run: docker compose -f deploy/docker-compose.yml logs cloudy
+        run: '[ ! -f .env ] || docker compose -f deploy/docker-compose.yml logs cloudy'
 
   publish:
     needs: test

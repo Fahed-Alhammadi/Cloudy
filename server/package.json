@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.ts",
     "typecheck": "tsc -p .",
-    "test": "node --test test/"
+    "test": "node --test 'test/*.test.ts'"
   },
   "dependencies": {
     "fast-xml-parser": "5.12.0",
