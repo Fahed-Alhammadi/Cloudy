@@ -265,3 +265,10 @@ CREATE TABLE IF NOT EXISTS blob_hashes (
 -- 1.18.1: a quota of 0 means unlimited (the admin form's "empty or 0"). Accounts saved with 0 before were refused every
 -- upload while every screen showed "no quota"; they get what the screens promised.
 UPDATE users SET quota_bytes = NULL WHERE quota_bytes = 0;
+
+-- 1.19: the account's time zone (IANA name). Events from clients that send no zone, and the apps' link expiry dates,
+-- are read in it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone text;
+
+-- 1.19: an upload that must not replace a file of the same name ("Keep both"; always for public-link visitors).
+ALTER TABLE uploads ADD COLUMN IF NOT EXISTS no_overwrite boolean NOT NULL DEFAULT false;

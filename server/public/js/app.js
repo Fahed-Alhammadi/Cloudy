@@ -1,16 +1,23 @@
 // App shell: login, navigation and routing (plain addresses: /files/12, /settings…).
-import { get, post } from './api.js';
-import { h, icon, showError, showMenu, closeMenu, formatSize, navigate, currentView } from './ui.js';
-import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash } from './files.js';
+import { get, post, patch } from './api.js';
+import { h, icon, showError, showMenu, closeMenu, formatSize, navigate, currentView, modal, toast, confirmDialog, setLeaveGuard, mayLeave } from './ui.js';
+import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash, placeOf, restorePlace } from './files.js';
 import { renderCalendar } from './calendar.js';
 import { renderContacts } from './contacts.js';
 import { renderSettings, renderAdmin } from './settings.js';
 import { passkeysSupported, passkeyAutofillAvailable, getPasskey, isPasskeyCancel } from './passkey.js';
 import { loadOfficeInfo } from './office.js';
+import { setDropTarget } from './drop.js';
+import { uploadsRunning, stopAllUploads } from './upload.js';
+import { consumeViewerBack } from './viewer.js';
 import { t, LANGUAGES, currentLanguage, setLanguage, storedLanguage } from './i18n.js';
 
 const app = document.getElementById('app');
-const ctx = { me: null, rerender: () => route({ refresh: true }), refreshMe };
+const ctx = { me: null, rerender: () => route({ refresh: true }), refreshMe, markNav: (view) => markNav(view),
+  // A refresh that waits while the user is busy (a selection, a dialog, a menu), like the live updates do.
+  refreshWhenFree: () => scheduleRefresh(0) };
+// Back and Forward put each page back where it was scrolled to (the browser's own attempt runs before the page is drawn).
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 async function refreshMe() {
   ctx.me = await get('/api/me');
@@ -18,6 +25,8 @@ async function refreshMe() {
 }
 
 async function startSession() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (!ctx.me.timezone && zone) patch('/api/me', { timezone: zone }).then(() => { ctx.me.timezone = zone; }, () => {});
   // The account's language wins over the one picked on the login page (null = keep that / the browser's).
   if (ctx.me.language && ctx.me.language !== currentLanguage()) await setLanguage(ctx.me.language);
   await loadOfficeInfo();
@@ -44,6 +53,7 @@ function startLiveUpdates() {
     let ev;
     try { ev = JSON.parse(e.data); } catch { return; }
     if (affectsView(ev)) scheduleRefresh(300);
+    if (ev.folders.length) refreshUsageSoon();
   });
   source.addEventListener('open', () => {
     reconnectDelay = 5000;
@@ -80,7 +90,8 @@ function stopLiveUpdates() {
 function affectsView(ev) {
   if (!ctx.me) return false;
   const { view, arg } = currentView();
-  if (view === 'files') return ev.folders.includes(Number(arg || ctx.me.rootId));
+  // A share given, changed or taken away: an open folder of someone else's may now be editable, read-only or gone.
+  if (view === 'files') return ev.shares || ev.folders.includes(Number(arg || ctx.me.rootId));
   if (view === 'shared-in') return ev.shares || ev.folders.length > 0;
   return ['recent', 'favorites', 'shared-out', 'search', 'trash'].includes(view) && ev.folders.length > 0;
 }
@@ -104,17 +115,52 @@ function scheduleRefresh(delay) {
       refreshTimer = null;
       return scheduleRefresh(1500);
     }
-    // The page (not <main>) scrolls; keep its position and the focused row, so keyboard users don't lose their place.
-    const scroll = window.scrollY;
-    const focusKey = main.contains(document.activeElement) ? document.activeElement.closest('[data-key]')?.dataset.key : null;
     try {
-      await route({ refresh: true });
-      window.scrollTo(0, scroll);
-      if (focusKey) main.querySelector(`[data-key="${CSS.escape(focusKey)}"]`)?.focus({ preventScroll: true });
+      await route({ refresh: true }); // keeps the scroll position and the focused row (route)
     } finally {
       done();
     }
   }, delay);
+}
+
+/** Scrolls to `y`, first drawing enough of a long file list for the page to reach it (lists draw 200 rows at first). */
+function restoreScroll(y) {
+  main?.querySelector('.file-list')?.renderUntil?.(y + window.innerHeight);
+  window.scrollTo(0, y);
+}
+
+/** The sidebar entry for `view` is marked (a folder shared with you marks "Shared with you", not "Files"). */
+function markNav(view) {
+  nav?.querySelectorAll('a').forEach((a) => {
+    const on = a.dataset.view === view;
+    a.classList.toggle('active', on);
+    on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
+  });
+}
+
+// The sidebar's "x used": read at sign-in, then again after files change (at most every 10 seconds).
+let usageLine = null;
+let usageTimer = null;
+function showUsage() {
+  if (!usageLine || !ctx.me) return;
+  usageLine.textContent = ctx.me.quotaBytes != null
+    ? t('{used} of {quota} used', { used: formatSize(ctx.me.used), quota: formatSize(ctx.me.quotaBytes) })
+    : t('{used} used', { used: formatSize(ctx.me.used) });
+}
+function refreshUsageSoon() {
+  if (usageTimer) return;
+  usageTimer = setTimeout(async () => {
+    usageTimer = null;
+    const who = ctx.me?.id;
+    if (!who) return;
+    try {
+      const me = await get('/api/me');
+      if (ctx.me?.id !== who) return;
+      ctx.me.used = me.used;
+      ctx.me.quotaBytes = me.quotaBytes;
+      showUsage();
+    } catch { /* the next change tries again */ }
+  }, 10_000);
 }
 
 // Only one WebAuthn request may be pending; the autofill one is aborted before any other login.
@@ -126,12 +172,16 @@ function languagePicker(rerender) {
     LANGUAGES.map(([code, name]) => h('option', { value: code, selected: code === currentLanguage() }, name)));
 }
 
-function renderLogin(message, notice = false) {
+/** Passkeys are bound to the server's name: on an address like 192.168.1.10 the browser refuses them. */
+const ipAddressHost = () => /^\d+(\.\d+){3}$/.test(location.hostname) || location.hostname.includes(':');
+
+function renderLogin(message, notice = false, keep = {}) {
+  stopAllUploads(); // signed out: running uploads end, and their panel does not stay on the sign-in page
   passkeyAbort?.abort();
   passkeyAbort = null;
   if (/^\/(forgot|reset)(\/|$)/.test(location.pathname)) history.replaceState(null, '', '/');
-  const user = h('input', { type: 'text', name: 'username', autocomplete: 'username webauthn', required: true, autofocus: true, 'aria-label': t('Username') });
-  const pass = h('input', { type: 'password', name: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password') });
+  const user = h('input', { type: 'text', name: 'username', autocomplete: 'username webauthn', required: true, autofocus: true, 'aria-label': t('Username'), value: keep.user ?? '' });
+  const pass = h('input', { type: 'password', name: 'password', autocomplete: 'current-password', required: true, 'aria-label': t('Password'), value: keep.pass ?? '' });
   // Second step for accounts with two-factor authentication; shown when the server asks for it.
   const code = h('input', { type: 'text', name: 'code', autocomplete: 'one-time-code', inputmode: 'numeric', 'aria-label': t('Authentication code'), placeholder: '123 456' });
   const codeField = h('label', { class: 'field', hidden: true }, h('span', {}, t('Authentication code')), code,
@@ -162,7 +212,7 @@ function renderLogin(message, notice = false) {
       }
     }
   };
-  const passkeyBtn = passkeysSupported() && h('button', { class: 'btn block', type: 'button', onclick: () => passkeyLogin(false) }, icon('key'), t('Sign in with a passkey'));
+  const passkeyBtn = passkeysSupported() && !ipAddressHost() && h('button', { class: 'btn block', type: 'button', onclick: () => passkeyLogin(false) }, icon('key'), t('Sign in with a passkey'));
   app.replaceChildren(h('main', { class: 'login' },
     h('form', { class: 'login-card', onsubmit: async (e) => {
       e.preventDefault();
@@ -181,6 +231,7 @@ function renderLogin(message, notice = false) {
         } else {
           error.textContent = t(err.message);
           if (!codeField.hidden) code.select();
+          else if (err.status === 401) pass.select(); // the password, ready to type again
         }
         btn.disabled = false;
         passkeyAutofillAvailable().then((ok) => ok && passkeyAbort?.signal.aborted && app.contains(user) && passkeyLogin(true));
@@ -194,10 +245,10 @@ function renderLogin(message, notice = false) {
       error, btn,
       passkeyBtn && h('div', { class: 'login-or', 'aria-hidden': 'true' }, t('or')),
       passkeyBtn,
-      languagePicker(() => renderLogin(message, notice)))));
+      languagePicker(() => renderLogin(message, notice, { user: user.value, pass: pass.value })))));
   get('/api/auth/options').then((o) => { forgot.hidden = !o.passwordReset; }, () => {});
-  user.focus();
-  passkeyAutofillAvailable().then((ok) => ok && !passkeyAbort && app.contains(user) && passkeyLogin(true));
+  (user.value ? pass : user).focus();
+  if (!ipAddressHost()) passkeyAutofillAvailable().then((ok) => ok && !passkeyAbort && app.contains(user) && passkeyLogin(true));
 }
 
 // ---------------------------------------------------------------- password reset by email
@@ -226,6 +277,13 @@ function renderForgot(initial = '') {
     msg, btn,
     h('a', { href: '/', onclick: (e) => { e.preventDefault(); renderLogin(); } }, t('Back to login')),
     languagePicker(() => renderForgot(login.value)));
+  get('/api/auth/options').then((o) => {
+    if (o.passwordReset) return;
+    msg.className = 'notice';
+    msg.textContent = t('Password reset by email is not set up on this server. Ask your administrator to set a new password.');
+    btn.disabled = true;
+    login.disabled = true;
+  }, () => {});
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     btn.disabled = true;
@@ -293,10 +351,9 @@ function renderShell() {
     h('ul', {},
       h('li', {}, h('a', { href: '/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings')))),
       ctx.me.isAdmin && h('li', {}, h('a', { href: '/admin', 'data-view': 'admin' }, icon('shield'), h('span', {}, t('Administration'))))),
-    h('div', { class: 'usage' }, ctx.me.quotaBytes != null
-      ? t('{used} of {quota} used', { used: formatSize(ctx.me.used), quota: formatSize(ctx.me.quotaBytes) })
-      : t('{used} used', { used: formatSize(ctx.me.used) })),
+    usageLine = h('div', { class: 'usage' }),
   );
+  showUsage();
   main = h('main', { class: 'content', id: 'content', tabindex: -1 });
   const header = h('header', { class: 'topbar' },
     menuToggle = h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), 'aria-controls': 'sidebar', 'aria-expanded': 'false',
@@ -305,7 +362,14 @@ function renderShell() {
     h('div', { class: 'search' }, icon('search'), search),
     h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
       { label: ctx.me.displayName, icon: 'contacts', onclick: () => navigate('/settings') },
-      { label: t('Log out'), icon: 'logout', onclick: async () => { stopLiveUpdates(); await post('/api/logout').catch(() => {}); ctx.me = null; document.body.classList.remove('nav-open'); renderLogin(); } },
+      { label: t('Log out'), icon: 'logout', onclick: async () => {
+        if (uploadsRunning() && !(await confirmDialog(t('Log out'), t('Uploads that are still running will stop.'), t('Log out'), true))) return;
+        stopLiveUpdates();
+        await post('/api/logout').catch(() => {});
+        ctx.me = null;
+        document.body.classList.remove('nav-open');
+        renderLogin();
+      } },
     ]) }, (ctx.me.displayName || ctx.me.id).slice(0, 1).toUpperCase()),
   );
   // Phones: the sidebar is a drawer over the page; a tap beside it closes it.
@@ -331,17 +395,18 @@ document.addEventListener('keydown', (e) => {
 // clicked on, or an upload's reload fired after leaving the folder) then writes into a detached element instead of
 // replacing what is on screen.
 let routeSeq = 0;
-async function route({ refresh = false } = {}) {
+async function route({ refresh = false, scrollTo = null } = {}) {
   if (!ctx.me || !main) return;
   const seq = ++routeSeq;
   const { view, arg } = currentView();
-  if (!refresh) { setNavOpen(false); closeMenu(); }
-  nav.querySelectorAll('a').forEach((a) => {
-    const on = a.dataset.view === view;
-    a.classList.toggle('active', on);
-    on ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
-  });
+  // A refresh keeps the scroll position (the page, not <main>, scrolls) and the focused row or control, so keyboard
+  // users don't lose their place.
+  const place = refresh ? placeOf(main) : null;
+  let notFound = false;
+  if (!refresh) { setNavOpen(false); closeMenu(); setLeaveGuard(null); shownAt = location.pathname + location.search; } // each page sets its own guard again
+  markNav(view);
   if (search && view !== 'search' && !refresh) search.value = '';
+  if (!refresh) setDropTarget(null);
   const slot = h('div', { class: 'view' });
   const shown = () => {
     if (seq !== routeSeq) return;
@@ -373,12 +438,28 @@ async function route({ refresh = false } = {}) {
       case 'contacts': await renderContacts(slot, ctx); break;
       case 'settings': await renderSettings(slot, ctx); break;
       case 'admin': await renderAdmin(slot, ctx); break;
-      default: navigate('/', { replace: true }); return;
+      default:
+        notFound = true;
+        slot.replaceChildren(h('div', { class: 'empty', role: 'alert' }, icon('cloud'), h('h1', { class: 'view-title' }, t('Page not found')),
+          h('p', { class: 'muted' }, t('This address does not exist in Cloudy.')),
+          h('a', { class: 'btn primary', href: '/' }, icon('folder'), t('Go to Files'))));
+        break;
     }
-    if (seq === routeSeq) document.title = `${nav.querySelector('a.active span:not(.icon)')?.textContent || t('Files')} – Cloudy`;
+    if (seq === routeSeq) {
+      if (place) restorePlace(main, place);
+      else if (scrollTo != null) restoreScroll(scrollTo);
+      document.title = `${notFound ? t('Page not found') : nav.querySelector('a.active span:not(.icon)')?.textContent || t('Files')} – Cloudy`;
+      // Keyboard and screen-reader users start at the new page's content (focus was left on the clicked link,
+      // or fell back to the page when the link was replaced).
+      if (!refresh && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) main.focus({ preventScroll: true });
+    }
   } catch (e) {
     if (seq !== routeSeq) return;
-    if (e.status === 404 && view === 'files') navigate('/files', { replace: true });
+    if (e.status === 404 && view === 'files') {
+      // Shown while it was taken away (the share removed, or the folder deleted elsewhere): say so before leaving it.
+      if (refresh) toast(t('This folder is no longer available.'), 'error');
+      navigate('/files', { replace: true });
+    }
     else if (e.status !== 401) {
       showError(e);
       // A view that could not load says so (with a way to retry) instead of leaving the previous view under the new title.
@@ -394,7 +475,19 @@ async function route({ refresh = false } = {}) {
 }
 
 // Back/Forward, and moves made by the views (navigate() in ui.js).
-window.addEventListener('popstate', () => route());
+// (Back while the viewer is open closes the viewer: that history entry is the viewer's, not a page.)
+// Unsaved work (the contact form) asks first; staying puts the page's address back. Back pressed again while the
+// question is open changes nothing more.
+let shownAt = location.pathname + location.search;
+let asking = false;
+window.addEventListener('popstate', async () => {
+  if (consumeViewerBack() || asking) return;
+  asking = true;
+  const ok = await mayLeave();
+  asking = false;
+  if (!ok) return void history.pushState(null, '', shownAt);
+  route({ scrollTo: history.state?.scroll ?? null });
+});
 window.addEventListener('cloudy:navigate', () => route());
 // Links to the app's own pages open in place; a Ctrl/⌘/Shift/middle click still opens a new tab or window
 // (the server answers those addresses with the app too).
@@ -419,8 +512,40 @@ function fromOldAddress() {
 }
 window.addEventListener('hashchange', () => { if (fromOldAddress()) route(); });
 // Only an existing session can expire; at startup "not logged in" is handled below.
+let reauthenticating = false;
+async function reauthenticate() {
+  if (reauthenticating) return;
+  reauthenticating = true;
+  const pass = h('input', { type: 'password', required: true, autocomplete: 'current-password', 'aria-label': t('Password') });
+  const code = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', 'aria-label': t('Authentication code') });
+  const codeField = h('label', { class: 'field', hidden: true }, h('span', {}, t('Authentication code')), code);
+  const error = h('p', { class: 'error', role: 'alert' });
+  const ok = await modal({
+    title: t('Sign in again'),
+    body: h('div', {}, h('p', {}, t('Your session has ended. Sign in again to save your changes; nothing you typed is lost.')),
+      h('label', { class: 'field' }, h('span', {}, t('Password')), pass), codeField, error),
+    buttons: [{ label: t('Cancel'), value: null }, { label: t('Sign in'), value: 'ok', primary: true }],
+    onSubmit: async () => {
+      try {
+        await post('/api/login', { user: ctx.me.id, password: pass.value, ...(codeField.hidden ? {} : { code: code.value.trim() }) });
+        return true;
+      } catch (err) {
+        if (err.body?.twoFactor && codeField.hidden) { codeField.hidden = false; code.focus(); return false; }
+        error.textContent = t(err.message);
+        return false;
+      }
+    },
+  });
+  reauthenticating = false;
+  if (ok) {
+    startLiveUpdates();
+    toast(t('Signed in again. You can save now.'));
+  }
+}
+
 window.addEventListener('cloudy:unauthorized', () => {
   if (!ctx.me) return;
+  if (document.querySelector('dialog.viewer[data-dirty="true"]')) return void reauthenticate();
   stopLiveUpdates();
   ctx.me = null;
   document.body.classList.remove('nav-open');
@@ -436,4 +561,9 @@ const resetToken = location.pathname === '/reset' ? /^#([\w-]+)$/.exec(location.
 if (resetToken) {
   history.replaceState(null, '', '/reset');
   renderReset(resetToken);
-} else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => (location.pathname === '/forgot' ? renderForgot() : renderLogin()));
+} else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => {
+  if (location.pathname === '/forgot') return renderForgot();
+  let notice = null;
+  try { notice = sessionStorage.getItem('cloudy-notice'); sessionStorage.removeItem('cloudy-notice'); } catch { /* storage unavailable */ }
+  return notice === 'deleted' ? renderLogin(t('Your account was deleted.'), true) : renderLogin();
+});

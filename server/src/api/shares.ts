@@ -6,6 +6,8 @@ import type { User } from '../auth.ts';
 import { newToken, hashPassword, verifyPassword, sign, checkRate, attempt } from '../auth.ts';
 import * as F from '../files.ts';
 import { sendNodeFile, sendZip } from '../download.ts';
+import { sendThumbnail, thumbnailsAvailable } from '../thumbs.ts';
+import { validTimeZone, zonedToUtc } from '../timezones.ts';
 import { notifyShare } from '../mail.ts';
 import { startUpload } from './files.ts';
 
@@ -24,7 +26,12 @@ interface Share {
   expires_at: Date | null;
   label: string;
   created_at: Date;
+  /** Display name of the user it is shared with (from SHARE_ROW). */
+  share_with_name?: string | null;
 }
+
+/** Share rows with the display name of the user each is shared with: people know each other by name. */
+const SHARE_ROW = `SELECT s.*, u.display_name AS share_with_name FROM shares s LEFT JOIN users u ON s.type = 'user' AND u.id = s.share_with`;
 
 function shareJson(s: Share) {
   return {
@@ -32,6 +39,7 @@ function shareJson(s: Share) {
     nodeId: s.node_id,
     type: s.type,
     shareWith: s.share_with,
+    shareWithName: s.share_with_name ?? null,
     canEdit: s.can_edit,
     token: s.token,
     url: s.token ? `/s/${s.token}` : null,
@@ -42,11 +50,29 @@ function shareJson(s: Share) {
   };
 }
 
-function parseExpiry(v: unknown): Date | null {
+/**
+ * An expiry date. The web app sends an instant; the phone apps send the end of the chosen day without a zone
+ * ("2026-12-31T23:59:59"), which used to be read in the server's zone (UTC in the container): east of UTC the link
+ * lasted into the next day, west of it the link died in the afternoon. Without a zone, the account's zone is used.
+ */
+function parseExpiry(v: unknown, tz: string | null): Date | null {
   if (v == null || v === '') return null;
-  const d = new Date(String(v));
+  const s = String(v);
+  const local = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+  if (local && tz && validTimeZone(tz)) {
+    const [, y, mo, d, h = '23', mi = '59', sec = local[4] ? '0' : '59'] = local;
+    return new Date(zonedToUtc(tz, +y, +mo, +d, +h, +mi, +sec));
+  }
+  const d = new Date(s);
   if (Number.isNaN(d.getTime())) throw new HttpError(400, 'Invalid expiry date');
   return d;
+}
+
+/** A link password: at least 4 characters (one character was accepted, and guessed in no time). */
+function linkPassword(v: unknown): string {
+  const s = String(v);
+  if (s.length < 4) throw new HttpError(400, 'Link passwords need at least 4 characters');
+  return s;
 }
 
 async function ownShare(user: User, id: string): Promise<Share> {
@@ -59,7 +85,7 @@ export function registerShares(r: Router, authed: Wrap) {
   r.get('/api/nodes/:id/shares', authed(async ({ res, params }, user) => {
     const { node, acc } = await F.requireAccess(user.id, params.id, 'read');
     if (acc.perm !== 'owner') throw new HttpError(403, 'Only the owner can manage shares');
-    json(res, (await q<Share>(`SELECT * FROM shares WHERE node_id = $1 ORDER BY created_at`, [node.id])).map(shareJson));
+    json(res, (await q<Share>(`${SHARE_ROW} WHERE s.node_id = $1 ORDER BY s.created_at`, [node.id])).map(shareJson));
   }));
 
   r.post('/api/nodes/:id/shares', authed(async ({ req, res, params }, user) => {
@@ -85,28 +111,28 @@ export function registerShares(r: Router, authed: Wrap) {
     if (shareWith && (await one(`SELECT 1 FROM shares WHERE node_id = $1 AND type = $2 AND share_with = $3`, [node.id, type, shareWith]))) {
       throw new HttpError(409, 'Already shared');
     }
-    const pw = typeof b.password === 'string' && b.password ? await hashPassword(b.password) : null;
+    const pw = typeof b.password === 'string' && b.password ? await hashPassword(linkPassword(b.password)) : null;
     const s = await one<Share>(
       `INSERT INTO shares (node_id, owner, type, share_with, can_edit, token, password_hash, expires_at, label)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [node.id, user.id, type, shareWith, !!b.canEdit && (type !== 'link' || node.is_dir), token,
        // Expiry is a link feature (checked in loadLink); user/group shares never expire, so none is stored for them.
-       type === 'link' ? pw : null, type === 'link' ? parseExpiry(b.expiresAt) : null, String(b.label ?? '')],
+       type === 'link' ? pw : null, type === 'link' ? parseExpiry(b.expiresAt, user.timezone) : null, String(b.label ?? '').slice(0, 100)],
     );
     if (shareWith) await notifyShare(req, user, node.id, type, shareWith);
-    json(res, shareJson(s!), 201);
+    json(res, shareJson((await one<Share>(`${SHARE_ROW} WHERE s.id = $1`, [s!.id]))!), 201);
   }));
 
   r.patch('/api/shares/:id', authed(async ({ req, res, params }, user) => {
     const s = await ownShare(user, params.id);
     const b = await readJson(req);
     if (typeof b.canEdit === 'boolean') await q(`UPDATE shares SET can_edit = $2 WHERE id = $1`, [s.id, b.canEdit]);
-    if ('expiresAt' in b && s.type === 'link') await q(`UPDATE shares SET expires_at = $2 WHERE id = $1`, [s.id, parseExpiry(b.expiresAt)]);
-    if (typeof b.label === 'string') await q(`UPDATE shares SET label = $2 WHERE id = $1`, [s.id, b.label]);
+    if ('expiresAt' in b && s.type === 'link') await q(`UPDATE shares SET expires_at = $2 WHERE id = $1`, [s.id, parseExpiry(b.expiresAt, user.timezone)]);
+    if (typeof b.label === 'string') await q(`UPDATE shares SET label = $2 WHERE id = $1`, [s.id, b.label.trim().slice(0, 100)]);
     if ('password' in b && s.type === 'link') {
-      await q(`UPDATE shares SET password_hash = $2 WHERE id = $1`, [s.id, b.password ? await hashPassword(String(b.password)) : null]);
+      await q(`UPDATE shares SET password_hash = $2 WHERE id = $1`, [s.id, b.password ? await hashPassword(linkPassword(b.password)) : null]);
     }
-    json(res, shareJson((await one<Share>(`SELECT * FROM shares WHERE id = $1`, [s.id]))!));
+    json(res, shareJson((await one<Share>(`${SHARE_ROW} WHERE s.id = $1`, [s.id]))!));
   }));
 
   // Owners delete a share; direct recipients may also leave a user share.
@@ -142,7 +168,7 @@ export function registerShares(r: Router, authed: Wrap) {
 
   r.get('/api/shares/outgoing', authed(async ({ res }, user) => {
     const rows = await q<Share>(
-      `SELECT s.* FROM shares s JOIN nodes n ON n.id = s.node_id
+      `${SHARE_ROW} JOIN nodes n ON n.id = s.node_id
         WHERE s.owner = $1 AND n.deleted_at IS NULL ORDER BY s.created_at DESC`,
       [user.id],
     );
@@ -186,14 +212,15 @@ export function registerShares(r: Router, authed: Wrap) {
     return { s, node, crumbs: chain.slice(0, idx + 1).reverse().map((n) => ({ id: n.id, name: n.name })) };
   }
 
-  const publicNode = (n: F.Node) => ({ id: n.id, name: n.name, isDir: n.is_dir, size: n.size, mime: n.is_dir ? 'inode/directory' : n.mime, mtime: n.mtime });
+  const publicNode = (n: F.Node) => ({ id: n.id, name: n.name, isDir: n.is_dir, size: n.size, mime: n.is_dir ? 'inode/directory' : n.mime, mtime: n.mtime, etag: n.etag });
 
   r.get('/api/public/:token', async ({ req, res, params }) => {
     const s = await loadLink(params.token);
     if (!(await authorized(req, s))) return json(res, { needsPassword: true });
     const node = (await F.getNode(s.node_id))!;
     const owner = await one<{ display_name: string }>(`SELECT display_name FROM users WHERE id = $1`, [s.owner]);
-    json(res, { needsPassword: false, node: publicNode(node), canEdit: s.can_edit, ownerName: owner?.display_name, expiresAt: s.expires_at, label: s.label });
+    json(res, { needsPassword: false, node: publicNode(node), canEdit: s.can_edit, ownerName: owner?.display_name, expiresAt: s.expires_at, label: s.label,
+      thumbnails: thumbnailsAvailable() });
   });
 
   r.post('/api/public/:token/auth', async ({ req, res, params }) => {
@@ -222,6 +249,12 @@ export function registerShares(r: Router, authed: Wrap) {
     const { node } = await linkNode(req, params.token, params.id);
     if (node.is_dir) await sendZip(res, node);
     else sendNodeFile(req, res, node, url.searchParams.has('inline'));
+  });
+
+  // Photo grids on shared links.
+  r.get('/api/public/:token/nodes/:id/thumb', async ({ req, res, params }) => {
+    const { node } = await linkNode(req, params.token, params.id);
+    await sendThumbnail(req, res, node);
   });
 
   r.post('/api/public/:token/nodes/:id/folders', async ({ req, res, params }) => {

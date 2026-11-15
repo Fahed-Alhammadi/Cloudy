@@ -11,6 +11,134 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.19.0 (2026-11-15)
+
+A new Files page in the web app, thumbnails, time zones in the calendar, and the rest of the fixes from the full
+review. Nothing to do before you update. Good to know:
+
+- The image is about 140 MB larger (libvips, which makes the thumbnails).
+- On the first start, file names are converted once to one Unicode form, and the type of files renamed in older
+  versions is corrected (see *Server* below). On a large server this takes a little while before the web app answers.
+- With your own PostgreSQL (`DATABASE_URL`), search ignores accents only if Cloudy may add PostgreSQL's `unaccent`
+  extension (a trusted extension: the database owner may). Otherwise search works as before and the log says why.
+
+**The Files page**
+
+- **Dragging files in from your computer** (files or whole folders): a strip at the top names the folder they will
+  go to: the folder on screen, or the folder under the pointer, which lights up. A drop anywhere in the window
+  counts; one that missed the list used to open the file in the browser tab instead. Pages that take no files
+  (Recent, Calendar…) say so.
+- **Moving by dragging:** items dragged onto a folder, or onto a folder in the path above the list, move there. The
+  message names the folder and offers *Undo*.
+- **Same names:** when files with the same names are already there, you are asked once for all of them:
+  *Replace*, *Keep both* or *Skip*. *Keep both* also works when a folder has the file's name.
+- **List or grid, and sorting** by name, date modified or size (numbers in natural order: 2 before 10), from the
+  toolbar or the column headings. Both are remembered.
+- **Thumbnails** of photos (JPEG, PNG, GIF, WebP, HEIC, AVIF, TIFF) and of the first page of PDFs in the grid,
+  also on public links. They are made the first time they are shown, kept in the data volume (`cache/thumbs`) and
+  removed after 60 days unused.
+- Big folders open at once: the rest of the list is drawn as you scroll (Ctrl+F / ⌘F draws it all, so the browser's
+  find sees every name). Back returns to where you were in a folder, and so do your own changes (a rename, a star).
+- In the list: Shift-click selects a range, Ctrl-click (⌘-click on a Mac) adds one item, Ctrl+A (⌘A) selects
+  everything, Delete moves to the trash, F2 renames, Escape clears the selection. The list is one stop for the Tab
+  key (it was three per row): the arrow keys move along it, and Shift+F10 or the menu key opens a row's actions.
+- The toolbar stays in view while you scroll. Phones get one "+" button for uploading and creating.
+- The upload panel folds into its header, counts the files, has *Cancel all*, and uploads empty folders too. An
+  upload that ends no longer clears the items you ticked meanwhile.
+- Search finds names whatever their accents (é = e) and also looks inside folders shared with you. It shows up to
+  200 results and says when there are more. Search results and Recent have *Show in folder*.
+- Public links: grid, thumbnails and sorting; on upload links files can be dropped anywhere on the page.
+- In a folder shared with you, the sidebar marks *Shared with you*. A change to the share reaches the open folder at
+  once (it becomes editable or read-only), and when the share is taken away the page says so.
+- Deleting in someone else's folder says that the items go to the owner's trash, where only the owner can restore
+  them (the message pointed to your own trash, where they never appear).
+- A refused name says why (a slash, more than 255 characters, "." or "..", control characters).
+- On phones, the date (and in Search the location, in *Shared with you* the owner) shows under each name, since
+  those columns do not fit.
+- The storage line in the sidebar follows changes; it was read once, at sign-in.
+- Logging out while files are uploading asks first, then stops them (the upload panel stayed on the sign-in page).
+- An unknown address shows "Page not found" instead of your files.
+
+**Viewer and text editor**
+
+- Saving a text file that someone changed after you opened it asks before overwriting their version.
+- Back closes the viewer (it left the folder). Unsaved text asks before closing, also when the tab is closed.
+- When your sign-in expires while you edit, you sign in again in a dialog and keep the text.
+- Files that are not UTF-8 text open read-only (saving would have damaged them). A byte order mark and Windows line
+  endings are kept when saving.
+- The title shows "3 of 10". Videos and audio no longer start playing by themselves. A video or picture this browser
+  cannot play (AVI, MKV, some phone videos) says so and offers the download.
+
+**Calendar**
+
+- New *Settings → Time zone* (set from your browser when you first sign in). Events made or changed in the web app keep
+  their time zone, so a weekly 9:00 meeting stays at 9:00 after a daylight-saving change; they were stored in UTC.
+  Changing an event keeps the times you did not touch exactly as your phone or calendar app wrote them (editing a
+  series made on a phone moved it before).
+- The week starts on the day usual for your language and region. *New event* starts in the month on screen.
+  An event that runs past midnight shows when it ends on the next day ("– 02:00") instead of its start time again.
+  A calendar that could not be loaded says so.
+- An invitation to one occurrence of someone else's repeating event (stored without the series) now shows up.
+
+**Contacts**
+
+- Saving a contact in the web app keeps the details the form does not show (more phone and email types, labels,
+  groups, other addresses, departments…). They were removed. A display name you chose ("Mom", "Dr. Anna Maria
+  Meier") stays too; it was rebuilt from the first and last name at every save, also from the phone apps.
+- Contacts with only a phone number or an email address can be saved.
+- Importing: Outlook CSV files in German, French and Spanish, phonetic name columns ignored, folded lines in vCard
+  2.1, and contacts with only a name are no longer imported twice when the same file is imported again.
+- The editor asks before unsaved changes are left behind (another contact, another address book, an import, another
+  page, closing the tab); on phones, *All contacts* goes back to the list.
+
+**Sharing**
+
+- Public links can have a label (who you sent it to, for example), shown in *Shared by you*.
+- Link passwords need at least 4 characters.
+- A link's expiry date now lasts until the end of that day in your time zone. It ended at midnight UTC, up to a
+  day early.
+- You can share with someone by their display name as well as their user name. The share dialog and *Shared by
+  you* name people by their display name.
+
+**Accessibility, phones and tablets**
+
+- Stronger contrast for grey text, touch targets of at least 40 px, focus moves to the page after you navigate,
+  and the search field shows a focus ring.
+- Dates and the first day of the week follow your region: English in Britain shows 15/11/2026 and weeks starting on
+  Monday (the US form was used everywhere).
+- *Administration* fits a phone: *Edit* and *Delete* stay in view, Email and Groups are left out there.
+- Tablets in portrait (768 px wide and more) get the sidebar instead of the phone layout.
+- *Settings → Password* asks for the new password twice and can show it. Changing the language on the sign-in page
+  keeps what you typed. *Sign in with a passkey* is hidden on plain IP addresses, where passkeys cannot work. When
+  email is off, the *Forgot password?* page says to ask an administrator.
+
+**WebDAV** (programs that sync or mount Cloudy)
+
+- Programs that save by writing a temporary file and renaming it over the original (many editors, Office on a
+  mapped drive) no longer replace the item: its shares, public links and favorite stay, and the old content becomes
+  a version. The links stopped working before.
+- `If-Match` and `If-None-Match` are honoured for uploads, deletes, moves and copies (412 when the file changed).
+- `PROPFIND` with `Depth: infinity` is refused the standard way (403, `propfind-finite-depth`), and the program
+  then lists folder by folder. It got one level, as if every subfolder were empty.
+
+**Server** (for app and script developers)
+
+- File names are stored in one Unicode form (NFC), so "é" typed on a Mac and on Windows is the same name. On the
+  first start, existing names are converted once; an item whose converted name is already taken in its folder gets a
+  free one, such as "Café (2).txt" (WebDAV programs could not tell the two apart). Renames and copies now update a file's type (`mime`); files renamed before get theirs on that start.
+- `GET /api/nodes/:id/thumb` and `GET /api/public/:token/nodes/:id/thumb` (WebP; add `?v=<etag>` to cache it for
+  good). `GET /api/me` has `thumbnails` (whether this server makes them) and `timezone`; `PATCH /api/me` takes
+  `timezone`.
+- Uploads accept `onConflict: "rename"` (keep both). `PUT /api/nodes/:id/content` honours `If-Match` (412).
+- JSON answers and the web app's files are compressed (gzip or Brotli) when the client accepts it.
+- Copying a folder takes a few database statements per folder level instead of several per item: 900 files copy
+  in a quarter of a second.
+- Creating a group with a name that exists answers 409 instead of an error.
+- Folders can be nested at most 250 levels deep (creating, moving or copying deeper is refused): every change walks
+  a folder's parents, and no computer could sync such a tree.
+- Share lists (`GET /api/nodes/:id/shares`, `/api/shares/outgoing`) have `shareWithName`, the person's display name.
+- Calendars and address books no longer advertise `COPY` and `MOVE` in `Allow` (they refused them).
+
 ## 1.18.1 (2026-11-15)
 
 Security and reliability fixes from a full review of the server and the web app. **Update soon**: one of them lets

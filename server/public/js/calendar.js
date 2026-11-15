@@ -7,6 +7,18 @@ const HIDDEN_KEY = 'cloudy-hidden-calendars';
 const pad = (n) => String(n).padStart(2, '0');
 const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const hm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+/** A time as the language writes it (the grid used 24-hour times while the dialog used the language's own). */
+const clock = (d) => d.toLocaleTimeString(locale(), { hour: 'numeric', minute: '2-digit' });
+/** The first day of the week in the user's language and region (it was always Monday). 0 = Sunday. */
+function firstWeekday() {
+  try {
+    const l = new Intl.Locale(navigator.language.startsWith(locale()) ? navigator.language : locale());
+    const info = typeof l.getWeekInfo === 'function' ? l.getWeekInfo() : l.weekInfo;
+    if (info?.firstDay) return info.firstDay % 7;
+  } catch { /* older browsers */ }
+  return 1;
+}
+const zone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 const parseDay = (s) => { const [y, m, d] = s.slice(0, 10).split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const toDate = (v, allDay) => (allDay ? parseDay(v) : new Date(v));
@@ -32,24 +44,48 @@ function saveHidden(set) {
   try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set])); } catch { /* storage unavailable */ }
 }
 
-let month = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
+// The month on screen survives a reload of the tab (it went back to the current month).
+const MONTH_KEY = 'cloudy-calendar-month';
+let month = (() => {
+  try {
+    const m = /^(\d{4})-(\d{2})$/.exec(sessionStorage.getItem(MONTH_KEY) || '');
+    if (m) return new Date(+m[1], +m[2] - 1, 1);
+  } catch { /* storage unavailable */ }
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+})();
+const setMonth = (d) => {
+  month = new Date(d.getFullYear(), d.getMonth(), 1);
+  try { sessionStorage.setItem(MONTH_KEY, `${month.getFullYear()}-${pad(month.getMonth() + 1)}`); } catch { /* storage unavailable */ }
+};
+let renderSeq = 0;
 
 export async function renderCalendar(main, ctx) {
+  // Two quick clicks on "Next": only the last month asked for is drawn (a slow first answer drew December's events
+  // under January's title).
+  const seq = ++renderSeq;
+  const shown = month;
   const calendars = await get('/api/calendars');
   const hidden = loadHidden();
   const rerender = () => renderCalendar(main, ctx).catch(showError);
 
-  // Grid starts on Monday.
-  const gridStart = addDays(month, -((month.getDay() + 6) % 7));
+  const first = firstWeekday();
+  const gridStart = addDays(shown, -((shown.getDay() - first + 7) % 7));
   const gridEnd = addDays(gridStart, 42);
   const visible = calendars.filter((c) => !hidden.has(c.id));
+  let failedCalendars = 0;
   const events = (await Promise.all(visible.map((c) =>
-    get(`/api/calendars/${c.id}/events?start=${gridStart.toISOString()}&end=${gridEnd.toISOString()}`).catch(() => []),
+    get(`/api/calendars/${c.id}/events?start=${gridStart.toISOString()}&end=${gridEnd.toISOString()}`).catch(() => { failedCalendars++; return []; }),
   ))).flat();
+  if (seq !== renderSeq) return;
   const colorOf = Object.fromEntries(calendars.map((c) => [c.id, safeColor(c.color)]));
 
   const side = h('aside', { class: 'cal-side' },
-    h('button', { class: 'btn primary block', onclick: () => eventDialog(null, calendars, rerender, new Date()) }, icon('plus'), t('New event')),
+    // A new event starts in the month on screen (today when that is this month).
+    h('button', { class: 'btn primary block', onclick: () => {
+      const now = new Date();
+      eventDialog(null, calendars, rerender, now.getMonth() === shown.getMonth() && now.getFullYear() === shown.getFullYear() ? now : shown, hidden);
+    } }, icon('plus'), t('New event')),
     h('h3', {}, t('Calendars')),
     h('ul', { class: 'cal-list' }, calendars.map((c) => h('li', {},
       h('label', { class: 'check' },
@@ -74,13 +110,16 @@ export async function renderCalendar(main, ctx) {
     } }, icon('plus'), t('New calendar')),
   );
 
-  const title = month.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
-  const header = h('div', { class: 'toolbar' },
-    h('h1', { class: 'view-title' }, icon('calendar'), title), h('div', { class: 'grow' }),
-    h('button', { class: 'icon-btn', 'aria-label': t('Previous month'), onclick: () => { month = new Date(month.getFullYear(), month.getMonth() - 1, 1); rerender(); } }, icon('left')),
-    h('button', { class: 'btn', onclick: () => { const d = new Date(); month = new Date(d.getFullYear(), d.getMonth(), 1); rerender(); } }, t('Today')),
-    h('button', { class: 'icon-btn', 'aria-label': t('Next month'), onclick: () => { month = new Date(month.getFullYear(), month.getMonth() + 1, 1); rerender(); } }, icon('right')),
+  const title = shown.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
+  const header = h('div', { class: 'toolbar cal-toolbar' },
+    h('h1', { class: 'view-title' }, icon('calendar'), h('span', { class: 'title-text' }, title)), h('div', { class: 'grow' }),
+    h('button', { class: 'icon-btn', 'aria-label': t('Previous month'), onclick: () => { setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1)); rerender(); } }, icon('left')),
+    h('button', { class: 'btn', onclick: () => { setMonth(new Date()); rerender(); } }, t('Today')),
+    h('button', { class: 'icon-btn', 'aria-label': t('Next month'), onclick: () => { setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1)); rerender(); } }, icon('right')),
   );
+  // A calendar whose events could not be loaded says so (the month just looked empty).
+  const loadNotice = failedCalendars > 0 && h('p', { class: 'notice', role: 'alert' }, icon('cloud'),
+    t('Some events could not be loaded.'), h('button', { class: 'btn ghost', type: 'button', onclick: rerender }, t('Try again')));
 
   const weekdays = [...Array(7)].map((_, i) => addDays(gridStart, i));
   // Weeks are ARIA rows (display: contents keeps the 7-column CSS grid); each day is named by its full date.
@@ -88,14 +127,22 @@ export async function renderCalendar(main, ctx) {
     h('div', { class: 'week', role: 'row' }, weekdays.map((d) => h('div', { class: 'weekday', role: 'columnheader', 'aria-label': d.toLocaleDateString(locale(), { weekday: 'long' }) },
       d.toLocaleDateString(locale(), { weekday: 'short' })))));
   const today = ymd(new Date());
-  const eventButton = (ev, onOpen) => h('button', {
-    type: 'button',
-    class: `event ${ev.allDay ? 'all-day' : ''}`,
-    style: ev.allDay ? { background: colorOf[ev.calendarId], color: textOn(colorOf[ev.calendarId]) } : { '--cal': colorOf[ev.calendarId] },
-    title: ev.summary,
-    onclick: (e) => { e.stopPropagation(); onOpen(ev); },
-  }, !ev.allDay && h('span', { class: 'time', dir: 'ltr' }, hm(new Date(ev.start))), h('span', { class: 'ev-title', dir: 'auto' }, ev.summary || t('(no title)')));
-  const openEvent = (ev) => eventDialog(ev, calendars, rerender);
+  // On the days after its first one, a timed event that runs past midnight shows when it ends ("– 02:00"), not
+  // its start time again.
+  const eventButton = (ev, onOpen, day) => {
+    const start = new Date(ev.start);
+    const continued = !ev.allDay && day && start < day;
+    const end = new Date(ev.end);
+    const when = ev.allDay ? null : continued ? (end < addDays(day, 1) ? `– ${clock(end)}` : '…') : clock(start);
+    return h('button', {
+      type: 'button',
+      class: `event ${ev.allDay ? 'all-day' : ''}`,
+      style: ev.allDay ? { background: colorOf[ev.calendarId], color: textOn(colorOf[ev.calendarId]) } : { '--cal': colorOf[ev.calendarId] },
+      title: ev.summary,
+      onclick: (e) => { e.stopPropagation(); onOpen(ev); },
+    }, when && h('span', { class: 'time', dir: 'ltr' }, when), h('span', { class: 'ev-title', dir: 'auto' }, ev.summary || t('(no title)')));
+  };
+  const openEvent = (ev) => eventDialog(ev, calendars, rerender, null, hidden);
   let week;
   for (let i = 0; i < 42; i++) {
     if (i % 7 === 0) grid.append(week = h('div', { class: 'week', role: 'row' }));
@@ -107,23 +154,23 @@ export async function renderCalendar(main, ctx) {
     const label = day.toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long' })
       + (dayEvents.length ? ` – ${t('{n} event(s)', { n: dayEvents.length })}` : '');
     const cell = h('div', {
-      class: `day ${day.getMonth() !== month.getMonth() ? 'other' : ''} ${ymd(day) === today ? 'today' : ''}`,
+      class: `day ${day.getMonth() !== shown.getMonth() ? 'other' : ''} ${ymd(day) === today ? 'today' : ''}`,
       role: 'gridcell', tabindex: 0, 'aria-label': label, 'aria-current': ymd(day) === today ? 'date' : null,
-      onclick: () => eventDialog(null, calendars, rerender, day),
-      onkeydown: (e) => { if (e.target === e.currentTarget && e.key === 'Enter') eventDialog(null, calendars, rerender, day); },
+      onclick: () => eventDialog(null, calendars, rerender, day, hidden),
+      onkeydown: (e) => { if (e.target === e.currentTarget && e.key === 'Enter') eventDialog(null, calendars, rerender, day, hidden); },
     },
       h('span', { class: 'day-num', 'aria-hidden': 'true' }, day.getDate()),
-      dayEvents.slice(0, dayEvents.length > 4 ? 3 : 4).map((ev) => eventButton(ev, openEvent)),
+      dayEvents.slice(0, dayEvents.length > 4 ? 3 : 4).map((ev) => eventButton(ev, openEvent, day)),
       // Events that don't fit used to be unreachable; "+n more" lists the whole day.
       dayEvents.length > 4 && h('button', { type: 'button', class: 'more-events', onclick: (e) => {
         e.stopPropagation();
-        dayDialog(day, dayEvents, eventButton, openEvent, () => eventDialog(null, calendars, rerender, day));
+        dayDialog(day, dayEvents, (ev, open) => eventButton(ev, open, day), openEvent, () => eventDialog(null, calendars, rerender, day, hidden));
       } }, t('+{n} more', { n: dayEvents.length - 3 })),
     );
     week.append(cell);
   }
 
-  main.replaceChildren(h('section', { class: 'calendar-view' }, side, h('div', { class: 'cal-main' }, header, grid)));
+  main.replaceChildren(h('section', { class: 'calendar-view' }, side, h('div', { class: 'cal-main' }, header, loadNotice, grid)));
 }
 
 /** All events of one day (opened from "+n more"). */
@@ -147,7 +194,7 @@ async function colorDialog(c, rerender) {
   }
 }
 
-async function eventDialog(ev, calendars, rerender, day) {
+async function eventDialog(ev, calendars, rerender, day, hidden = new Set()) {
   if (!calendars.length) return toast(t('Create a calendar first'), 'error');
   const allDay = ev ? ev.allDay : false;
   // Recurring events are edited as a series, so show the series' own times.
@@ -164,11 +211,21 @@ async function eventDialog(ev, calendars, rerender, day) {
     endTime: h('input', { type: 'time', value: hm(end) }),
     rrule: h('select', {}, [['', t('Does not repeat')], ['DAILY', t('Daily')], ['WEEKLY', t('Weekly')], ['MONTHLY', t('Monthly')], ['YEARLY', t('Yearly')]]
       .map(([v, l]) => h('option', { value: v, selected: (ev?.rrule ?? '') === v }, l))),
-    calendar: h('select', { disabled: !!ev }, calendars.map((c) => h('option', { value: c.id, selected: ev ? ev.calendarId === c.id : false }, c.name))),
+    // A new event goes to a calendar that is shown (it went into the first one, even when that was hidden).
+    calendar: h('select', { disabled: !!ev, title: ev ? t('To move an event to another calendar, use a calendar app') : null },
+      calendars.map((c) => h('option', { value: c.id, selected: ev ? ev.calendarId === c.id : c.id === (calendars.find((x) => !hidden.has(x.id)) ?? calendars[0]).id }, c.name))),
     location: h('input', { type: 'text', value: ev?.location ?? '' }),
     description: h('textarea', { rows: 3, value: ev?.description ?? '' }),
   };
   const syncTimes = () => { f.startTime.hidden = f.endTime.hidden = f.allDay.checked; };
+  // An all-day event made a timed one gets an hour from 9 (it kept 00:00–00:00, and vanished from the month).
+  f.allDay.addEventListener('change', () => {
+    if (!f.allDay.checked && f.startTime.value === f.endTime.value && f.startDate.value === f.endDate.value) {
+      f.startTime.value = '09:00';
+      f.endTime.value = '10:00';
+      length = 3600000;
+    }
+  });
   f.allDay.addEventListener('change', syncTimes);
   syncTimes();
   f.startTime.setAttribute('aria-label', t('Start time'));
@@ -208,10 +265,12 @@ async function eventDialog(ev, calendars, rerender, day) {
     if (f.allDay.checked) {
       return { allDay: true, start: f.startDate.value, end: ymd(addDays(parseDay(f.endDate.value), 1)) };
     }
+    // tz: the event keeps its local time when the clocks change (a weekly 09:00 meeting stayed at 09:00 UTC).
     return {
       allDay: false,
       start: new Date(`${f.startDate.value}T${f.startTime.value || '00:00'}`).toISOString(),
       end: new Date(`${f.endDate.value}T${f.endTime.value || '00:00'}`).toISOString(),
+      tz: zone(),
     };
   };
 

@@ -17,9 +17,11 @@ export interface User {
   totp_enabled: boolean;
   notify_shares: boolean;
   language: string | null;
+  /** IANA time zone (calendar events from clients that send none, link expiry dates from the apps). */
+  timezone: string | null;
 }
 
-const USER_COLS = 'id, display_name, email, is_admin, disabled, quota_bytes, totp_enabled, notify_shares, language';
+const USER_COLS = 'id, display_name, email, is_admin, disabled, quota_bytes, totp_enabled, notify_shares, language, timezone';
 const SESSION_COOKIE = 'cloudy_session';
 
 function scrypt(pw: string, salt: Buffer): Promise<Buffer> {

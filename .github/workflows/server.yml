@@ -1,6 +1,7 @@
 # Server (container image). Runs when server files change.
-#   - every push / pull request: type-check, compose files + entrypoint lint, end-to-end tests against the built container
-#     (started from .env.example with the hardened flags), container smoke test (tests/docker_smoke.sh)
+#   - every push / pull request: type-check, compose files + entrypoint lint, browser tests of the web app (tests/web,
+#     Playwright) and end-to-end tests against the built container (started from .env.example with the hardened flags),
+#     container smoke test (tests/docker_smoke.sh)
 #   - tag server-X.Y.Z (scripts/version.py bump X.Y.Z server, CHANGELOG.md section, commit, tag, push): the tests, then
 #     image ghcr.io/<owner>/cloudy:X.Y.Z and :latest. No GitHub release: what changed for admins is in CHANGELOG.md.
 #     The tag must match server/package.json (scripts/version.py check). An image that is already there is not rebuilt.
@@ -16,6 +17,7 @@ on:
       - 'docker-compose.yml'
       - '.env.example'
       - 'tests/e2e.py'
+      - 'tests/web/**'
       - 'tests/docker_smoke.sh'
       - 'scripts/version.py'
       - 'scripts/published.mjs'
@@ -57,6 +59,14 @@ jobs:
         run: |
           sed -i 's/^CLOUDY_ADMIN_PASSWORD=.*/CLOUDY_ADMIN_PASSWORD=ci-admin-password/' .env
           docker compose -f deploy/docker-compose.yml up -d --build --wait
+      # Before the end-to-end tests: those send wrong passwords on purpose, which fills the sign-in limiter for this
+      # machine's address for 15 minutes.
+      - name: Browser tests (Playwright, Chromium)
+        working-directory: tests/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node run.mjs http://localhost:8080 admin ci-admin-password
       - name: End-to-end tests
         run: |
           # The email tests run a fake SMTP server on this machine; the container reaches it via its network gateway.

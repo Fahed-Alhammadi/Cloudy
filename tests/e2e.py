@@ -870,6 +870,276 @@ check('quota 0 means unlimited', bm.get('quotaBytes') is None, bm)
 s, _ = admin.req('PATCH', '/api/me', {'email': 'a@' + '.' * 300000 + ' x'})
 check('a huge "email" is refused at once', s == 400, s)
 
+print('== 1.19')
+import unicodedata, zlib
+s, ap19 = admin.req('POST', '/api/me/app-passwords', {'name': 'e2e 1.19', 'password': ADMIN_PW})
+d19 = Client(basic=f"{ADMIN}:{ap19['password']}")  # app passwords are never limited (the suite filled the limiter)
+s, me19 = admin.req('GET', '/api/me')
+s, f19 = admin.req('POST', f'/api/nodes/{root}/folders', {'name': 'e2e-119-' + uuid.uuid4().hex[:6]})
+F19 = f19['id']
+# names in one Unicode form
+nfd = unicodedata.normalize('NFD', 'Résumé Müller.txt')
+s, n1 = admin.req('POST', f'/api/nodes/{F19}/files', {'name': nfd, 'content': 'x'})
+check('a decomposed (Mac) name is stored composed', s == 201 and n1['name'] == unicodedata.normalize('NFC', nfd), (s, n1))
+s, _ = admin.req('POST', f'/api/nodes/{F19}/files', {'name': unicodedata.normalize('NFC', nfd), 'content': 'y'})
+s, kids = admin.req('GET', f'/api/nodes/{F19}')
+check('the same name in the other form is the same file', len([c for c in kids['children'] if c['name'] == n1['name']]) == 1, kids['children'])
+# the type follows the name
+s, scan = admin.req('POST', f'/api/nodes/{F19}/files', {'name': 'scan', 'content': '%PDF-1.4'})
+s, scan2 = admin.req('PATCH', f"/api/nodes/{scan['id']}", {'name': 'scan.pdf'})
+check('renaming to .pdf makes it a PDF', scan2.get('mime') == 'application/pdf', scan2)
+# keep both
+s, kb = admin.req('POST', '/api/uploads', {'parentId': F19, 'name': 'scan.pdf', 'size': 3, 'onConflict': 'rename'})
+check('keep both: the upload gets a free name', s == 201 and kb['name'] == 'scan (2).pdf', kb)
+admin.req('PUT', f"/api/uploads/{kb['id']}", b'abc', headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
+s, kids = admin.req('GET', f'/api/nodes/{F19}')
+names = [c['name'] for c in kids['children']]
+check('both files are there', 'scan.pdf' in names and 'scan (2).pdf' in names, names)
+# the editor's version check
+s, note = admin.req('POST', f'/api/nodes/{F19}/files', {'name': 'note.txt', 'content': 'one'})
+s, _ = admin.req('PUT', f"/api/nodes/{note['id']}/content", 'two', headers={'Content-Type': 'application/octet-stream', 'If-Match': f'"{note["etag"]}"'})
+check('save with the current version works', s == 200, s)
+s, _ = admin.req('PUT', f"/api/nodes/{note['id']}/content", 'three', headers={'Content-Type': 'application/octet-stream', 'If-Match': f'"{note["etag"]}"'})
+check('save from an older version is refused (412)', s == 412, s)
+# WebDAV: saving over a file keeps it (links, id); conditional requests; whole trees
+fpath = f"/dav/files/{ADMIN}/{f19['name']}"
+d19.req('PUT', f'{fpath}/doc.txt', b'version 1')
+s, kids = admin.req('GET', f'/api/nodes/{F19}')
+doc = next(c for c in kids['children'] if c['name'] == 'doc.txt')
+s, lnk = admin.req('POST', f"/api/nodes/{doc['id']}/shares", {'type': 'link'})
+d19.req('PUT', f'{fpath}/doc.txt.tmp', b'version 2')
+s, _ = d19.req('MOVE', f'{fpath}/doc.txt.tmp', headers={'Destination': f'{BASE}{fpath}/doc.txt', 'Overwrite': 'T'})
+s, kids = admin.req('GET', f'/api/nodes/{F19}')
+doc2 = next(c for c in kids['children'] if c['name'] == 'doc.txt')
+s, body, _ = Client().req('GET', f"/api/public/{lnk['url'].split('/')[-1]}/nodes/{doc2['id']}/download", raw=True)
+check('save-over by MOVE keeps the file and its link', doc2['id'] == doc['id'] and body == b'version 2' and not any(c['name'] == 'doc.txt.tmp' for c in kids['children']), (doc, doc2, body))
+s, vs = admin.req('GET', f"/api/nodes/{doc['id']}/versions")
+check('the old content is a version', s == 200 and len(vs) == 1, vs)
+s, _ = d19.req('PUT', f'{fpath}/doc.txt', b'x', headers={'If-None-Match': '*'})
+check('If-None-Match: * on an existing file is 412', s == 412, s)
+s, _ = d19.req('PUT', f'{fpath}/doc.txt', b'x', headers={'If-Match': '"stale"'})
+check('If-Match with an old version is 412', s == 412, s)
+s, _ = d19.req('PROPFIND', f'/dav/files/{ADMIN}/', headers={'Depth': 'infinity'})
+check('PROPFIND Depth: infinity is refused (403)', s == 403, s)
+# time zones: a weekly 09:00 meeting in Berlin stays at 09:00 across the clock change
+s, cals = admin.req('GET', '/api/calendars')
+cal = cals[0]['id']
+s, ev = admin.req('POST', f'/api/calendars/{cal}/events', {'summary': 'Weekly sync', 'start': '2027-03-15T08:00:00.000Z', 'end': '2027-03-15T09:00:00.000Z', 'rrule': 'WEEKLY', 'tz': 'Europe/Berlin'})
+s, occ = admin.req('GET', f'/api/calendars/{cal}/events?start=2027-03-14T00:00:00Z&end=2027-04-12T00:00:00Z')
+starts = [o['start'] for o in occ if o['uri'] == ev['uri']]
+check('weekly event keeps 09:00 Berlin after the clock change', starts[:2] == ['2027-03-15T08:00:00.000Z', '2027-03-22T08:00:00.000Z'] and starts[2] == '2027-03-29T07:00:00.000Z', starts)
+s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev['uri']}")
+check('the event is stored with its time zone', 'DTSTART;TZID=Europe/Berlin:20270315T090000' in raw and 'BEGIN:VTIMEZONE' in raw, raw[:400])
+s, _ = admin.req('PUT', f"/api/calendars/{cal}/events/{ev['uri']}", {'summary': 'Weekly sync (renamed)', 'start': '2027-03-15T08:00:00.000Z', 'end': '2027-03-15T09:00:00.000Z', 'rrule': 'WEEKLY'})
+s, raw2 = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev['uri']}")
+check('an edit of the title leaves the times as they were', 'DTSTART;TZID=Europe/Berlin:20270315T090000' in raw2 and 'renamed' in raw2, raw2[:400])
+check('timestamps are UTC', re.search(r'DTSTAMP:\d{8}T\d{6}Z', raw2) is not None, raw2[:400])
+admin.req('PATCH', '/api/me', {'timezone': 'America/New_York'})
+s, ev2 = admin.req('POST', f'/api/calendars/{cal}/events', {'summary': 'Standup', 'start': '2027-03-01T14:00:00.000Z', 'end': '2027-03-01T14:15:00.000Z', 'rrule': 'DAILY'})
+s, raw3 = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev2['uri']}")
+check('without a zone from the client, the account zone is used', 'TZID=America/New_York' in raw3, raw3[:300])
+s, _ = admin.req('PATCH', '/api/me', {'timezone': 'Not/AZone'})
+check('an unknown time zone is refused', s == 400, s)
+admin.req('PATCH', '/api/me', {'timezone': None})
+admin.req('DELETE', f"/api/calendars/{cal}/events/{ev['uri']}"); admin.req('DELETE', f"/api/calendars/{cal}/events/{ev2['uri']}")
+# contacts keep what the form does not show
+s, books = admin.req('GET', '/api/addressbooks')
+book = books[0]
+vc = ('BEGIN:VCARD\r\nVERSION:3.0\r\nUID:e2e-keep\r\nFN:Anna Meier\r\nN:Meier;Anna;Maria;Dr.;PhD\r\nTEL;TYPE=CELL:+49 170 1\r\n'
+      'TEL;TYPE=WORK:+49 30 2\r\nitem1.TEL:+49 40 3\r\nitem1.X-ABLABEL:Studio\r\nEMAIL;TYPE=WORK:anna@example.de\r\nORG:Acme;Engineering\r\n'
+      'ADR;TYPE=HOME:;;Hauptstr. 1;Berlin;;10115;Germany\r\nADR;TYPE=WORK:;;Werkstr. 2;Berlin;;10117;Germany\r\nNOTE:old\r\nEND:VCARD\r\n')
+d19.req('PUT', f"/dav/addressbooks/{ADMIN}/{book['uri']}/e2e-keep.vcf", vc, headers={'Content-Type': 'text/vcard'})
+s, cs = admin.req('GET', f"/api/addressbooks/{book['id']}/contacts")
+anna = next(c for c in cs if c['fn'] == 'Anna Meier')
+s, _ = admin.req('PUT', f"/api/addressbooks/{book['id']}/contacts/{anna['uri']}", {**anna, 'note': 'new note'})
+s, after = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{book['uri']}/e2e-keep.vcf")
+keep = ['N:Meier;Anna;Maria;Dr.;PhD', 'TEL;TYPE=CELL:+49 170 1', 'ITEM1.X-ABLABEL:Studio', 'ORG:Acme;Engineering', 'ADR;TYPE=WORK:;;Werkstr. 2', 'NOTE:new note']
+# (vCard group names ignore case: ical.js writes item1 as ITEM1)
+check('saving a contact keeps names, labels, department and other addresses', all(k.upper() in after.upper() for k in keep), [k for k in keep if k.upper() not in after.upper()])
+s, ph = admin.req('POST', f"/api/addressbooks/{book['id']}/contacts", {'phones': ['+971 4 555 0100']})
+check('a contact with only a phone number can be saved', s == 201, (s, ph))
+admin.req('DELETE', f"/api/addressbooks/{book['id']}/contacts/{anna['uri']}")
+if s == 201: admin.req('DELETE', f"/api/addressbooks/{book['id']}/contacts/{ph['uri']}")
+# links
+s, l2 = admin.req('POST', f"/api/nodes/{F19}/shares", {'type': 'link', 'password': 'abc'})
+check('a link password of 3 characters is refused', s == 400, s)
+s, l3 = admin.req('POST', f"/api/nodes/{F19}/shares", {'type': 'link', 'label': 'For the accountant', 'expiresAt': '2031-01-31T23:59:59'})
+check('a link label is kept', s == 201 and l3['label'] == 'For the accountant', l3)
+# groups
+gname = 'g' + uuid.uuid4().hex[:6]
+admin.req('POST', '/api/admin/groups', {'id': gname})
+s, _ = admin.req('POST', '/api/admin/groups', {'id': gname})
+check('a group that exists is said so (409)', s == 409, s)
+admin.req('DELETE', f'/api/admin/groups/{gname}')
+# search ignores accents when the database can (unaccent), and finds files in folders shared with you
+admin.req('POST', f'/api/nodes/{F19}/files', {'name': 'Café menu.txt', 'content': 'x'})
+s, found = admin.req('GET', '/api/search?q=cafe%20menu')
+check('search ignores accents (or at least finds the exact name)', any(i['name'] == 'Café menu.txt' for i in found) or admin.req('GET', '/api/search?q=Caf%C3%A9')[1] != [], [i['name'] for i in found])
+# compression and pages
+r = urllib.request.Request(BASE + f'/api/nodes/{root}', headers={'Accept-Encoding': 'gzip', 'Cookie': '; '.join(f'{c.name}={c.value}' for c in admin.jar)})
+for i in range(30): admin.req('POST', f'/api/nodes/{F19}/files', {'name': f'pad {i:03}.txt', 'content': 'x'})
+r = urllib.request.Request(BASE + f'/api/nodes/{F19}', headers={'Accept-Encoding': 'gzip', 'Cookie': '; '.join(f'{c.name}={c.value}' for c in admin.jar)})
+resp = urllib.request.urlopen(r)
+raw = resp.read()
+check('big listings are sent compressed', resp.headers.get('Content-Encoding') == 'gzip' and json.loads(zlib.decompress(raw, 16 + zlib.MAX_WBITS))['node']['id'] == F19, resp.headers.get('Content-Encoding'))
+s, body, hd = Client().req('GET', '/Recent', headers={'Accept': 'text/html'}, raw=True)
+check('an unknown page opens the app (404) instead of a bare text', s == 404 and b'/js/app.js' in body, s)
+# thumbnails (made in the container; this server may have no image tool)
+png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+s, up = admin.req('POST', '/api/uploads', {'parentId': F19, 'name': 'dot.png', 'size': len(png)})
+s, done = admin.req('PUT', f"/api/uploads/{up['id']}", png, headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
+s, tb, hd = admin.req('GET', f"/api/nodes/{done['node']['id']}/thumb", raw=True)
+if me19.get('thumbnails'):
+    check('a picture gets a WebP thumbnail', s == 200 and hd.get('Content-Type') == 'image/webp' and tb[:4] == b'RIFF', (s, hd.get('Content-Type')))
+    s, tb2, _ = admin.req('GET', f"/api/nodes/{scan['id']}/thumb", raw=True)
+    check('a file that is no picture gets 404 (the client shows its icon)', s == 404, s)
+    # A PDF: its first page, no bigger than a picture's thumbnail (a large page came out thousands of pixels wide).
+    objs = [b'<</Type/Catalog/Pages 2 0 R>>', b'<</Type/Pages/Kids[3 0 R]/Count 1>>',
+            b'<</Type/Page/Parent 2 0 R/MediaBox[0 0 2384 3370]/Contents 4 0 R>>', None]
+    page_ops = b'0.2 0.5 0.8 rg 100 100 2000 3000 re f'
+    objs[3] = b'<</Length %d>>stream\n%s\nendstream' % (len(page_ops), page_ops)
+    pdf, offsets = bytearray(b'%PDF-1.4\n'), []
+    for i, o in enumerate(objs, 1):
+        offsets.append(len(pdf))
+        pdf += b'%d 0 obj\n%s\nendobj\n' % (i, o)
+    xref = len(pdf)
+    pdf += b'xref\n0 %d\n0000000000 65535 f \n' % (len(objs) + 1) + b''.join(b'%010d 00000 n \n' % off for off in offsets)
+    pdf += b'trailer\n<</Size %d/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n' % (len(objs) + 1, xref)
+    s, up = admin.req('POST', '/api/uploads', {'parentId': F19, 'name': 'A0 poster.pdf', 'size': len(pdf)})
+    s, donep = admin.req('PUT', f"/api/uploads/{up['id']}", bytes(pdf), headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
+    s, tbp, hdp = admin.req('GET', f"/api/nodes/{donep['node']['id']}/thumb", raw=True)
+    # WebP size from the VP8/VP8L/VP8X header: at most 480 on the longest side.
+    dims = None
+    if s == 200 and tbp[:4] == b'RIFF':
+        kind = tbp[12:16]
+        if kind == b'VP8X': dims = (1 + int.from_bytes(tbp[24:27], 'little'), 1 + int.from_bytes(tbp[27:30], 'little'))
+        elif kind == b'VP8 ': dims = (int.from_bytes(tbp[26:28], 'little') & 0x3FFF, int.from_bytes(tbp[28:30], 'little') & 0x3FFF)
+        elif kind == b'VP8L':
+            bits = int.from_bytes(tbp[21:25], 'little'); dims = ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1)
+    check('a PDF gets a thumbnail of its first page, at most 480 px', bool(dims) and max(dims) <= 480 and min(dims) > 100, (s, hdp.get('Content-Type'), dims))
+else:
+    check('no image tool: thumbnails answer 404', s == 404, s)
+# events near a clock change keep their local time (they were stored an hour off), the VTIMEZONE comes first
+s, cals2 = admin.req('GET', '/api/calendars')
+c19 = cals2[0]
+for label, tz, st, en, want in [
+    ('Los Angeles, Saturday evening before the spring change', 'America/Los_Angeles', '2027-03-14T03:00:00.000Z', '2027-03-14T05:00:00.000Z', '20270313T190000'),
+    ('New York, Saturday evening before the autumn change', 'America/New_York', '2027-11-07T01:00:00.000Z', '2027-11-07T03:00:00.000Z', '20271106T210000'),
+    ('Sydney, Sunday morning of the change', 'Australia/Sydney', '2027-04-03T23:00:00.000Z', '2027-04-04T00:00:00.000Z', '20270404T090000'),
+]:
+    s, ev = admin.req('POST', f"/api/calendars/{c19['id']}/events", {'summary': label, 'start': st, 'end': en, 'rrule': 'WEEKLY', 'tz': tz})
+    s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{ev['uri']}")
+    s, occ = admin.req('GET', f"/api/calendars/{c19['id']}/events?start={st[:10]}T00:00:00Z&end={st[:8]}28T00:00:00Z")
+    first = next((o['start'] for o in occ if o['uri'] == ev['uri']), None)
+    check(f'{label}: stored at its local time', f'DTSTART;TZID={tz}:{want}' in raw and raw.index('BEGIN:VTIMEZONE') < raw.index('BEGIN:VEVENT')
+          and bool(first) and first.startswith(st[:16]), ([l for l in raw.split('\r\n') if l.startswith('DTSTART')], first))
+    admin.req('DELETE', f"/api/calendars/{c19['id']}/events/{ev['uri']}")
+# the same for a zone known only from the event's own VTIMEZONE (Outlook's names), edited near its clock changes
+for tzid, rules, cases in [
+    ('Pacific Standard Time', ('-0700', '-0800', '1SU', '11', '-0800', '-0700', '2SU', '3'),
+     [('2027-03-14T09:30:00.000Z', '20270314T013000'), ('2027-03-14T11:30:00.000Z', '20270314T043000'), ('2027-07-01T16:00:00.000Z', '20270701T090000')]),
+    ('AUS Eastern Standard Time', ('+1100', '+1000', '1SU', '4', '+1000', '+1100', '1SU', '10'),
+     [('2027-04-03T15:30:00.000Z', '20270404T023000'), ('2027-10-02T16:30:00.000Z', '20271003T033000')]),
+]:
+    sf, st_, sday, smon, df, dt_, dday, dmon = rules
+    vtz = (f'BEGIN:VTIMEZONE\r\nTZID:{tzid}\r\nBEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:{sf}\r\nTZOFFSETTO:{st_}\r\n'
+           f'RRULE:FREQ=YEARLY;BYDAY={sday};BYMONTH={smon}\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\n'
+           f'TZOFFSETFROM:{df}\r\nTZOFFSETTO:{dt_}\r\nRRULE:FREQ=YEARLY;BYDAY={dday};BYMONTH={dmon}\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n')
+    for i, (start, want) in enumerate(cases):
+        uid = f'e2e-outlook-{tzid[:3]}-{i}'
+        ics = (f'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//e2e//EN\r\n{vtz}BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20270101T000000Z\r\n'
+               f'DTSTART;TZID={tzid}:20270105T100000\r\nDTEND;TZID={tzid}:20270105T110000\r\nSUMMARY:t\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
+        d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics", ics, headers={'Content-Type': 'text/calendar'})
+        admin.req('PUT', f"/api/calendars/{c19['id']}/events/{uid}.ics", {'summary': 't', 'start': start, 'end': start[:11] + '23:59:00.000Z'})
+        s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
+        got = next((l for l in raw.split('\r\n') if l.startswith('DTSTART;TZID=')), '')
+        check(f'{tzid} (its own VTIMEZONE), {start}: stored at its local time', got == f'DTSTART;TZID={tzid}:{want}', got)
+        d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
+# time zone names in their own spelling; a bare offset is no time zone
+admin.req('PATCH', '/api/me', {'timezone': 'europe/berlin'})
+check('a time zone is stored in its own spelling', admin.req('GET', '/api/me')[1].get('timezone') == 'Europe/Berlin')
+s, _ = admin.req('PATCH', '/api/me', {'timezone': '+05:30'})
+check('a bare offset is refused', s == 400, s)
+admin.req('PATCH', '/api/me', {'timezone': me19.get('timezone')})
+# contacts: a chosen display name stays, one number as home and as work stays twice, several given names stay
+s, cbook = admin.req('POST', '/api/addressbooks', {'name': 'e2e 1.19 contacts'})
+vc = ('BEGIN:VCARD\r\nVERSION:3.0\r\nUID:e2e-fn-119\r\nFN:Dr. Anna Maria Meier\r\nN:Meier;Anna,Maria;;Dr.;\r\n'
+      'TEL;TYPE=HOME:+1 555 0100\r\nTEL;TYPE=WORK:+1 555 0100\r\nEMAIL;TYPE=HOME:anna@example.com\r\nEMAIL;TYPE=WORK:anna@example.com\r\nEND:VCARD\r\n')
+s, _ = d19.req('PUT', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/e2e-fn-119.vcf", vc, headers={'Content-Type': 'text/vcard'})
+s, cts = admin.req('GET', f"/api/addressbooks/{cbook['id']}/contacts")
+anna2 = next((c for c in cts if c.get('uid') == 'e2e-fn-119'), None)
+if anna2:
+    body = {k: anna2.get(k) for k in ('givenName', 'familyName', 'emails', 'phones', 'org', 'title', 'address')}
+    s, _ = admin.req('PUT', f"/api/addressbooks/{cbook['id']}/contacts/{anna2['uri']}", {**body, 'note': 'only the note changed'})
+    s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{anna2['uri']}")
+    check('a chosen display name stays when the app sends none', 'FN:Dr. Anna Maria Meier' in raw, raw)
+    check('one number as home and as work stays twice', raw.count('+1 555 0100') == 2 and raw.count('anna@example.com') == 2, raw)
+    check('several given names stay as they were', 'Anna,Maria' in raw, raw)
+    s, _ = admin.req('PUT', f"/api/addressbooks/{cbook['id']}/contacts/{anna2['uri']}", {**body, 'familyName': 'Muster'})
+    s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{anna2['uri']}")
+    check('a new family name keeps the given names and rebuilds the display name', 'N:Muster;Anna,Maria;' in raw and 'FN:Anna Maria Muster\r\n' in raw, raw)
+else:
+    check('contact stored over CardDAV is listed', False, cts)
+# vCard 2.1 import: a folded photo keeps its data (the folding spaces went into it)
+photo = base64.b64encode(bytes(range(256)) * 3).decode()
+folded = '\r\n '.join(photo[i:i + 60] for i in range(0, len(photo), 60))
+v21p = f'BEGIN:VCARD\r\nVERSION:2.1\r\nN:Photo;Paula\r\nFN:Paula Photo\r\nPHOTO;ENCODING=BASE64;TYPE=JPEG:{folded}\r\n\r\nEND:VCARD\r\n'
+s, r = admin.req('POST', f"/api/addressbooks/{cbook['id']}/import", v21p.encode(), headers=oct_h)
+s, cts = admin.req('GET', f"/api/addressbooks/{cbook['id']}/contacts")
+paula = next((c for c in cts if 'Paula' in (c.get('fn') or '')), None)
+s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{paula['uri']}") if paula else (0, '')
+unfolded = re.sub(r'\r\n[ \t]', '', raw)
+m = re.search(r'PHOTO[^:]*:([^\r\n]*)', unfolded)
+check('a vCard 2.1 photo is stored without the folding spaces', bool(m) and ' ' not in m.group(1) and base64.b64decode(m.group(1)) == bytes(range(256)) * 3, (s, unfolded[:300]))
+admin.req('DELETE', f"/api/addressbooks/{cbook['id']}")
+# saving text over a file renamed since it was opened: 412, no second file under the old name (here the etag check
+# answers; the same rule under the folder lock covers a rename while the text is on its way)
+s, ef = admin.req('POST', f'/api/nodes/{F19}/files', {'name': 'edit-me.txt', 'content': 'v1'})
+admin.req('PATCH', f"/api/nodes/{ef['id']}", {'name': 'renamed-meanwhile.txt'})
+s, _ = admin.req('PUT', f"/api/nodes/{ef['id']}/content", b'v2', headers={'Content-Type': 'application/octet-stream', 'If-Match': f'"{ef["etag"]}"'})
+check('saving a file renamed meanwhile asks first (412)', s == 412, s)
+check('and leaves no second file under the old name', not any(c['name'] == 'edit-me.txt' for c in admin.req('GET', f'/api/nodes/{F19}')[1]['children']))
+# "Keep both" with a folder of the same name: the file gets a free name (it was refused)
+admin.req('POST', f'/api/nodes/{F19}/folders', {'name': 'clash'})
+s, up = admin.req('POST', '/api/uploads', {'parentId': F19, 'name': 'clash', 'size': 1, 'onConflict': 'rename'})
+check('"Keep both" over a folder of the same name stores the file as "clash (2)"', s == 201 and up.get('name') == 'clash (2)', (s, up))
+if s == 201: admin.req('DELETE', f"/api/uploads/{up['id']}")
+s, _ = admin.req('POST', '/api/uploads', {'parentId': F19, 'name': 'clash', 'size': 1})
+check('without it, a folder of that name still refuses the file', s == 409, s)
+# a refused name says why
+for bad, why in [('a/b', 'slash'), ('..', '".."'), ('x' * 256, '255'), ('a\x01b', 'control')]:
+    s, e = admin.req('POST', f'/api/nodes/{F19}/folders', {'name': bad})
+    check(f'name {bad[:6]!r} refused with its reason', s == 400 and why in (e or {}).get('error', ''), (s, e))
+# folders at most 250 levels deep: creating, moving and copying a folder below that is refused
+chain = [F19]  # F19 is 1 level below the top folder
+for i in range(248):
+    s, d = admin.req('POST', f'/api/nodes/{chain[-1]}/folders', {'name': f'L{i}'})
+    chain.append(d['id'])
+s, _ = admin.req('POST', f'/api/nodes/{chain[-1]}/folders', {'name': 'level 250'})
+check('a folder 250 levels deep can be made', s == 201, s)
+s, e = admin.req('POST', f"/api/nodes/{_['id']}/folders", {'name': 'level 251'}) if s == 201 else (0, {})
+check('one level more is refused', s == 400 and '250' in (e or {}).get('error', ''), (s, e))
+s, two = admin.req('POST', f'/api/nodes/{F19}/folders', {'name': 'two levels'})
+admin.req('POST', f"/api/nodes/{two['id']}/folders", {'name': 'inner'})
+s, _ = admin.req('PATCH', f"/api/nodes/{two['id']}", {'parentId': chain[-2]})
+check('moving a folder in as deep as allowed works', s == 200, s)
+s, e = admin.req('PATCH', f"/api/nodes/{two['id']}", {'parentId': chain[-1]})
+check('moving it one level deeper is refused', s == 400 and '250' in (e or {}).get('error', ''), (s, e))
+s, e = admin.req('POST', f"/api/nodes/{two['id']}/copy", {'parentId': chain[-1]})
+check('copying it there is refused too', s == 400 and '250' in (e or {}).get('error', ''), (s, e))
+# share lists name people
+s, _ = admin.req('POST', f'/api/nodes/{F19}/shares', {'type': 'user', 'shareWith': bob, 'canEdit': False})
+s, lst = admin.req('GET', f'/api/nodes/{F19}/shares')
+check('a share names the person (display name)', any(x.get('shareWithName') == 'Bob' and x['shareWith'] == bob for x in lst), lst)
+s, out = admin.req('GET', '/api/shares/outgoing')
+check('so does "Shared by you"', any(x.get('shareWithName') == 'Bob' for x in out if x['nodeId'] == F19), [x.get('shareWithName') for x in out])
+# calendars and address books do not offer COPY or MOVE (they refuse them)
+s, _, hd = d19.req('OPTIONS', f'/dav/calendars/{ADMIN}/', raw=True)
+check('calendars do not advertise MOVE or COPY', s == 200 and 'MOVE' not in hd.get('Allow', '') and 'PROPFIND' in hd.get('Allow', ''), hd.get('Allow'))
+s, _, hd = d19.req('OPTIONS', f'/dav/files/{ADMIN}/', raw=True)
+check('files still do', 'MOVE' in hd.get('Allow', ''), hd.get('Allow'))
+admin.req('DELETE', f'/api/nodes/{F19}')
+
 print('== cleanup')
 s, _ = admin.req('DELETE', f'/api/admin/users/{bob}')
 check('delete user', s == 204)

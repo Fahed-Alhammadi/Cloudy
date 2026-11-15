@@ -1,15 +1,15 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.ts';
 import { migrate, q } from './db.ts';
-import { Router, HttpError, json, requestUrl } from './http.ts';
+import { Router, HttpError, json, requestUrl, acceptedEncoding, compress } from './http.ts';
 import type { Ctx } from './http.ts';
 import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
 import { ensureAdmin } from './users.ts';
-import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes } from './files.ts';
+import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes, repairNamesAndTypes } from './files.ts';
 import { handleDav } from './dav/server.ts';
 import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
@@ -19,6 +19,7 @@ import { registerShares } from './api/shares.ts';
 import { registerGroupware } from './api/groupware.ts';
 import { openStream, startLiveUpdates, closeStreams } from './events.ts';
 import { registerOffice, pruneOfficeCache } from './office.ts';
+import { pruneThumbnails } from './thumbs.ts';
 import { registerMail, expirePasswordResets } from './mail.ts';
 import { registerLimits, loadLimits } from './limits.ts';
 
@@ -76,7 +77,9 @@ const CSP = [
 const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin|forgot|reset)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
 const PUBLIC_PAGES = /^\/s\/[\w-]+(?:\/\d+)?$/;
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+const compressedStatic = new Map<string, Buffer>();
+
+async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL, status = 200): Promise<boolean> {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   let rel = url.pathname;
   if (APP_PAGES.test(rel)) rel = '/index.html';
@@ -87,21 +90,38 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL):
   if (!file.startsWith(config.publicDir)) return false;
   const st = await stat(file).catch(() => null);
   if (!st?.isFile()) return false;
-  const etag = `"${st.size.toString(16)}-${st.mtimeMs.toString(16)}"`;
-  const headers = {
-    'Content-Type': STATIC_TYPES[path.extname(file)] ?? 'application/octet-stream',
+  const type = STATIC_TYPES[path.extname(file)] ?? 'application/octet-stream';
+  // Text files (the app's scripts, styles, translations) go compressed when the browser accepts it.
+  const enc = /^(text\/|application\/(json|manifest\+json)|image\/svg)/.test(type) ? acceptedEncoding(req) : null;
+  const version = `${st.size.toString(16)}-${st.mtimeMs.toString(16)}`;
+  const etag = `"${version}${enc ? `-${enc}` : ''}"`;
+  const headers: Record<string, string | number> = {
+    'Content-Type': type,
     'Cache-Control': 'no-cache',
     ETag: etag,
     'Content-Security-Policy': CSP,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
+    Vary: 'Accept-Encoding',
   };
-  if (req.headers['if-none-match'] === etag) {
+  if (status === 200 && req.headers['if-none-match'] === etag) {
     res.writeHead(304, headers);
     res.end();
     return true;
   }
-  res.writeHead(200, { ...headers, 'Content-Length': st.size });
+  if (enc) {
+    const key = `${file}|${version}|${enc}`;
+    let body = compressedStatic.get(key);
+    if (!body) {
+      body = compress(await readFile(file), enc);
+      if (compressedStatic.size > 200) compressedStatic.clear();
+      compressedStatic.set(key, body);
+    }
+    res.writeHead(status, { ...headers, 'Content-Encoding': enc, 'Content-Length': body.length });
+    res.end(req.method === 'HEAD' ? undefined : body);
+    return true;
+  }
+  res.writeHead(status, { ...headers, 'Content-Length': st.size });
   if (req.method === 'HEAD') res.end();
   else sendFile(res, file);
   return true;
@@ -127,6 +147,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const m = router.match(req.method!, url.pathname);
     if (m) return await m.handler({ req, res, url, params: m.params });
     if (await serveStatic(req, res, url)) return;
+    // A mistyped or outdated address opened in the browser (/Recent, /nope): the app, which says the page does not
+    // exist and offers the way back, instead of a bare "Not found" text page.
+    if ((req.method === 'GET' || req.method === 'HEAD') && String(req.headers.accept ?? '').includes('text/html')
+        && !/^\/(api|dav|s)(\/|$)/.test(url.pathname) && !/\.[\w]+$/.test(url.pathname)
+        && (await serveStatic(req, res, new URL('http://localhost/index.html'), 404))) return;
     throw new HttpError(404, 'Not found');
   } catch (e: any) {
     const status = e instanceof HttpError ? e.status : 500;
@@ -148,6 +173,7 @@ async function jobs(): Promise<void> {
     ['uploads', expireUploads],
     ['storage', cleanStorage],
     ['office previews', pruneOfficeCache],
+    ['thumbnails', pruneThumbnails],
     ['password resets', expirePasswordResets],
     ['trash', async () => { const n = await expireTrash(); if (n) console.log(`purged ${n} expired trash item(s)`); }],
     ['hashes', gcHashes],
@@ -169,6 +195,8 @@ try {
   process.exit(1);
 }
 await migrate();
+// A failure here is logged and the server starts anyway; the repair runs again at the next start.
+await repairNamesAndTypes().catch((e) => console.error('repairing names and file types failed (tried again at the next start):', e));
 await loadLimits();
 await ensureAdmin();
 await startLiveUpdates();

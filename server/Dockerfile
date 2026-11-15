@@ -1,4 +1,4 @@
-# Cloudy all-in-one image: PostgreSQL 17 + LibreOffice (office previews) + Cloudy server in one container.
+# Cloudy all-in-one image: PostgreSQL 17 + LibreOffice (office previews) + libvips (thumbnails) + Cloudy server in one container.
 FROM node:24-trixie-slim
 ARG APP_VERSION=
 LABEL org.opencontainers.image.title="Cloudy" org.opencontainers.image.description="Self-hosted files, sharing, office previews, calendar and contacts"
@@ -18,6 +18,13 @@ RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui libreoffice-draw-nogui \
       fonts-liberation2 fonts-crosextra-carlito fonts-crosextra-caladea fonts-dejavu-core fonts-noto-core \
+ && rm -rf /var/lib/apt/lists/*
+
+# libvips for thumbnails of photos, pictures and PDFs (grid view, shared links); libheif's decoders read iPhone HEIC
+# and AVIF photos. Its own layer, after LibreOffice, so updates of either reuse the other.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libvips-tools libheif-plugin-libde265 libheif-plugin-dav1d \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

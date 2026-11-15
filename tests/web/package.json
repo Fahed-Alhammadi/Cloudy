@@ -1,0 +1,12 @@
+{
+  "name": "cloudy-web-tests",
+  "private": true,
+  "type": "module",
+  "description": "Browser tests of the Cloudy web app (Playwright, Chromium), run in CI against the running container.",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}

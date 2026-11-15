@@ -14,6 +14,7 @@ import {
 import type { Props, PropRequest, XEl } from './xml.ts';
 
 const ALLOW = 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, MKCALENDAR, COPY, MOVE, LOCK, UNLOCK, REPORT';
+const ALLOW_GROUPWARE = 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, MKCALENDAR, REPORT';
 const DAV_HEADER = '1, 2, 3, calendar-access, addressbook, extended-mkcol';
 
 const d = (n: string) => key(NS.d, n);
@@ -23,6 +24,23 @@ const cs = (n: string) => key(NS.cs, n);
 const ic = (n: string) => key(NS.ic, n);
 
 const syncToken = (c: Collection) => `http://cloudy.local/sync/${c.ctag}`;
+
+/**
+ * If-Match / If-None-Match (RFC 9110 §13.1.1-2) for writes: a client that saw an older version, or expects that no
+ * file exists yet, gets 412 instead of overwriting or deleting (they were ignored).
+ */
+function checkPreconditions(req: IncomingMessage, node: F.Node | undefined): void {
+  const tags = (h: string | string[] | undefined) => String(h).split(',').map((s) => s.trim().replace(/^W\//, '')).filter(Boolean);
+  const etag = node ? `"${node.etag}"` : null;
+  if (req.headers['if-match'] !== undefined) {
+    const want = tags(req.headers['if-match']);
+    if (!node || !(want.includes('*') || want.includes(etag!))) throw new HttpError(412, 'Precondition failed');
+  }
+  if (req.headers['if-none-match'] !== undefined && node) {
+    const unwanted = tags(req.headers['if-none-match']);
+    if (unwanted.includes('*') || unwanted.includes(etag!)) throw new HttpError(412, 'Precondition failed');
+  }
+}
 
 function depth(req: IncomingMessage, dflt: 0 | 1 = 1): 0 | 1 {
   const h = String(req.headers.depth ?? '').toLowerCase();
@@ -44,7 +62,9 @@ export async function handleDav(req: IncomingMessage, res: ServerResponse, url: 
   res.setHeader('DAV', DAV_HEADER);
   res.setHeader('MS-Author-Via', 'DAV');
   if (req.method === 'OPTIONS') {
-    res.writeHead(200, { Allow: ALLOW, 'Content-Length': 0 });
+    // Calendars and address books take no COPY, MOVE or locks (they answer 405): only files advertise them.
+    const groupware = /^\/dav\/(calendars|addressbooks)\//.test(path);
+    res.writeHead(200, { Allow: groupware ? ALLOW_GROUPWARE : ALLOW, 'Content-Length': 0 });
     res.end();
     return true;
   }
@@ -163,6 +183,11 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
   switch (req.method) {
     case 'PROPFIND': {
       if (!node) throw new HttpError(404, 'Not found');
+      // A whole tree in one answer is refused the standard way (RFC 4918 §9.1): the client then lists folder by
+      // folder. It used to get one level, as if every subfolder were empty, which a sync client could act on.
+      if (String(req.headers.depth ?? '').toLowerCase() === 'infinity' && node.is_dir) {
+        return davError(res, 403, '<d:propfind-finite-depth/>');
+      }
       const pr = propRequest(parseXml(await readText(req)));
       const ms = new Multistatus();
       await ms.add(hrefOf(segs, node.is_dir), props(node), pr);
@@ -185,6 +210,7 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
       return sendNodeFile(req, res, node);
     }
     case 'PUT': {
+      checkPreconditions(req, node); // before the body: a stale client must not upload it for nothing
       const parent = await parentOf();
       if (!parent || !parent.is_dir) throw new HttpError(409, 'Parent folder does not exist');
       if (node?.is_dir) throw new HttpError(405, 'Is a folder');
@@ -207,6 +233,7 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
     }
     case 'DELETE': {
       if (!node) throw new HttpError(404, 'Not found');
+      checkPreconditions(req, node);
       await F.trashNode(node);
       res.writeHead(204);
       return void res.end();
@@ -230,8 +257,17 @@ async function files(req: IncomingMessage, res: ServerResponse, user: User, segs
         throw new HttpError(409, 'Cannot replace a folder that contains the source');
       }
       if (node.parent_id === null) throw new HttpError(403, 'Cannot move or copy the root folder');
+      checkPreconditions(req, node);
       if (existing) {
         if (String(req.headers.overwrite ?? 'T').toUpperCase() === 'F') throw new HttpError(412, 'Destination exists');
+        // A file onto a file: programs that save by writing a temporary file and renaming it over the original do
+        // this on every save. The original keeps its identity (shares, public links, favorite) and gets the new
+        // content as a new version; it used to be trashed and replaced by another item, and its links stopped working.
+        if (!node.is_dir && !existing.is_dir) {
+          await F.replaceFileContent(node, existing, req.method === 'MOVE');
+          res.writeHead(204, { 'Content-Length': 0 });
+          return void res.end();
+        }
         await F.trashNode(existing);
       }
       if (req.method === 'MOVE') await F.moveNode(node, (await F.getNode(destParent.id))!, name);

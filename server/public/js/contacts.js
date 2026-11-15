@@ -1,12 +1,18 @@
 // Contacts app over CardDAV-backed address books.
 import { api, get, post, put, patch, del } from './api.js';
-import { h, icon, toast, showError, confirmDialog, promptDialog, showMenu, copyText, modal } from './ui.js';
+import { h, icon, toast, showError, confirmDialog, promptDialog, showMenu, copyText, modal, setLeaveGuard } from './ui.js';
 import { attachDropZone } from './files.js';
 import { t, locale } from './i18n.js';
 
 let currentBook = null;
 let currentUri = null;
 let filter = '';
+
+// Closing or reloading the tab with a contact half typed: the browser asks first.
+let unsavedContact = () => false;
+window.addEventListener('beforeunload', (e) => {
+  if (document.querySelector('.contacts-view') && unsavedContact()) { e.preventDefault(); e.returnValue = ''; }
+});
 
 /** Uploads a .vcf / .csv file into `book` and shows what happened. */
 async function importContacts(book, file, rerender) {
@@ -37,7 +43,8 @@ const pickFile = (onFile) => {
 };
 
 const displayName = (c) => c.fn || c.org || c.emails?.[0] || c.phones?.[0] || t('(no name)');
-const initials = (c) => (c.fn || c.org || '?').split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
+const firstChar = (s) => [...new Intl.Segmenter().segment(s)][0]?.segment ?? '';
+const initials = (c) => (c.fn || c.org || '?').trim().split(/\s+/).map(firstChar).slice(0, 2).join('').toUpperCase() || '?';
 
 export async function renderContacts(main, ctx) {
   const books = await get('/api/addressbooks');
@@ -59,14 +66,25 @@ export async function renderContacts(main, ctx) {
     const q = filter.toLowerCase();
     const shown = contacts.filter((c) => !q || [c.fn, c.org, ...c.emails, ...c.phones].join(' ').toLowerCase().includes(q));
     list.replaceChildren(...(shown.length ? shown.map((c) => h('li', {},
-      h('button', { class: `contact-item ${c.uri === currentUri ? 'active' : ''}`, 'aria-current': c.uri === currentUri ? 'true' : null, onclick: () => { currentUri = c.uri; drawList(); drawDetail(c, true); } },
+      h('button', { class: `contact-item ${c.uri === currentUri ? 'active' : ''}`, 'aria-current': c.uri === currentUri ? 'true' : null, onclick: async () => {
+        if (!(await leaveEdits())) return;
+        currentUri = c.uri; drawList(); drawDetail(c, true);
+      } },
         h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(c)),
         h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, displayName(c)), h('small', { class: 'muted', dir: c.emails[0] || c.phones[0] ? 'ltr' : 'auto' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
   };
   search.addEventListener('input', () => { filter = search.value; drawList(); });
 
-  // `reveal`: on phones the form sits below the list, so it is scrolled into view.
+  let edited = false;
+  /** True when it is fine to leave the form: nothing typed, or the user chose to discard it. */
+  const leaveEdits = async () => !edited || confirmDialog(t('Discard changes?'), t('You have unsaved changes.'), t('Discard'), true);
+  // The same question before another page of the app, another address book or an import replaces the form.
+  unsavedContact = () => edited;
+  setLeaveGuard(leaveEdits);
+
+  // `reveal`: on phones the form sits below the list, so it is scrolled into view (below the top bar).
   const drawDetail = (c, reveal = false) => {
+    edited = false;
     const isNew = !c;
     c = c || { fn: '', givenName: '', familyName: '', emails: [], phones: [], org: '', title: '', address: '', birthday: '', note: '' };
     const f = {
@@ -87,8 +105,13 @@ export async function renderContacts(main, ctx) {
       noYear
         ? t('{date} (no year)', { date: new Date(2000, Number(noYear[1]) - 1, Number(noYear[2])).toLocaleDateString(locale(), { day: 'numeric', month: 'long' }) })
         : c.birthday);
+    let saving = false;
     const save = async (e) => {
       e.preventDefault();
+      // One save at a time: a double click created the contact twice.
+      if (saving) return;
+      saving = true;
+      submit.disabled = true;
       const data = {
         givenName: f.givenName.value, familyName: f.familyName.value, org: f.org.value, title: f.title.value,
         emails: f.emails.value.split('\n'), phones: f.phones.value.split('\n'), address: f.address.value,
@@ -101,12 +124,25 @@ export async function renderContacts(main, ctx) {
           ? await post(`/api/addressbooks/${book.id}/contacts`, data)
           : await put(`/api/addressbooks/${book.id}/contacts/${encodeURIComponent(c.uri)}`, data);
         currentUri = saved.uri;
+        edited = false;
         toast(t('Contact saved'));
         rerender();
-      } catch (err) { showError(err); }
+      } catch (err) {
+        showError(err);
+      } finally {
+        saving = false;
+        submit.disabled = false;
+      }
     };
-    detail.replaceChildren(h('form', { class: 'form-grid', onsubmit: save },
-      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big' }, isNew ? icon('plus') : initials(c)), h('h2', {}, isNew ? t('New contact') : displayName(c))),
+    const submit = h('button', { type: 'submit', class: 'btn primary' }, icon('save'), t('Save'));
+    detail.replaceChildren(h('form', { class: 'form-grid', onsubmit: save, oninput: () => { edited = true; } },
+      // Phones: the list is above; this goes back to it.
+      h('button', { type: 'button', class: 'btn ghost back-to-list wide', onclick: async () => {
+        if (!(await leaveEdits())) return;
+        edited = false;
+        list.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      } }, icon('left'), t('All contacts')),
+      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big' }, isNew ? icon('plus') : initials(c)), h('h2', { dir: 'auto' }, isNew ? t('New contact') : displayName(c))),
       h('label', { class: 'field' }, h('span', {}, t('First name')), f.givenName),
       h('label', { class: 'field' }, h('span', {}, t('Last name')), f.familyName),
       h('label', { class: 'field' }, h('span', {}, t('Organization')), f.org),
@@ -123,13 +159,18 @@ export async function renderContacts(main, ctx) {
           currentUri = null;
           rerender();
         } }, icon('trash'), t('Delete')),
-        h('button', { type: 'submit', class: 'btn primary' }, icon('save'), t('Save'))),
+        submit),
     ));
-    f.givenName.focus({ preventScroll: true });
-    if (reveal && matchMedia('(max-width: 860px)').matches) detail.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    // Phones: the opened contact is scrolled into view, and the keyboard does not pop up at once.
+    const phone = matchMedia('(max-width: 760px)').matches;
+    if (!phone) f.givenName.focus({ preventScroll: true });
+    if (reveal && phone) detail.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
 
-  const bookSelect = h('select', { 'aria-label': t('Address book'), onchange: (e) => { currentBook = Number(e.target.value); currentUri = null; rerender(); } },
+  const bookSelect = h('select', { 'aria-label': t('Address book'), onchange: async (e) => {
+    if (!(await leaveEdits())) { e.target.value = String(book.id); return; }
+    currentBook = Number(e.target.value); currentUri = null; rerender();
+  } },
     books.map((b) => h('option', { value: b.id, selected: b.id === book.id }, b.name)));
 
   main.replaceChildren(h('section', { class: 'contacts-view', 'data-drop-label': t('Drop a .vcf or .csv file to import') },
@@ -143,7 +184,7 @@ export async function renderContacts(main, ctx) {
           const name = await promptDialog(t('Rename address book'), t('Name'), book.name, t('Save'));
           if (name) await patch(`/api/addressbooks/${book.id}`, { name }).then(rerender, showError);
         } },
-        { label: t('Import contacts (.vcf, .csv)'), icon: 'upload', onclick: () => pickFile((f) => importContacts(book, f, rerender)) },
+        { label: t('Import contacts (.vcf, .csv)'), icon: 'upload', onclick: async () => { if (await leaveEdits()) pickFile((f) => importContacts(book, f, rerender)); } },
         { label: t('Export contacts (.vcf)'), icon: 'download', onclick: () => {
           const a = h('a', { href: `/api/addressbooks/${book.id}/export`, download: `${book.name}.vcf` });
           document.body.append(a); a.click(); a.remove();
@@ -156,12 +197,12 @@ export async function renderContacts(main, ctx) {
       ]) }, icon('more'))),
       search,
       h('div', { class: 'row' },
-        h('button', { class: 'btn primary grow', onclick: () => { currentUri = null; drawList(); drawDetail(null, true); } }, icon('plus'), t('New contact')),
-        h('button', { class: 'btn', title: t('Import a .vcf or .csv file'), onclick: () => pickFile((f) => importContacts(book, f, rerender)) }, icon('upload'), t('Import'))),
+        h('button', { class: 'btn primary grow', onclick: async () => { if (!(await leaveEdits())) return; currentUri = null; drawList(); drawDetail(null, true); } }, icon('plus'), t('New contact')),
+        h('button', { class: 'btn', title: t('Import a .vcf or .csv file'), onclick: async () => { if (await leaveEdits()) pickFile((f) => importContacts(book, f, rerender)); } }, icon('upload'), t('Import'))),
       list),
     detail));
   // Dropping a .vcf / .csv file anywhere on the contacts view imports it.
-  attachDropZone(main.querySelector('.contacts-view'), (items) => importContacts(book, items[0]?.file ?? items[0], rerender));
+  attachDropZone(main.querySelector('.contacts-view'), async (items) => { if (await leaveEdits()) importContacts(book, items[0]?.file ?? items[0], rerender); });
   drawList();
   const selected = contacts.find((c) => c.uri === currentUri);
   if (selected) drawDetail(selected);

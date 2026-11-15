@@ -12,6 +12,7 @@ import type { User } from '../auth.ts';
 import { newToken, sha256 } from '../auth.ts';
 import * as F from '../files.ts';
 import { sendNodeFile, sendBlob, sendZip, sendItemsZip } from '../download.ts';
+import { sendThumbnail } from '../thumbs.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
 type Wrap = (h: Authed) => (ctx: Ctx) => Promise<void>;
@@ -57,9 +58,18 @@ export function registerFiles(r: Router, authed: Wrap) {
   r.put('/api/nodes/:id/content', authed(async ({ req, res, params }, user) => {
     const { node } = await F.requireAccess(user.id, params.id, 'edit');
     if (node.is_dir) throw new HttpError(400, 'Not a file');
+    // If-Match: the version the editor opened. Someone else saved meanwhile: 412, and the editor asks what to do
+    // (the newer text used to be overwritten silently). Clients that do not send it (the apps) save as before.
+    const ifMatch = req.headers['if-match'];
+    if (ifMatch && ifMatch !== '*' && String(ifMatch).replace(/^W\//, '') !== `"${node.etag}"`) {
+      throw new HttpError(412, 'Someone else changed this file since you opened it');
+    }
     const parent = await F.mustNode(node.parent_id!);
     const { file, size, sha256 } = await F.streamToTemp(req, await F.remainingQuota(node.owner));
-    const { node: saved } = await F.writeFile(parent, node.name, file, size, { sha256 });
+    const expectEtag = ifMatch && ifMatch !== '*' ? node.etag : undefined;
+    // With If-Match the save is for this very file: renamed, moved or deleted meanwhile is a change too (412), not a
+    // reason to create a new file under the old name.
+    const { node: saved } = await F.writeFile(parent, node.name, file, size, { sha256, expectEtag, expectId: expectEtag ? node.id : undefined });
     json(res, (await F.toJson([saved], user.id))[0]);
   }));
 
@@ -96,6 +106,12 @@ export function registerFiles(r: Router, authed: Wrap) {
     const { node } = await F.requireAccess(user.id, params.id, 'read');
     if (node.is_dir) await sendZip(res, node);
     else sendNodeFile(req, res, node, url.searchParams.has('inline'));
+  }));
+
+  // A small WebP preview of a photo, picture or PDF (grid view); 404 when the file has none.
+  r.get('/api/nodes/:id/thumb', authed(async ({ req, res, params }, user) => {
+    const { node } = await F.requireAccess(user.id, params.id, 'read');
+    await sendThumbnail(req, res, node);
   }));
 
   // Several items as one ZIP. A browser saves only what it navigates to (a GET), and the ids of a large selection
@@ -175,7 +191,17 @@ export function registerFiles(r: Router, authed: Wrap) {
     if (!text) return json(res, []);
     const nodes = await F.searchNodes(user.id, text);
     const out = await F.toJson(nodes, user.id);
-    for (const item of out) (item as any).path = await F.nodePath(item.parentId!);
+    // The location as the user sees it: from their own top folder, or from the shared folder, never the owner's
+    // folders above it. An item shared on its own is at "/" of what was shared, and its folder is not theirs to open.
+    for (const [i, item] of out.entries()) {
+      const node = nodes[i];
+      const own = node.owner === user.id;
+      const acc = own ? { perm: 'edit' as const, shareRoot: null } : await F.access(user.id, node);
+      const chain = acc ? await F.breadcrumb(node, acc) : [];
+      (item as any).path = acc ? '/' + chain.slice(own ? 1 : 0, -1).map((c) => c.name).join('/') : '';
+      (item as any).parentVisible = own || (!!acc && acc.shareRoot !== node.id);
+    }
+    res.setHeader('X-Cloudy-Limit', String(F.SEARCH_LIMIT));
     json(res, out);
   }));
 
@@ -215,27 +241,30 @@ export function registerFiles(r: Router, authed: Wrap) {
   r.post('/api/uploads', authed(async ({ req, res }, user) => {
     const b = await readJson(req);
     const { node: parent } = await F.requireAccess(user.id, b.parentId, 'edit');
-    json(res, await startUpload(parent, b.name, b.size, { userId: user.id }), 201);
+    // onConflict "rename": a file with that name stays, the upload is stored as "name (2)" ("Keep both").
+    json(res, await startUpload(parent, b.name, b.size, { userId: user.id }, b.onConflict === 'rename'), 201);
   }));
 }
 
 /** Who started an upload: a signed-in user, or a public link (its share id). Checked again when the file lands. */
 export type UploadBy = { userId: string } | { shareId: number };
 
-export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unknown, by: UploadBy) {
+export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unknown, by: UploadBy, keepBoth = false) {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   let name = checkName(rawName);
   const size = Number(rawSize);
   if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, 'Invalid size');
   if (size > (await F.remainingQuota(parent.owner))) throw new HttpError(507, 'Storage quota exceeded');
   const existing = await F.childByName(parent.id, name);
-  if (existing?.is_dir) throw new HttpError(409, 'A folder with that name exists');
   // Visitors of an "allow upload" link add files; they never replace (and version away) the owner's files.
-  if (existing && 'shareId' in by) name = await F.uniqueName(parent.id, name);
+  const noOverwrite = keepBoth || 'shareId' in by;
+  // A folder of that name: with "Keep both" (and on links) the file gets a free name instead of being refused.
+  if (existing?.is_dir && !noOverwrite) throw new HttpError(409, 'A folder with that name exists');
+  if (existing && noOverwrite) name = await F.uniqueName(parent.id, name);
   const id = newToken(24);
   await fsWriteFile(F.uploadPath(id), '');
-  await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null]);
+  await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id, no_overwrite) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null, noOverwrite]);
   return { id, chunkSize: config.chunkSize, received: 0, size, name };
 }
 
@@ -282,8 +311,8 @@ export function registerUploadChunks(r: Router) {
   });
 
   r.put('/api/uploads/:id', async ({ req, res, params }) => {
-    const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null }>(
-      `SELECT id, parent_id, name, size, received, user_id, share_id FROM uploads WHERE id = $1`, [uploadId(params.id)]);
+    const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null; no_overwrite: boolean }>(
+      `SELECT id, parent_id, name, size, received, user_id, share_id, no_overwrite FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
     const file = F.uploadPath(u.id);
     // After a power cut the part file can be shorter than what was confirmed (writes not yet on disk). Continuing at
@@ -351,7 +380,7 @@ export function registerUploadChunks(r: Router) {
       await rm(file, { force: true });
       throw new HttpError(403, 'No longer allowed to upload here');
     }
-    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id, sha256 });
+    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id || u.no_overwrite, sha256 });
     // A signed-in uploader gets the node exactly as GET /api/nodes/:id lists it (etag, mtime, sha256…), so it needs no
     // extra request; a public-link visitor only what it had before (no owner name, favorites…).
     const full = u.user_id ? (await F.toJson([node], u.user_id))[0] : { id: node.id, name: node.name, size: node.size };

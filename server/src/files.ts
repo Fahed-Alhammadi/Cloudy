@@ -211,7 +211,8 @@ const MIME: Record<string, string> = {
   ts: 'text/plain', py: 'text/x-python', sh: 'text/x-shellscript', yml: 'text/yaml', yaml: 'text/yaml',
   ini: 'text/plain', conf: 'text/plain', ics: 'text/calendar', vcf: 'text/vcard',
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon', heic: 'image/heic',
+  avif: 'image/avif', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon', heic: 'image/heic', heif: 'image/heif',
+  tif: 'image/tiff', tiff: 'image/tiff',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska', m4v: 'video/mp4',
   mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac', ogg: 'audio/ogg', oga: 'audio/ogg',
   opus: 'audio/opus', wav: 'audio/wav', flac: 'audio/flac',
@@ -229,6 +230,63 @@ const MIME: Record<string, string> = {
 export function mimeOf(name: string): string {
   const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
   return Object.hasOwn(MIME, ext) ? MIME[ext] : 'application/octet-stream';
+}
+
+/**
+ * Once, from the first start of 1.19 until it has run through: names stored in another Unicode form are brought to
+ * NFC (when the folder already has that name, a free one: "Café (2).txt"), and files get the type their name says (it
+ * was fixed when they were created, so a file renamed to ".pdf", or uploaded under a temporary name, had no preview).
+ */
+export async function repairNamesAndTypes(): Promise<void> {
+  // Marked done only once it has run through: every step can simply run again after a crash or a failure.
+  if (await one(`SELECT 1 FROM settings WHERE key = 'repair:names-types'`)) return;
+  let renamed = 0;
+  let complete = true;
+  try {
+    for (const n of await q<{ id: number; parent_id: number; name: string; deleted: boolean }>(
+      `SELECT id, parent_id, name, deleted_at IS NOT NULL AS deleted FROM nodes WHERE parent_id IS NOT NULL AND name <> normalize(name, NFC)`)) {
+      // The same name in the other form already in the folder: this one gets a free name, "Café (2).txt" (left as it
+      // was, a WebDAV program asking for one of the two by name got the other).
+      let name = n.name.normalize('NFC');
+      if (!n.deleted && (await childByName(n.parent_id, name))) name = await uniqueName(n.parent_id, name);
+      const done = await tx(async (db) => {
+        await lockChain(db, n.parent_id);
+        const row = await one(`UPDATE nodes SET name = $2, etag = md5(random()::text) WHERE id = $1 RETURNING id`, [n.id, name], db);
+        // The folders above list it under its new name: new etags, so sync clients look again.
+        if (row && !n.deleted) await propagate(db, n.parent_id, 0);
+        return row;
+      }).catch(() => null); // the name was taken meanwhile: the next start tries again
+      if (done) renamed++;
+      else complete = false;
+    }
+  } catch (e: any) {
+    // A database not in UTF-8 (possible with DATABASE_URL) cannot normalize text: that stays so, the repair is done.
+    // Anything else: tried again at the next start.
+    console.warn(`names were not converted to one Unicode form: ${e.message}`);
+    if (!/encoding/i.test(String(e?.message))) complete = false;
+  }
+  // In batches, so a server with millions of files does not hold them all in memory.
+  let typed = 0;
+  for (let after = 0; ;) {
+    const batch = await q<{ id: number; name: string; mime: string }>(
+      `SELECT id, name, mime FROM nodes WHERE NOT is_dir AND id > $1 ORDER BY id LIMIT 5000`, [after]);
+    if (!batch.length) break;
+    after = batch[batch.length - 1].id;
+    const byType = new Map<string, number[]>();
+    for (const f of batch) {
+      const m = mimeOf(f.name);
+      if (m === f.mime) continue;
+      const ids = byType.get(m);
+      if (ids) ids.push(f.id);
+      else byType.set(m, [f.id]);
+    }
+    for (const [mime, ids] of byType) {
+      await q(`UPDATE nodes SET mime = $1 WHERE id = ANY($2::bigint[])`, [mime, ids]);
+      typed += ids.length;
+    }
+  }
+  if (complete) await q(`INSERT INTO settings (key, value) VALUES ('repair:names-types', $1) ON CONFLICT DO NOTHING`, [new Date().toISOString()]);
+  if (renamed || typed) console.log(`repaired ${renamed} name(s) to one Unicode form and the type of ${typed} file(s)`);
 }
 
 // ---------------------------------------------------------------- lookup
@@ -269,9 +327,10 @@ export async function ancestors(id: number, db: Db = pool): Promise<Node[]> {
 }
 
 export async function childByName(parentId: number, name: string, db: Db = pool): Promise<Node | undefined> {
+  // Names are stored in NFC (see checkName); a lookup with the same name in another form (WebDAV from a Mac) finds it.
   return one<Node>(
     `SELECT ${COLS} FROM nodes WHERE parent_id = $1 AND name = $2 AND deleted_at IS NULL`,
-    [parentId, name],
+    [parentId, name.normalize('NFC')],
     db,
   );
 }
@@ -461,11 +520,53 @@ export async function uniqueName(parentId: number, name: string, db: Db = pool):
   }
 }
 
+/**
+ * Folders inside folders, at most this many levels below the top. Every write walks a folder's ancestors, and file
+ * systems and programs give up long before (a Windows path ends at 260 characters unless long paths are turned on).
+ */
+export const MAX_DEPTH = 250;
+
+/** How many levels below the owner's top folder `id` is (the top folder is 0). */
+async function depthOf(db: Db, id: number): Promise<number> {
+  const r = await one<{ d: number }>(
+    `WITH RECURSIVE a AS (
+       SELECT id, parent_id, 0 AS d FROM nodes WHERE id = $1
+       UNION ALL
+       SELECT n.id, n.parent_id, a.d + 1 FROM nodes n JOIN a ON n.id = a.parent_id)
+     SELECT max(d)::int AS d FROM a`,
+    [id],
+    db,
+  );
+  return r?.d ?? 0;
+}
+
+/** How many levels of folders lie inside folder `id` (0 when it holds no folders). */
+async function heightOf(db: Db, id: number): Promise<number> {
+  const r = await one<{ h: number }>(
+    `WITH RECURSIVE t AS (
+       SELECT id, 0 AS h FROM nodes WHERE id = $1
+       UNION ALL
+       SELECT n.id, t.h + 1 FROM nodes n JOIN t ON n.parent_id = t.id WHERE n.is_dir AND n.deleted_at IS NULL AND t.h <= $2)
+     SELECT max(h)::int AS h FROM t`,
+    [id, MAX_DEPTH],
+    db,
+  );
+  return r?.h ?? 0;
+}
+
+/** A folder placed in `parentId`, with `inside` levels of folders of its own, must not end up too deep. */
+async function assertDepth(db: Db, parentId: number, inside: number): Promise<void> {
+  if ((await depthOf(db, parentId)) + 1 + inside > MAX_DEPTH) {
+    throw new HttpError(400, 'Folders can be nested at most 250 levels deep');
+  }
+}
+
 export async function createDir(parent: Node, name: string): Promise<Node> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   return tx(async (db) => {
     await lockChain(db, parent.id);
     await assertLive(db, parent.id);
+    await assertDepth(db, parent.id, 0);
     const n = await one<Node>(
       `INSERT INTO nodes (owner, parent_id, name, is_dir) VALUES ($1, $2, $3, true) RETURNING ${COLS}`,
       [parent.owner, parent.id, name],
@@ -485,7 +586,7 @@ export async function writeFile(
   name: string,
   file: string,
   size: number,
-  opts: { noOverwrite?: boolean; sha256?: string } = {},
+  opts: { noOverwrite?: boolean; sha256?: string; expectEtag?: string; expectId?: number } = {},
 ): Promise<{ node: Node; created: boolean }> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
   const blob = await adoptBlob(file);
@@ -502,6 +603,9 @@ export async function writeFile(
         existing = undefined;
       }
       if (existing?.is_dir) throw new HttpError(409, 'A folder with that name exists');
+      if (opts.expectId && existing?.id !== opts.expectId) throw new HttpError(412, 'Someone else changed this file since you opened it');
+      // Checked again under the lock: a save that started from an older version never overwrites a newer one.
+      if (opts.expectEtag && existing && existing.etag !== opts.expectEtag) throw new HttpError(412, 'Someone else changed this file since you opened it');
       await checkQuota(db, parent.owner, size);
       if (existing) {
         await q(`INSERT INTO versions (node_id, blob, size, mtime) VALUES ($1, $2, $3, $4)`,
@@ -566,11 +670,13 @@ export async function moveNode(node: Node, dest: Node, newName: string): Promise
     if ((await ancestors(dest.id, db)).some((n) => n.id === node.id)) {
       throw new HttpError(400, 'Cannot move a folder into itself');
     }
+    if (node.is_dir && dest.id !== node.parent_id) await assertDepth(db, dest.id, await heightOf(db, node.id));
     const cur = await current(db, node.id); // parent as it is now (a parallel move may have changed it)
     const size = await sizeOf(db, node.id);
     const moved = (await one<Node>(
-      `UPDATE nodes SET parent_id = $2, name = $3, etag = md5(random()::text) WHERE id = $1 RETURNING ${COLS}`,
-      [node.id, dest.id, newName],
+      `UPDATE nodes SET parent_id = $2, name = $3, etag = md5(random()::text), mime = CASE WHEN is_dir THEN mime ELSE $4 END
+        WHERE id = $1 RETURNING ${COLS}`,
+      [node.id, dest.id, newName, mimeOf(newName)],
       db,
     ).catch(conflict))!;
     if (dest.id === cur.parent_id) {
@@ -598,26 +704,62 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
       if (node.is_dir && (await ancestors(dest.id, db)).some((n) => n.id === node.id)) {
         throw new HttpError(400, 'Cannot copy a folder into itself');
       }
+      if (node.is_dir) await assertDepth(db, dest.id, await heightOf(db, node.id));
       const src = await current(db, node.id); // its content now (blob, size), not the caller's copy
       const size = await sizeOf(db, node.id);
       await checkQuota(db, dest.owner, size);
-      const copyRec = async (src: Node, parentId: number, name: string): Promise<Node> => {
-        const blob = src.blob ? await duplicateBlob(src.blob) : null;
-        if (blob) {
-          created.push(blob);
-          // Same bytes, same hash (if the source's is known yet; otherwise the queue below computes it).
-          await q(`INSERT INTO blob_hashes (blob, sha256) SELECT $2, sha256 FROM blob_hashes WHERE blob = $1`, [src.blob, blob], db);
+      // One folder level at a time: a few statements per level instead of several per item, so a big folder is copied
+      // quickly while its folders are locked. Each file's copy is a hard link (duplicateBlob).
+      const copyLevel = async (items: Node[], parentOf: (n: Node) => number, nameOf: (n: Node) => string): Promise<Node[]> => {
+        const blobs: (string | null)[] = [];
+        for (const n of items) {
+          const blob = n.blob ? await duplicateBlob(n.blob) : null;
+          if (blob) created.push(blob);
+          blobs.push(blob);
         }
-        const n = (await one<Node>(
+        // Same bytes, same hash (where the source's is known yet; the queue below computes the others).
+        const linked = items.flatMap((n, i) => (blobs[i] ? [[n.blob!, blobs[i]!]] : []));
+        if (linked.length) {
+          await q(
+            `INSERT INTO blob_hashes (blob, sha256)
+             SELECT c.blob, h.sha256 FROM unnest($1::text[], $2::text[]) AS c(src, blob) JOIN blob_hashes h ON h.blob = c.src
+             ON CONFLICT DO NOTHING`,
+            [linked.map((p) => p[0]), linked.map((p) => p[1])],
+            db,
+          );
+        }
+        return q<Node>(
           `INSERT INTO nodes (owner, parent_id, name, is_dir, size, mime, blob)
-           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${COLS}`,
-          [dest.owner, parentId, name, src.is_dir, src.size, src.mime, blob],
+           SELECT $1, c.parent_id, c.name, c.is_dir, c.size, c.mime, c.blob
+             FROM unnest($2::bigint[], $3::text[], $4::boolean[], $5::bigint[], $6::text[], $7::text[])
+               AS c(parent_id, name, is_dir, size, mime, blob)
+           RETURNING ${COLS}`,
+          [dest.owner, items.map(parentOf), items.map(nameOf), items.map((n) => n.is_dir), items.map((n) => n.size),
+            items.map((n) => (n.is_dir ? n.mime : mimeOf(nameOf(n)))), blobs],
           db,
-        ).catch(conflict))!;
-        if (src.is_dir) for (const c of await children(src.id, db)) await copyRec(c, n.id, c.name);
-        return n;
+        ).catch(conflict);
       };
-      const copy = await copyRec(src, dest.id, newName);
+      const [copy] = await copyLevel([src], () => dest.id, () => newName);
+      // Source folder id → its copy's id, for the level being copied.
+      let folders = src.is_dir ? new Map([[src.id, copy.id]]) : new Map<number, number>();
+      while (folders.size) {
+        const next = new Map<number, number>();
+        // A level in pieces of 2,000 items, so a wide tree is never all in memory at once.
+        for (let after = 0; ;) {
+          const items = await q<Node>(
+            `SELECT ${COLS} FROM nodes WHERE parent_id = ANY($1::bigint[]) AND deleted_at IS NULL AND id > $2 ORDER BY id LIMIT 2000`,
+            [[...folders.keys()], after],
+            db,
+          );
+          if (!items.length) break;
+          after = items[items.length - 1].id;
+          const copies = await copyLevel(items, (n) => folders.get(n.parent_id!)!, (n) => n.name);
+          // Names are unique per folder, so (new parent, name) finds each copy whatever order the rows come back in.
+          const byPlace = new Map(copies.map((c) => [`${c.parent_id}/${c.name}`, c.id]));
+          for (const n of items) if (n.is_dir) next.set(n.id, byPlace.get(`${folders.get(n.parent_id!)}/${n.name}`)!);
+        }
+        folders = next;
+      }
       await propagate(db, dest.id, size);
       return copy;
     });
@@ -625,6 +767,54 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
     return out;
   } catch (e) {
     await dropBlobs(created);
+    throw e;
+  }
+}
+
+/**
+ * WebDAV MOVE or COPY of a file onto another file. The destination stays the same item (its shares, public links and
+ * favorite) and gets the source's content; its old content becomes a version, as with any overwrite. After a MOVE the
+ * source is gone (its own versions with it).
+ */
+export async function replaceFileContent(src: Node, dest: Node, move: boolean): Promise<Node> {
+  if (src.is_dir || dest.is_dir || !src.blob) throw new HttpError(400, 'Not a file');
+  if (move && dest.owner !== src.owner) throw new HttpError(403, "Items can only be moved within the owner's storage; copy instead");
+  const copied = move ? null : await duplicateBlob(src.blob);
+  let drop: (string | null)[] = [];
+  try {
+    const out = await tx(async (db) => {
+      await lockChain(db, src.id, dest.id);
+      await assertLive(db, src.id, dest.id);
+      const s = await current(db, src.id);
+      const d = await current(db, dest.id);
+      // The copy was made before the lock: if the source changed since, it is not what was asked for.
+      if (copied && s.blob !== src.blob) throw new HttpError(409, 'The source changed meanwhile; try again');
+      // A copy adds the whole file: the content it replaces is kept as a version and still counts. (A move only
+      // swaps the same bytes around.)
+      if (!move) await checkQuota(db, d.owner, s.size);
+      await q(`INSERT INTO versions (node_id, blob, size, mtime) VALUES ($1, $2, $3, $4)`, [d.id, d.blob, d.size, d.mtime], db);
+      const blob = copied ?? s.blob!;
+      if (copied) await q(`INSERT INTO blob_hashes (blob, sha256) SELECT $2, sha256 FROM blob_hashes WHERE blob = $1 ON CONFLICT DO NOTHING`, [s.blob, copied], db);
+      const node = (await one<Node>(
+        `UPDATE nodes SET blob = $2, size = $3, etag = md5(random()::text), mtime = $4, mime = $5 WHERE id = $1 RETURNING ${COLS}`,
+        [d.id, blob, s.size, move ? s.mtime : new Date(), mimeOf(d.name)],
+        db,
+      ))!;
+      await propagate(db, d.parent_id!, s.size - d.size);
+      drop = await pruneVersions(db, d.id);
+      if (move) {
+        // The source's own versions go with it; its content now belongs to the destination.
+        drop.push(...(await q<{ blob: string }>(`SELECT blob FROM versions WHERE node_id = $1`, [s.id], db)).map((v) => v.blob));
+        await q(`DELETE FROM nodes WHERE id = $1`, [s.id], db);
+        await propagate(db, s.parent_id!, -s.size);
+      }
+      return node;
+    });
+    await dropBlobs(drop);
+    if (copied) queueHash(copied); // skipped at once when the source's hash came along
+    return out;
+  } catch (e) {
+    if (copied) await dropBlobs([copied]);
     throw e;
   }
 }
@@ -784,13 +974,53 @@ export async function restoreVersion(node: Node, versionId: number | string): Pr
 
 // ---------------------------------------------------------------- views
 
-export async function searchNodes(owner: string, text: string): Promise<Node[]> {
-  const pattern = '%' + text.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-  return q<Node>(
-    `SELECT ${COLS} FROM nodes WHERE owner = $1 AND deleted_at IS NULL AND parent_id IS NOT NULL
-        AND name ILIKE $2 ORDER BY is_dir DESC, lower(name) LIMIT 200`,
-    [owner, pattern],
-  );
+let unaccent: Promise<boolean> | null = null;
+/** PostgreSQL's unaccent (a trusted extension the database owner may add); without it, search stays accent-exact. */
+function unaccentAvailable(): Promise<boolean> {
+  return (unaccent ??= q(`CREATE EXTENSION IF NOT EXISTS unaccent`).then(() => true, (e) => {
+    console.warn(`search ignores accents only with PostgreSQL's unaccent extension: ${e.message}`);
+    return false;
+  }));
+}
+
+export const SEARCH_LIMIT = 200;
+
+/**
+ * Names containing `text`, in the user's own files and in folders shared with them. Accents and case are ignored
+ * ("cafe" finds "Café") and the text is compared in the same Unicode form the names are stored in.
+ */
+export async function searchNodes(user: string, text: string): Promise<Node[]> {
+  const pattern = '%' + text.normalize('NFC').replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+  const accentFree = await unaccentAvailable();
+  const match = (col: string) => (accentFree ? `unaccent(${col}) ILIKE unaccent($2)` : `${col} ILIKE $2`);
+  // Own files and shared ones are searched apart and then put together. One query with "owner = me OR id IN
+  // (shared)" made the planner scan everybody's files and re-read the shared tree for every match: minutes on a big
+  // server, holding a database connection. The time limit keeps any search from doing that again.
+  try {
+    return await tx(async (db) => {
+      await q(`SET LOCAL statement_timeout = '20s'`, [], db);
+      return q<Node>(
+        `WITH RECURSIVE shared AS (
+           SELECT n.id FROM nodes n JOIN shares s ON s.node_id = n.id
+            WHERE n.deleted_at IS NULL AND n.owner <> $1
+              AND ((s.type = 'user' AND s.share_with = $1)
+                OR (s.type = 'group' AND s.share_with IN (SELECT group_id FROM group_members WHERE user_id = $1)))
+           UNION
+           SELECT c.id FROM nodes c JOIN shared t ON c.parent_id = t.id WHERE c.deleted_at IS NULL)
+         SELECT ${COLS} FROM (
+           SELECT ${COLS} FROM nodes WHERE owner = $1 AND deleted_at IS NULL AND parent_id IS NOT NULL AND ${match('name')}
+           UNION ALL
+           SELECT ${COLS.split(', ').map((c) => 'n.' + c).join(', ')} FROM shared t JOIN nodes n ON n.id = t.id
+            WHERE n.deleted_at IS NULL AND ${match('n.name')}
+         ) found ORDER BY is_dir DESC, lower(name) LIMIT ${SEARCH_LIMIT}`,
+        [user, pattern],
+        db,
+      );
+    });
+  } catch (e: any) {
+    if (e?.code === '57014') throw new HttpError(503, 'The search took too long. Try a longer part of the name.');
+    throw e;
+  }
 }
 
 export async function recentFiles(owner: string): Promise<Node[]> {

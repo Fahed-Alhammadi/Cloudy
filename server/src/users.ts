@@ -87,6 +87,7 @@ export async function userJson(u: User) {
     passkeys: keys?.n ?? 0,
     notifyShares: u.notify_shares !== false,
     language: u.language ?? null,
+    timezone: u.timezone ?? null,
     disabled: u.disabled,
     quotaBytes: u.quota_bytes,
     used: await usage(u.id),

@@ -42,7 +42,7 @@ export async function withPasswordDialog({ title, okLabel, danger = false, intro
 
 export async function renderSettings(main, ctx) {
   const me = await get('/api/me');
-  const [appPasswords, passkeys] = await Promise.all([get('/api/me/app-passwords'), get('/api/me/passkeys')]);
+  const [appPasswords, passkeys, options] = await Promise.all([get('/api/me/app-passwords'), get('/api/me/passkeys'), get('/api/auth/options').catch(() => ({}))]);
   const rerender = () => renderSettings(main, ctx).catch(showError);
   const davBase = `${location.origin}/dav`;
 
@@ -51,6 +51,11 @@ export async function renderSettings(main, ctx) {
   const notifyShares = h('input', { type: 'checkbox', checked: me.notifyShares !== false });
   const language = h('select', {}, h('option', { value: '' }, t('Automatic (browser language)')),
     LANGUAGES.map(([code, label]) => h('option', { value: code, selected: me.language === code }, label)));
+  // Repeating events keep their local time in this zone, and the apps' link expiry dates are read in it.
+  const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const timezone = h('select', {}, [...new Set([me.timezone || browserZone, ...zones])].filter(Boolean)
+    .map((z) => h('option', { value: z, selected: z === (me.timezone || browserZone) }, z.replace(/_/g, ' '))));
   const cur = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   // Changing the email address needs the current password (reset links go there); other profile edits don't.
   const emailPw = passwordInput(t('Current password (needed to change the email)'));
@@ -64,6 +69,8 @@ export async function renderSettings(main, ctx) {
   emailPw.input.required = false;
   const pwError = h('p', { class: 'error wide', role: 'alert' });
   const pw1 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
+  const pw2 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
+  const showPw = h('input', { type: 'checkbox', onchange: (e) => { for (const i of [cur, pw1, pw2]) i.type = e.target.checked ? 'text' : 'password'; } });
   const pct = me.quotaBytes ? Math.min(100, (me.used / me.quotaBytes) * 100) : 0;
 
   const urlRow = (label, url) => h('div', { class: 'url-row' }, h('span', { class: 'muted' }, label),
@@ -80,7 +87,7 @@ export async function renderSettings(main, ctx) {
 
     h('form', { class: 'card form-grid', onsubmit: busyForm(async () => {
       emailPw.error.textContent = '';
-      const body = { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, language: language.value || null };
+      const body = { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, language: language.value || null, timezone: timezone.value };
       if (emailChanged()) body.password = emailPw.input.value;
       try {
         await patch('/api/me', body);
@@ -98,13 +105,16 @@ export async function renderSettings(main, ctx) {
       h('label', { class: 'field' }, h('span', {}, t('Display name')), name),
       h('label', { class: 'field' }, h('span', {}, t('Email')), email),
       h('label', { class: 'field' }, h('span', {}, t('Language')), language),
+      h('label', { class: 'field' }, h('span', {}, t('Time zone')), timezone),
       emailPwBox,
-      h('label', { class: 'check wide' }, notifyShares, t('Email me when something is shared with me')),
+      // Only when this server can send email.
+      options.passwordReset && h('label', { class: 'check wide' }, notifyShares, t('Email me when something is shared with me')),
       h('p', { class: 'muted small wide' }, t('Your language is used here, in the Android and desktop apps and in emails. Your email is also used for password reset links and security notices.')),
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save profile')))),
 
     h('form', { class: 'card form-grid', onsubmit: busyForm(async (e) => {
       pwError.textContent = '';
+      if (pw1.value !== pw2.value) { pwError.textContent = t('The passwords do not match.'); pw2.focus(); return; }
       try {
         await post('/api/me/password', { current: cur.value, password: pw1.value });
         toast(t('Password changed'));
@@ -117,6 +127,8 @@ export async function renderSettings(main, ctx) {
       h('h2', { class: 'wide' }, t('Password')),
       h('label', { class: 'field' }, h('span', {}, t('Current password')), cur),
       h('label', { class: 'field' }, h('span', {}, t('New password (8+ characters)')), pw1),
+      h('label', { class: 'field' }, h('span', {}, t('Repeat new password')), pw2),
+      h('label', { class: 'check wide' }, showPw, t('Show passwords')),
       pwError,
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Change password')))),
 
@@ -172,7 +184,10 @@ function deleteAccountCard() {
       intro: h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. It can’t be undone.')),
       submit: (password) => post('/api/me/delete', { password }),
     });
-    if (deleted) location.reload(); // the session is gone: back to the sign-in page
+    if (deleted) {
+      try { sessionStorage.setItem('cloudy-notice', 'deleted'); } catch { /* storage unavailable */ }
+      location.assign('/'); // the session is gone: back to the sign-in page, which says the account was deleted
+    }
   };
   return h('div', { class: 'card' }, h('h2', {}, t('Delete account')),
     h('p', {}, t('Deletes your account and all your data on this server for good.')),
@@ -225,7 +240,9 @@ function passkeysCard(passkeys, rerender) {
       h('button', { class: 'btn ghost danger', onclick: async () => {
         if (await confirmDialog(t('Remove passkey'), t('You will no longer be able to sign in with "{name}". Also delete it from the device or password manager.', { name: p.name }), t('Remove'), true)) await del(`/api/me/passkeys/${p.id}`).then(rerender, showError);
       } }, t('Remove'))))) : h('p', { class: 'muted' }, t('No passkeys yet.')),
-    passkeysSupported()
+    /^\d+(\.\d+){3}$/.test(location.hostname) || location.hostname.includes(':')
+      ? h('p', { class: 'muted small' }, t('Passkeys need the server’s name (for example cloud.example.com), not an IP address.'))
+      : passkeysSupported()
       ? h('button', { class: 'btn', onclick: add }, icon('plus'), t('Add a passkey'))
       : h('p', { class: 'muted small' }, t('This browser cannot create passkeys here. Passkeys need HTTPS (or localhost) and a recent browser.')));
 }
@@ -343,6 +360,7 @@ async function userDialog(user, groups, rerender) {
       try {
         if (isNew) await post('/api/admin/users', { ...data, id: f.id.value.trim(), password: f.password.value });
         else await patch(`/api/admin/users/${encodeURIComponent(user.id)}`, { ...data, disabled: f.disabled.checked, password: f.password.value || undefined, resetTwoFactor: f.resetTwoFactor.checked || undefined, removePasskeys: f.removePasskeys.checked || undefined });
+        toast(isNew ? t('User created') : f.password.value ? t('User saved, password changed') : t('User saved'));
         rerender();
         return true;
       } catch (e) {
@@ -361,14 +379,16 @@ export async function renderAdmin(main, ctx) {
       h('button', { class: 'btn primary', onclick: () => userDialog(null, groups, rerender) }, icon('plus'), t('New user'))),
     h('div', { class: 'card' }, h('h2', {}, t('Users ({n})', { n: users.length })),
       h('div', { class: 'table-wrap' }, h('table', { class: 'data-table' },
-        h('thead', {}, h('tr', {}, [t('User'), t('Email'), t('Groups'), t('Storage'), t('Role'), h('span', { class: 'sr-only' }, t('Actions'))].map((th) => h('th', {}, th)))),
+        // Phones: Email and Groups are left out (both are in the Edit dialog); Edit and Delete stay at the right edge.
+        h('thead', {}, h('tr', {}, [[t('User')], [t('Email'), 'col-email'], [t('Groups'), 'col-groups'], [t('Storage')], [t('Role')],
+          [h('span', { class: 'sr-only' }, t('Actions')), 'col-actions']].map(([th, cls]) => h('th', { class: cls ?? null }, th)))),
         h('tbody', {}, users.map((u) => h('tr', { class: u.disabled ? 'dim' : '' },
           h('td', {}, h('strong', {}, u.displayName), h('div', { class: 'muted small' }, u.id)),
-          h('td', {}, u.email),
-          h('td', {}, u.groups.join(', ')),
+          h('td', { class: 'col-email' }, u.email),
+          h('td', { class: 'col-groups' }, u.groups.join(', ')),
           h('td', { class: 'nowrap' }, `${formatSize(u.used)}${u.quotaBytes ? ` / ${formatSize(u.quotaBytes)}` : ''}`),
           h('td', {}, u.isAdmin ? h('span', { class: 'pill' }, t('admin')) : '', u.twoFactor ? h('span', { class: 'pill' }, '2FA') : '', u.passkeys ? h('span', { class: 'pill' }, t('passkey')) : '', u.disabled ? h('span', { class: 'pill warn' }, t('disabled')) : ''),
-          h('td', { class: 'nowrap' },
+          h('td', { class: 'nowrap col-actions' },
             h('button', { class: 'icon-btn', 'aria-label': t('Edit {name}', { name: u.id }), onclick: () => userDialog(u, groups, rerender) }, icon('edit')),
             u.id !== ctx.me.id && h('button', { class: 'icon-btn', 'aria-label': t('Delete {name}', { name: u.id }), onclick: async () => {
               if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files, calendars and contacts? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
@@ -383,8 +403,8 @@ export async function renderAdmin(main, ctx) {
           if (await confirmDialog(t('Delete group'), t('Delete group "{name}"? Shares with this group are removed.', { name: g.id }), t('Delete'), true)) await del(`/api/admin/groups/${encodeURIComponent(g.id)}`).then(rerender, showError);
         } }, icon('trash'))))) : h('p', { class: 'muted' }, t('No groups yet.')),
       h('button', { class: 'btn', onclick: async () => {
-        const id = await promptDialog(t('New group'), t('Group name'), '', t('Create'));
-        if (id) await post('/api/admin/groups', { id }).then(rerender, showError);
+        const id = await promptDialog(t('New group'), t('Group name (letters, digits and . _ -)'), '', t('Create'));
+        if (id) await post('/api/admin/groups', { id }).then(() => { toast(t('Group created')); rerender(); }, showError);
       } }, icon('plus'), t('New group'))),
     limitsCard(limits, ctx, rerender),
     mailCard(mail, ctx, rerender),
@@ -464,7 +484,7 @@ function mailCard(mail, ctx, rerender) {
           const r = await post('/api/admin/mail/test', { to });
           status.textContent = t('Test email sent to {to}.', { to: r.to });
           toast(t('Test email sent'));
-        } catch (err) { status.textContent = ''; showError(err); }
+        } catch (err) { status.textContent = t(err.message); showError(err); }
       } }, t('Save and send test')),
       h('button', { class: 'btn primary', type: 'submit' }, t('Save'))),
   );

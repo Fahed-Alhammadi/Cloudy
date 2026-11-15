@@ -84,8 +84,10 @@ function splitProp(line: string): [string, string] | null {
 
 /** Turns one BEGIN:VCARD…END:VCARD block (raw lines) into clean vCard 3.0/4.0 text, or throws. */
 function normalizeCard(raw: string[]): string {
-  // 1. Join folded lines and quoted-printable soft line breaks.
+  // 1. Join folded lines and quoted-printable soft line breaks. vCard 3/4 drop the one space or tab that starts a
+  //    continuation line; vCard 2.1 folds like email headers, where it is part of the value (words ran together).
   const lines: string[] = [];
+  const folded21 = raw.some((l) => /^VERSION:\s*2\.1\s*$/i.test(l));
   for (let i = 0; i < raw.length; i++) {
     let line = raw[i];
     if (!line.trim()) continue;
@@ -105,7 +107,7 @@ function normalizeCard(raw: string[]): string {
       if (length > MAX_LINE) continue;
       line = parts.join('');
     }
-    if (/^[ \t]/.test(line) && lines.length) lines[lines.length - 1] += line.slice(1);
+    if (/^[ \t]/.test(line) && lines.length) lines[lines.length - 1] += folded21 ? line : line.slice(1);
     else lines.push(line);
   }
 
@@ -145,6 +147,8 @@ function normalizeCard(raw: string[]): string {
     }
     if (BINARY_PROPS.has(name) && version !== '4.0' && !outParams.includes('ENCODING=b') && !/^(https?|data):/i.test(rawValue)) continue;
     let value = qp ? decodeQuotedPrintable(rawValue, charset) : rawValue;
+    // Base64 (a photo): the spaces vCard 2.1 folding leaves at the start of each line are not part of the data.
+    if (outParams.includes('ENCODING=b')) value = value.replace(/\s+/g, '');
     if ((qp || v21) && TEXT_ESCAPED.has(name)) value = value.replace(/[\\,]/g, (c) => '\\' + c).replace(/\r?\n/g, '\\n');
     else if (qp) value = value.replace(/\r?\n/g, ' ');
     if (name === 'UID') { if (!value.trim()) continue; hasUid = true; }
@@ -219,27 +223,43 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-const key = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
+const key = (h: string) => h.toLowerCase().replace(/ß/g, 'ss').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+
+/** Words of German, French and Spanish column headers, in the English the rules below know. */
+const WORDS: [RegExp, string][] = [
+  // Outlook's "Land/Region", "Pays/Région", "País o región": the country (it was read as a region, then dropped).
+  [/(land|pays|pais)o?region/g, 'countryregion'],
+  [/(privat|domicile|personnel|particular|casa)/g, 'home'], [/(geschaftlich|bureau|professionnel|trabajo|oficina)/g, 'business'],
+  [/(strasse|rue|calle)/g, 'street'], [/^(ort|ville|ciudad|localidad)|(ort|ville|ciudad|localidad)$/g, 'city'],
+  [/(postleitzahl|plz|codepostal|codigopostal)/g, 'postalcode'], [/(bundesland|(?<!country)region|provincia)/g, 'state'],
+  [/(land|pays|pais)/g, 'country'],
+];
 
 type Role = 'given' | 'family' | 'fn' | 'email' | 'phone' | 'org' | 'title' | 'birthday' | 'note' | 'address' | `adr:${string}` | null;
 
 /** Maps a column header of Google, Outlook or simple sheets to a contact field. */
 function roleOf(header: string): Role {
   const k = key(header);
+  // "Phonetic First Name" (Google), "Yomi Name" (Outlook): pronunciation, not a name or a phone number.
+  if (k.includes('phonetic') || k.includes('yomi')) return null;
   if (/(type|label|displayname)$/.test(k) && !['displayname'].includes(k)) return null;
-  if (['firstname', 'givenname', 'first', 'forename'].includes(k)) return 'given';
-  if (['lastname', 'familyname', 'surname', 'last'].includes(k)) return 'family';
-  if (['name', 'fullname', 'displayname', 'formattedname', 'contactname'].includes(k)) return 'fn';
-  if (k.includes('email') || k === 'mail') return 'email';
-  if ((k.includes('phone') || k.includes('mobile') || k === 'tel' || k.startsWith('telephone') || k === 'cell') && !k.includes('fax')) return 'phone';
-  if (['company', 'organization', 'organisation', 'organizationname', 'organization1name', 'org', 'companyname'].includes(k)) return 'org';
-  if (['jobtitle', 'title', 'organizationtitle', 'organization1title', 'position'].includes(k)) return 'title';
-  if (['birthday', 'bday', 'dateofbirth', 'birthdate'].includes(k)) return 'birthday';
-  if (['notes', 'note', 'comments'].includes(k)) return 'note';
+  if (['firstname', 'givenname', 'first', 'forename', 'vorname', 'prenom', 'nombre'].includes(k)) return 'given';
+  if (['lastname', 'familyname', 'surname', 'last', 'nachname', 'familienname', 'nom', 'nomdefamille', 'apellidos', 'apellido'].includes(k)) return 'family';
+  if (['name', 'fullname', 'displayname', 'formattedname', 'contactname', 'anzeigename', 'nomcomplet', 'nombrecompleto'].includes(k)) return 'fn';
+  if (k.includes('email') || k === 'mail' || k.includes('courriel') || k.includes('messagerie') || k.includes('correoelectronico')) return 'email';
+  if ((k.includes('phone') || k.includes('mobile') || k === 'tel' || k.startsWith('telephone') || k === 'cell' || k.includes('telefon')
+    || k.includes('handy') || k.includes('portable') || k.includes('movil') || k.includes('celular')) && !k.includes('fax')) return 'phone';
+  if (['company', 'organization', 'organisation', 'organizationname', 'organization1name', 'org', 'companyname', 'firma', 'unternehmen',
+    'societe', 'entreprise', 'empresa', 'organizacion', 'compania'].includes(k)) return 'org';
+  if (['jobtitle', 'title', 'organizationtitle', 'organization1title', 'position', 'fonction', 'poste', 'puesto', 'cargo'].includes(k)) return 'title';
+  if (['birthday', 'bday', 'dateofbirth', 'birthdate', 'geburtstag', 'anniversaire', 'datedenaissance', 'cumpleanos', 'fechadenacimiento'].includes(k)) return 'birthday';
+  if (['notes', 'note', 'comments', 'notizen', 'notiz', 'remarques', 'commentaires', 'notas', 'comentarios'].includes(k)) return 'note';
   if (k.includes('address') && k.includes('formatted')) return 'address';
-  if (k === 'address' || k === 'homeaddress' || k === 'businessaddress') return 'address';
-  const adr = /^(home|business|other)?(street|city|state|region|postalcode|zip|zipcode|country|countryregion)$/.exec(k);
-  if (adr) return `adr:${adr[1] ?? 'home'}:${adr[2]}`;
+  if (['address', 'homeaddress', 'businessaddress', 'adresse', 'direccion'].includes(k)) return 'address';
+  let en = k;
+  for (const [re, word] of WORDS) en = en.replace(re, word);
+  const adr = /^(home|business|other)?(street|city|state|region|postalcode|zip|zipcode|country|countryregion)(home|business|other)?$/.exec(en);
+  if (adr) return `adr:${adr[1] ?? adr[3] ?? 'home'}:${adr[2]}`;
   return null;
 }
 

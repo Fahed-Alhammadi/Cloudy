@@ -27,9 +27,29 @@ export function h(tag, attrs, ...kids) {
 // Each view has a plain address: /files/<id>, /recent, /search?q=…, /settings… (the server answers all of them
 // with the app). Moving between views changes the address without reloading; app.js redraws on 'cloudy:navigate'.
 
+// A page with unsaved work (the contact form) asks before the app draws another page, or this one again: `guard`
+// resolves to false to stay.
+let leaveGuard = null;
+export function setLeaveGuard(guard) { leaveGuard = guard; }
+
+/** Whether the page on screen may go: nothing unsaved, or the user chose to discard it. */
+export async function mayLeave() {
+  if (!leaveGuard) return true;
+  const guard = leaveGuard;
+  const ok = await guard();
+  if (ok && leaveGuard === guard) leaveGuard = null;
+  return ok;
+}
+
 /** Goes to an address inside the app. `replace` swaps the current history entry instead of adding one. */
 export function navigate(path, { replace = false } = {}) {
-  if (path !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  // Also for the address on screen: it is drawn again (a click on Contacts while on Contacts reset the form).
+  if (leaveGuard) return void mayLeave().then((ok) => { if (ok) navigate(path, { replace }); });
+  if (path !== location.pathname + location.search) {
+    // The page being left remembers how far down it was, for Back (app.js puts it back there).
+    if (!replace) { try { history.replaceState({ ...(history.state ?? {}), scroll: window.scrollY }, ''); } catch { /* state too big: no matter */ } }
+    history[replace ? 'replaceState' : 'pushState'](null, '', path);
+  }
   window.dispatchEvent(new Event('cloudy:navigate'));
 }
 
@@ -79,6 +99,12 @@ const P = {
   key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/>',
+  list: '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
+  sort: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+  up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
+  blank: '',
   save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
 };
 
@@ -86,7 +112,7 @@ export function icon(name, cls = '') {
   const span = document.createElement('span');
   span.className = `icon ${cls}${name === 'left' || name === 'right' ? ' mirror-rtl' : ''}`;
   span.setAttribute('aria-hidden', 'true');
-  span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[name] || P.file}</svg>`;
+  span.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[name] ?? P.file}</svg>`;
   return span;
 }
 
@@ -170,7 +196,7 @@ export function showError(e) {
  * so a double click can't send the same request twice.
  */
 let dialogSeq = 0;
-export function modal({ title, body, buttons = [{ label: t('Close'), value: null }], wide = false, onSubmit }) {
+export function modal({ title, body, buttons = [{ label: t('Close'), value: null }], wide = false, onSubmit, focusPrimary = false }) {
   return new Promise((resolve) => {
     const titleId = `dlg-title-${++dialogSeq}`;
     const form = h('form', { method: 'dialog', class: 'dialog-form' });
@@ -231,11 +257,13 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     dlg.showModal();
     const first = dlg.querySelector('input:not([type=checkbox]):not([disabled]), textarea, select');
     if (first) { first.focus(); if (first.select) first.select(); }
+    else if (focusPrimary) footer.querySelector('button[type=submit]')?.focus();
   });
 }
 
-export async function confirmDialog(title, message, okLabel = t('OK'), danger = false) {
-  const v = await modal({ title, body: h('p', {}, message), buttons: [{ label: t('Cancel'), value: null }, { label: okLabel, value: 'ok', primary: true, danger }] });
+/** `focusOk`: the OK button starts with the focus (Enter confirms), for a question the user's own key press asked. */
+export async function confirmDialog(title, message, okLabel = t('OK'), danger = false, { focusOk = false } = {}) {
+  const v = await modal({ title, body: h('p', {}, message), buttons: [{ label: t('Cancel'), value: null }, { label: okLabel, value: 'ok', primary: true, danger }], focusPrimary: focusOk });
   return v === 'ok';
 }
 

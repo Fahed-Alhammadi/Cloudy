@@ -27,8 +27,25 @@ export function t(text, vars) {
 
 export const currentLanguage = () => lang;
 
-/** Locale for Intl / toLocale*(); Arabic keeps Latin digits so dates match sizes and times. */
-export const locale = () => (lang === 'ar' ? 'ar-u-nu-latn' : lang);
+/**
+ * Locale for Intl / toLocale*(): the browser's own variant of the chosen language, so dates and the first day of the
+ * week follow the region (English in Britain writes 15/11/2026, in the US 11/15/2026; it was always the US form).
+ * Arabic keeps Latin digits so dates match sizes and times.
+ */
+let localeFor = { lang: null, value: null };
+export const locale = () => {
+  if (localeFor.lang === lang) return localeFor.value;
+  const regional = (navigator.languages?.length ? navigator.languages : [navigator.language])
+    .find((l) => String(l || '').split('-')[0].toLowerCase() === lang);
+  let value = lang;
+  for (const candidate of [regional, lang]) {
+    if (!candidate) continue;
+    const tag = lang === 'ar' ? `${String(candidate).split('-u-')[0]}-u-nu-latn` : String(candidate);
+    try { value = Intl.getCanonicalLocales(tag)[0]; break; } catch { /* not a valid tag: the plain language */ }
+  }
+  localeFor = { lang, value };
+  return value;
+};
 
 export function browserLanguage() {
   for (const l of navigator.languages?.length ? navigator.languages : [navigator.language]) {

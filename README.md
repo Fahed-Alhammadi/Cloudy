@@ -72,9 +72,11 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
 
 ## Features
 
-- **Files:** drag-and-drop upload (whole folders too), resumable uploads, previews for images, video, audio and
-  PDF, a text editor, versions, trash, favorites, recent files, search, and download a folder or several items as
-  one ZIP.
+- **Files:** a list or a grid with thumbnails of photos (HEIC too) and PDFs, sorted by name, date or size.
+  Drag files or whole folders from your computer onto the page or onto a folder: a strip at the top names where
+  they go. Resumable uploads, previews for images, video, audio and PDF, a text editor, versions, trash, favorites,
+  recent files, search (accents ignored, folders shared with you included), and download a folder or several items
+  as one ZIP.
 - **Sharing:** with users or groups, read-only or editable; public links with a password, an expiry date, and
   optional upload into the shared folder.
 - **Desktop sync:** pick which folders to sync; changes go up and down within seconds; renames and moves aren't

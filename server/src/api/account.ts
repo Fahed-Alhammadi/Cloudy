@@ -13,6 +13,8 @@ import { rootOf } from '../files.ts';
 import { newSecret, otpauthUri, verifyTotp, newRecoveryCodes, normalizeRecoveryCode } from '../totp.ts';
 import QRCode from 'qrcode';
 import { notifyPasswordChanged, notifyEmailChanged, validEmail } from '../mail.ts';
+import { thumbnailsAvailable } from '../thumbs.ts';
+import { canonicalTimeZone } from '../timezones.ts';
 import { isLanguage } from '../i18n.ts';
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
@@ -60,7 +62,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   });
 
   r.get('/api/me', authed(async ({ res }, user) => {
-    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: limits().trashDays });
+    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: limits().trashDays, thumbnails: thumbnailsAvailable() });
   }));
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
@@ -76,6 +78,13 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
       [user.id, typeof b.displayName === 'string' ? b.displayName.trim() || user.id : null,
        typeof b.email === 'string' ? b.email.trim() : null, typeof b.notifyShares === 'boolean' ? b.notifyShares : null]);
     // language: a supported code, or null / '' for "same as the browser or phone".
+    // The account's time zone (the web app sets it from the browser): used for events and link expiry dates from
+    // clients that do not send one.
+    if ('timezone' in b) {
+      const tz = b.timezone ? canonicalTimeZone(b.timezone) : null;
+      if (b.timezone && !tz) throw new HttpError(400, 'Unknown time zone');
+      await q(`UPDATE users SET timezone = $2 WHERE id = $1`, [user.id, tz]);
+    }
     if ('language' in b) {
       if (b.language && !isLanguage(b.language)) throw new HttpError(400, 'Unsupported language');
       await q(`UPDATE users SET language = $2 WHERE id = $1`, [user.id, b.language || null]);
@@ -243,7 +252,8 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   r.post('/api/admin/groups', admin(async ({ req, res }) => {
     const id = String((await readJson(req)).id ?? '').trim();
     if (!USER_ID_RE.test(id)) throw new HttpError(400, 'Invalid group name');
-    await q(`INSERT INTO groups (id) VALUES ($1) ON CONFLICT DO NOTHING`, [id]);
+    // A group that exists already is said so (it was silently accepted).
+    if (!(await one(`INSERT INTO groups (id) VALUES ($1) ON CONFLICT DO NOTHING RETURNING id`, [id]))) throw new HttpError(409, 'A group with that name exists');
     noContent(res);
   }));
 
