@@ -2,7 +2,7 @@
 
 Cloudy is a self-hosted cloud for files, sharing, calendars and contacts. It has these parts:
 - one container running the Node.js server and its own PostgreSQL database;
-- a browser app written in plain HTML5, served by the server;
+- a browser app written in plain HTML5, served by the server (its fonts too: no third-party requests);
 - native apps for Android (Kotlin, Jetpack Compose) and iPhone (Swift, SwiftUI);
 - a desktop sync app for macOS, Windows and Linux (Electron, TypeScript).
 
@@ -118,7 +118,14 @@ what changed since their last sync.
   - RP ID = hostname of `PUBLIC_URL`, else of `Host` (`X-Forwarded-Host` with `TRUST_PROXY`); client origin must match.
   - Challenges are single-use, in memory, 5 minutes. A signature counter that fails to increase is rejected.
   - Registering one needs the account password; `user.id` is an HMAC of the username, not the username.
-- Device tokens are app passwords. Users see them, and can revoke them, under *Settings → App passwords*.
+- Device tokens are app passwords. Users see them, and can revoke them, under *Settings → Apps & devices*.
+- **Invitations** (`api/invitations.ts`): an admin creates one (`POST /api/admin/invitations`, optionally emailed);
+  the link is `<origin>/invite#<token>` (fragment, like reset links), stored as SHA-256, valid 7 days. The page
+  calls `POST /api/invitations/check`, then `POST /api/invitations/accept {token, username, password}`, which creates
+  the account and a session. The invitation row is locked (`FOR UPDATE`) in the same transaction that creates the
+  user, so one link makes at most one account; a refused name or password leaves it usable. Invited accounts are
+  never administrators. Wrong links are rate-limited per client address on their own counter. New usernames start
+  with a letter or digit (`.` and `..` collapse in URLs) and may not equal another account's email address.
 - Passwords are hashed with scrypt. Tokens are stored as SHA-256 hashes.
 - Failed sign-ins are rate-limited per client IP. Behind a proxy, `TRUST_PROXY` makes the real client IP
   visible. Set to the proxies' addresses or CIDR ranges, forwarded headers count only on connections from them,
@@ -198,14 +205,28 @@ and are sent in the background — failures are logged, never shown to the user 
   `GET /api/auth/options` tells the login page whether to offer it.
 - **Notifications**: new user/group shares (recipients with an email and `notify_shares`, not the sharer) and
   password changes. Links use `PUBLIC_URL` or the origin of the request that caused the email.
+- **Invitations** are sent at once (not in the background), so the admin sees a failure; the link is also shown
+  to copy. The email is in the inviting admin's language.
 
-## 12. Limits
+## 12. Profile pictures
+
+`api/avatars.ts`: `PUT /api/me/avatar` takes the picture's bytes, `DELETE` removes it, and
+`GET /api/users/:id/avatar?v=<version>` serves it to signed-in users (anyone's, like names in sharing).
+- The type comes from the first bytes (JPEG, PNG or WebP; never the client's Content-Type), the size from the
+  header: at most 1 MiB and 1024 × 1024 pixels, because other people's browsers decode these pictures.
+- Before storing, the server removes what the picture says about the photo: EXIF, XMP, IPTC and comments in JPEG,
+  text and EXIF chunks in PNG, EXIF and XMP in WebP. The web app also crops and shrinks on a canvas first.
+- The version (a hash of the bytes) is part of the address, so browsers keep a picture for good; responses carry
+  `nosniff`, a sandboxing CSP and `Cross-Origin-Resource-Policy: same-origin`. Without a picture, the web app shows
+  initials on a colour derived from the name, the same colour the phone apps give that name in contacts.
+
+## 13. Limits
 
 The limits (days in the trash, versions per file, sign-in length) live in `limits.ts`: `settings` key `limits`,
 kept in memory and replaced when an admin saves them, so they apply without a restart. The first start stores the
 values of the old `TRASH_RETENTION_DAYS` / `MAX_VERSIONS` / `SESSION_DAYS` variables (or the defaults).
 
-## 13. Contacts import and export
+## 14. Contacts import and export
 
 `POST /api/addressbooks/:id/import` takes the raw file (20 MB, 20,000 contacts at most); `contacts-import.ts`
 detects the format and encoding (UTF-8, UTF-16 with BOM, else Windows-1252).
@@ -218,7 +239,7 @@ detects the format and encoding (UTF-8, UTF-16 with BOM, else Windows-1252).
   email or phone (last 9 digits) is skipped. The response counts `imported`, `updated`, `duplicates`, `skipped`.
 - `GET /api/addressbooks/:id/export` returns every card as one `text/vcard` file.
 
-## 14. Desktop sync
+## 15. Desktop sync
 
 The desktop app (`desktop/src/main/sync.ts`) keeps one local folder in sync with the user's files. Each pass compares
 three trees by relative path: the **local folder**, the **server** (`GET /api/nodes/:id`, with each folder's listing

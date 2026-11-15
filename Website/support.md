@@ -11,7 +11,8 @@ Help with the Cloudy server and the apps.
 ## Signing in
 
 The apps connect to a Cloudy server that you, your company or someone you trust runs. There is no sign-up: the
-server's admin creates your account. Enter the server's address (for example `https://cloud.example.com`), your
+server's admin creates your account, or sends you an invitation link where you choose your own username and
+password (the link works once, for 7 days). Enter the server's address (for example `https://cloud.example.com`), your
 username and your password. If you don't have a server yet, the [install guide](https://github.com/Fahed-Alhammadi/Cloudy#install)
 sets one up in a few minutes.
 
@@ -35,7 +36,7 @@ to reset it.
 
 ## Deleting your account
 
-In the web app open *Settings*, or in the phone apps *More → Delete account*, and confirm with your password. This
+In the web app open *Settings → Account*, or in the phone apps *More → Delete account*, and confirm with your password. This
 deletes your files, calendars, contacts and shares from the server. Details are in the
 [privacy policy](privacy-policy.html#deleting-your-account).
 
