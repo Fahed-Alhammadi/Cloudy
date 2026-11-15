@@ -93,8 +93,12 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   `.csv` (Google, Outlook), skipping duplicates, and export an address book as one `.vcf`.
 - **Security:** passkey sign-in, two-factor authentication (authenticator-app codes + recovery codes), an app
   password per device that you can revoke, and brute-force protection.
-- **Email:** password reset by email, share notifications and security notices through your SMTP server.
-- **Administration:** users, groups, quotas, app passwords, 2FA and passkey reset, and email (SMTP) settings.
+- **Email:** password reset by email, invitations, share notifications and security notices through your SMTP
+  server.
+- **People:** invite people by email or link (they choose their own username and password), profile pictures,
+  groups.
+- **Administration:** users, invitations, groups, quotas, app passwords, 2FA and passkey reset, and email (SMTP)
+  settings, in the menu under your picture (administrators only).
 - **Languages:** English, العربية, Deutsch, Français, Español on the web, the apps and in emails.
 
 ## Install
@@ -128,7 +132,8 @@ The two files are all you edit:
 Days in the trash, versions kept per file and how long a sign-in lasts are under *Administration → Limits* in
 the web app, and apply at once.
 
-The admin account is created on the first start only; change its password later under *Settings*. If you leave
+The admin account is created on the first start only; change its password later under *Settings → Security*.
+*Administration* is in the menu under your picture, top right (administrators only). If you leave
 `CLOUDY_ADMIN_PASSWORD` empty or keep the example, a random password is generated on first start. Read it with
 `docker logs cloudy | grep "admin password"`.
 
@@ -259,7 +264,7 @@ checks right away).
 
 ## Two-factor authentication
 
-Each user can turn it on under *Settings → Two-factor authentication*:
+Each user can turn it on under *Settings → Security → Two-factor authentication*:
 1. Scan the QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…).
 2. Confirm with a code.
 3. Save the 10 recovery codes shown.
@@ -286,7 +291,8 @@ Set up an SMTP server under *Administration → Email (SMTP)* (server, port, enc
 - shows **Forgot password?** on the login page (web and Android): the user enters their username or email and
   gets a one-time link, valid 60 minutes, to choose a new password. The answer never reveals whether an account
   exists, and requests are rate-limited. A reset signs the account out everywhere;
-- emails users when a file or folder is shared with them (each user can turn this off under *Settings → Profile*);
+- sends invitations (see [Inviting people](#inviting-people));
+- emails users when a file or folder is shared with them (each user can turn this off under *Settings → Account*);
 - sends a security notice when a password is changed.
 
 Emails go to the address in each user's profile. Leave the SMTP server empty to turn email off. The SMTP password
@@ -296,9 +302,20 @@ Links in emails point at `PUBLIC_URL`, or, when that isn't set, at the address y
 email settings (never at whatever address a request came in on). Set one of them, or password reset emails are
 not sent.
 
+## Inviting people
+
+Under *Administration → Users*, **Invite someone** asks for an email address (and, optionally, a name, a quota and
+groups). With email set up, Cloudy sends the person a link; without it, you get the link to send yourself (it is
+also shown after sending, to copy). The link works once and for 7 days: the person picks their own username and
+password and is signed in straight away. Pending invitations are listed above the users, where you can send them
+again, make a new link (the old one stops working) or withdraw them.
+
+Invited accounts are never administrators; make someone an administrator later under *Edit user*. **New user**
+still creates an account with a username and password you choose.
+
 ## Passkeys
 
-Users add a passkey under *Settings → Passkeys* (confirming with their password). After that they can sign in to
+Users add a passkey under *Settings → Security* (confirming with their password). After that they can sign in to
 the web app with *Sign in with a passkey*, or by picking the passkey from the username field's autofill. No
 username, password or two-factor code is needed: the passkey itself requires the device's PIN or biometrics.
 
@@ -309,7 +326,7 @@ username, password or two-factor code is needed: the passkey itself requires the
 
 ## Connecting other apps
 
-Create an app password under *Settings → Connect apps and devices*, then use:
+Create an app password under *Settings → Apps & devices*, then use:
 
 | Client | Address |
 |---|---|

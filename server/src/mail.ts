@@ -93,15 +93,17 @@ interface Message { to: string; subject: string; text: string; action?: { label:
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
+// The web app's look (1.20): the name on the night-sky blue of the logo, the text on white, one blue button.
 function html(m: Message): string {
-  const paras = m.text.split(/\n{2,}/).map((p) => `<p style="margin:0 0 14px">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
+  const paras = m.text.split(/\n{2,}/).map((p) => `<p style="margin:0 0 14px;line-height:1.55">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`).join('');
   const button = m.action
-    ? `<p style="margin:22px 0"><a href="${escapeHtml(m.action.url)}" style="background:#3d6ff0;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block">${escapeHtml(m.action.label)}</a></p>`
+    ? `<p style="margin:24px 0 8px"><a href="${escapeHtml(m.action.url)}" style="background:#0a55c4;color:#ffffff;padding:12px 20px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:600">${escapeHtml(m.action.label)}</a></p>`
     : '';
   const lang = m.lang ?? 'en';
-  return `<!doctype html><html lang="${lang}" dir="${isRtl(lang) ? 'rtl' : 'ltr'}"><body style="margin:0;background:#f4f6fa;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1f2633">
-<div style="max-width:520px;margin:24px auto;background:#fff;border-radius:12px;padding:28px 28px 18px">
-<div style="font-weight:600;font-size:18px;margin-bottom:18px">☁ Cloudy</div>${paras}${button}</div></body></html>`;
+  return `<!doctype html><html lang="${lang}" dir="${isRtl(lang) ? 'rtl' : 'ltr'}"><body style="margin:0;background:#f5f8fd;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0b1b36">
+<div style="max-width:520px;margin:24px auto;background:#ffffff;border:1px solid #d7e1ef;border-radius:16px;overflow:hidden">
+<div style="background:#062b66;color:#ffffff;padding:18px 28px;font-weight:600;font-size:18px">Cloudy</div>
+<div style="padding:26px 28px 18px;font-size:15px">${paras}${button}</div></div></body></html>`;
 }
 
 /** Sends now and throws on failure (used by "Send test email"). */

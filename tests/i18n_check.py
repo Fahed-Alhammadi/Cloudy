@@ -48,13 +48,24 @@ for f in glob.glob(os.path.join(WEB, 'js/*.js')):
         keys.add((m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'").replace('\\"', '"'))
     # Labels kept in tables and translated where they are drawn, e.g. NAV in app.js.
     keys.update(re.findall(r"\['[\w-]+', '([^']+)', '\w+'\]", src))
+    # Tab labels: [address part, label] pairs in tables named *_TABS (SETTINGS_TABS, ADMIN_TABS in settings.js).
+    for table in re.findall(r"const \w+_TABS = \[(.*?)\];", src, re.S):
+        keys.update(re.findall(r"\['[\w-]*', '([^']+)'\]", table))
 # Server error messages: the web app shows them translated (showError → t(message)). WebDAV/CalDAV/CardDAV-only
 # messages (src/dav/) go to DAV clients, not to people, and messages built at run time cannot be looked up.
-server_messages = re.compile(r"""HttpError\(\d{3},\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")\s*[,)]""")
+quoted = r"""(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")"""
+server_messages = re.compile(r"HttpError\(\d{3},\s*" + quoted + r"\s*[,)]")
+# Also messages kept in a constant of the same file (const INVALID = '…'; … HttpError(400, INVALID)).
+message_const = re.compile(r"const ([A-Z][A-Z0-9_]*) = " + quoted + ";")
+const_thrown = re.compile(r"HttpError\(\d{3},\s*([A-Z][A-Z0-9_]*)\s*[,)]")
+unquote = lambda m, a, b: (m.group(a) if m.group(a) is not None else m.group(b)).replace("\\'", "'").replace('\\"', '"')
 for f in glob.glob(os.path.join(ROOT, 'server/src/**/*.ts'), recursive=True):
     if os.sep + 'dav' + os.sep in f: continue
-    for m in server_messages.finditer(open(f).read()):
-        keys.add((m.group(1) if m.group(1) is not None else m.group(2)).replace("\\'", "'").replace('\\"', '"'))
+    src = open(f).read()
+    for m in server_messages.finditer(src):
+        keys.add(unquote(m, 1, 2))
+    consts = {m.group(1): unquote(m, 2, 3) for m in message_const.finditer(src)}
+    keys.update(consts[name] for name in const_thrown.findall(src) if name in consts)
 ph = lambda s: sorted(re.findall(r'\{\w+\}', s))
 for lang in translated:
     path = os.path.join(WEB, f'i18n/{lang}.json')

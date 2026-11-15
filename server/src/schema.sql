@@ -272,3 +272,29 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone text;
 
 -- 1.19: an upload that must not replace a file of the same name ("Keep both"; always for public-link visitors).
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS no_overwrite boolean NOT NULL DEFAULT false;
+
+-- Profile pictures: a small JPEG, PNG or WebP per account (≤ 1 MiB, ≤ 2048 px a side, checked on upload), shown to
+-- signed-in users next to names. etag = short hash of the bytes: the picture's address carries it (?v=), so it can be
+-- cached for good. A table of its own: user rows are read on every request, the pictures rarely.
+CREATE TABLE IF NOT EXISTS avatars (
+  user_id text PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data bytea NOT NULL,
+  mime text NOT NULL,
+  etag text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Invitations: an administrator invites someone, who chooses their own username and password through a one-time link
+-- (valid 7 days; the token is stored as SHA-256). Never grants admin rights. Expired ones are deleted hourly.
+CREATE TABLE IF NOT EXISTS invitations (
+  id bigserial PRIMARY KEY,
+  token_hash text NOT NULL UNIQUE,
+  email text NOT NULL DEFAULT '',
+  display_name text NOT NULL DEFAULT '',
+  quota_bytes bigint,                      -- NULL = unlimited
+  groups text[] NOT NULL DEFAULT '{}',     -- group names; ones deleted meanwhile are skipped when the account is made
+  invited_by text REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  emailed_at timestamptz
+);

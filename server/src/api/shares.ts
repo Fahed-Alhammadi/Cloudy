@@ -28,10 +28,13 @@ interface Share {
   created_at: Date;
   /** Display name of the user it is shared with (from SHARE_ROW). */
   share_with_name?: string | null;
+  /** That user's profile picture version (from SHARE_ROW). */
+  share_with_avatar?: string | null;
 }
 
-/** Share rows with the display name of the user each is shared with: people know each other by name. */
-const SHARE_ROW = `SELECT s.*, u.display_name AS share_with_name FROM shares s LEFT JOIN users u ON s.type = 'user' AND u.id = s.share_with`;
+/** Share rows with the display name (and picture) of the user each is shared with: people know each other by name. */
+const SHARE_ROW = `SELECT s.*, u.display_name AS share_with_name, a.etag AS share_with_avatar
+                     FROM shares s LEFT JOIN users u ON s.type = 'user' AND u.id = s.share_with LEFT JOIN avatars a ON a.user_id = u.id`;
 
 function shareJson(s: Share) {
   return {
@@ -40,6 +43,8 @@ function shareJson(s: Share) {
     type: s.type,
     shareWith: s.share_with,
     shareWithName: s.share_with_name ?? null,
+    // GET /api/users/<shareWith>/avatar?v=<it>; null for groups, links and people without a picture.
+    shareWithAvatar: s.share_with_avatar ?? null,
     canEdit: s.can_edit,
     token: s.token,
     url: s.token ? `/s/${s.token}` : null,
@@ -144,8 +149,9 @@ export function registerShares(r: Router, authed: Wrap) {
   }));
 
   r.get('/api/shares/incoming', authed(async ({ res }, user) => {
-    const rows = await q<Share & { owner_name: string }>(
-      `SELECT s.*, u.display_name AS owner_name FROM shares s JOIN users u ON u.id = s.owner
+    const rows = await q<Share & { owner_name: string; owner_avatar: string | null }>(
+      `SELECT s.*, u.display_name AS owner_name, a.etag AS owner_avatar
+         FROM shares s JOIN users u ON u.id = s.owner LEFT JOIN avatars a ON a.user_id = s.owner
         WHERE s.owner <> $1 AND ((s.type = 'user' AND s.share_with = $1)
            OR (s.type = 'group' AND s.share_with IN (SELECT group_id FROM group_members WHERE user_id = $1)))
         ORDER BY s.created_at DESC`,
@@ -161,7 +167,7 @@ export function registerShares(r: Router, authed: Wrap) {
         continue;
       }
       const [nj] = await F.toJson([node], user.id);
-      seen.set(node.id, { ...nj, shareId: s.id, shareType: s.type, canEdit: s.can_edit, ownerName: s.owner_name });
+      seen.set(node.id, { ...nj, shareId: s.id, shareType: s.type, canEdit: s.can_edit, ownerName: s.owner_name, ownerAvatar: s.owner_avatar ?? null });
     }
     json(res, [...seen.values()]);
   }));

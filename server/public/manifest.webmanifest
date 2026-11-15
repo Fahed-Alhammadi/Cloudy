@@ -3,7 +3,7 @@
   "short_name": "Cloudy",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#0b6bcb",
+  "background_color": "#062b66",
+  "theme_color": "#062b66",
   "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
 }

@@ -106,6 +106,15 @@ const P = {
   down: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
   blank: '',
   save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+  sheet: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/>',
+  slides: '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>',
+  user: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  laptop: '<rect width="18" height="12" x="3" y="4" rx="2"/><line x1="2" x2="22" y1="20" y2="20"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
 };
 
 export function icon(name, cls = '') {
@@ -116,17 +125,69 @@ export function icon(name, cls = '') {
   return span;
 }
 
+// File types: the same groups and colours as the Android and iPhone apps (iconFor in Common.kt).
+const SHEETS = new Set(['xls', 'xlsx', 'ods', 'csv', 'numbers']);
+const SLIDES = new Set(['ppt', 'pptx', 'odp', 'key']);
+const DOCS = new Set(['doc', 'docx', 'odt', 'rtf', 'pages']);
+
 export function fileIcon(node) {
   if (node.isDir) return icon('folder', 'ic-folder');
   const m = node.mime || '';
+  const ext = (/\.([^.]+)$/.exec(node.name || '')?.[1] || '').toLowerCase();
   if (m.startsWith('image/')) return icon('image', 'ic-image');
   if (m.startsWith('video/')) return icon('video', 'ic-video');
   if (m.startsWith('audio/')) return icon('audio', 'ic-audio');
-  if (m === 'application/pdf') return icon('text', 'ic-pdf');
+  if (m === 'application/pdf' || ext === 'pdf') return icon('text', 'ic-pdf');
   if (/zip|tar|gzip|7z|rar/.test(m)) return icon('archive', 'ic-archive');
+  if (SHEETS.has(ext)) return icon('sheet', 'ic-sheet');
+  if (SLIDES.has(ext)) return icon('slides', 'ic-slides');
+  if (DOCS.has(ext)) return icon('text', 'ic-doc');
   if (m.startsWith('text/') || /json|xml/.test(m)) return icon('text', 'ic-text');
   return icon('file', 'ic-file');
 }
+
+// ---------------------------------------------------------------- people
+// A person's picture, else their initials on their own colour: the same colour as in the Android and iPhone apps
+// (AVATAR_COLORS[floorMod(name.hashCode(), 8)] there), so someone looks the same everywhere.
+const AVATAR_COLORS = ['#0B6BCB', '#0E9AA7', '#1F9D55', '#E8772E', '#E0457B', '#8B5CF6', '#D93A3A', '#3B66D9'];
+
+/** Java's String.hashCode, so the colour matches the apps. */
+function javaHash(s) {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (Math.imul(31, hash) + s.charCodeAt(i)) | 0;
+  return hash;
+}
+
+export const nameColor = (name) => AVATAR_COLORS[((javaHash(name || '') % 8) + 8) % 8];
+
+export function initialsOf(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2);
+  return parts.map((p) => Array.from(p)[0] ?? '').join('').toUpperCase() || '?';
+}
+
+/** The address of someone's picture; the version in it changes with the picture, so browsers keep it for good. */
+export const avatarUrl = (id, version) => `/api/users/${encodeURIComponent(id)}/avatar?v=${encodeURIComponent(version)}`;
+
+/**
+ * A person as a round picture: `person` = { id, displayName, avatar } (avatar = the picture's version, or null).
+ * `size`: '', 'xs', 'sm', 'big' or 'xl'. Decorative (aria-hidden): the name is always written next to it.
+ */
+export function avatar(person, size = '') {
+  const name = person?.displayName || person?.id || '';
+  const el = h('span', { class: `avatar ${size}`, 'aria-hidden': 'true', style: { '--av': nameColor(name) } }, initialsOf(name));
+  if (person?.avatar && person.id) {
+    const img = h('img', { src: avatarUrl(person.id, person.avatar), alt: '', decoding: 'async', draggable: 'false' });
+    // A picture that cannot be loaded (removed meanwhile) leaves the initials.
+    img.addEventListener('load', () => { el.replaceChildren(img); el.classList.add('has-img'); }, { once: true });
+  }
+  return el;
+}
+
+/**
+ * A name, address or other value set into a sentence, kept in its own reading direction: an email address inside Arabic
+ * text was split around its "@" and dots (FSI … PDI, invisible).
+ */
+export const isolate = (value) => `⁨${value}⁩`;
 
 export function formatSize(bytes) {
   if (bytes == null) return '';
@@ -255,7 +316,8 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     });
     document.body.append(dlg);
     dlg.showModal();
-    const first = dlg.querySelector('input:not([type=checkbox]):not([disabled]), textarea, select');
+    // Not a read-only field (a link to copy): selected, it showed only the end of the address.
+    const first = dlg.querySelector('input:not([type=checkbox]):not([disabled]):not([readonly]), textarea, select');
     if (first) { first.focus(); if (first.select) first.select(); }
     else if (focusPrimary) footer.querySelector('button[type=submit]')?.focus();
   });
@@ -312,21 +374,24 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && openMenu
 
 /**
  * Shows a menu of [{label, icon, onclick, danger}] next to `anchor` (an element, or an {x,y} point).
+ * An entry may bring its own `content` (elements shown instead of icon + label; `label` is then its accessible name)
+ * and `cls`. `opts.className` styles the whole menu (the account menu).
  * Keyboard: arrows/Home/End move, Escape closes and returns focus to the anchor, Tab closes.
  */
-export function showMenu(anchor, items) {
+export function showMenu(anchor, items, opts = {}) {
   closeMenu();
   const isEl = anchor instanceof Element;
-  const menu = h('div', { class: 'menu', role: 'menu' },
+  const menu = h('div', { class: `menu ${opts.className ?? ''}`, role: 'menu', 'aria-label': opts.label ?? null },
     items.filter(Boolean).map((it) => it === '-' ? h('hr') : h('button', {
-      type: 'button', role: 'menuitem', tabindex: -1, class: it.danger ? 'danger' : '',
+      type: 'button', role: 'menuitem', tabindex: -1, class: [it.danger ? 'danger' : '', it.cls ?? ''].join(' ').trim(),
+      'aria-label': it.content ? it.label : null,
       onclick: (e) => {
         e.stopPropagation();
         closeMenu({ refocus: true });
         // Errors of the chosen action (a dialog that failed to load, say) are shown, not lost.
         Promise.resolve().then(() => it.onclick()).catch(showError);
       },
-    }, it.icon ? icon(it.icon) : null, h('span', {}, it.label))),
+    }, it.content ?? [it.icon ? icon(it.icon) : null, h('span', {}, it.label)])),
   );
   const entries = () => [...menu.querySelectorAll('[role=menuitem]')];
   menu.addEventListener('keydown', (e) => {

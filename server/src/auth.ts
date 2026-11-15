@@ -82,9 +82,10 @@ function keysFor(req: IncomingMessage | null, account?: string): string[] {
   return keys;
 }
 
+/** Account counters allow more than the per-address ones (`ip:…`, and `invite:…` for invitation links). */
 function limited(key: string): boolean {
   const f = failures.get(key);
-  return !!f && Date.now() - f.first < WINDOW_MS && f.n >= (key.startsWith('ip:') ? MAX_FAILURES : MAX_ACCOUNT_FAILURES);
+  return !!f && Date.now() - f.first < WINDOW_MS && f.n >= (key.startsWith('acct:') ? MAX_ACCOUNT_FAILURES : MAX_FAILURES);
 }
 
 function bump(key: string): Counter {
@@ -110,8 +111,21 @@ export function checkRate(req: IncomingMessage | null, account?: string): void {
  * recorded (they used to: 300 parallel wrong passwords were all tried). `succeeded()` takes the count back.
  */
 export function attempt(req: IncomingMessage | null, account?: string): { succeeded(): void } {
-  checkRate(req, account);
-  const counted = keysFor(req, account).map(bump);
+  return attemptKeys(keysFor(req, account));
+}
+
+/**
+ * One guess of an invitation link's token: limited per client address like a sign-in (ten wrong ones in 15 minutes),
+ * but on a counter of its own. Sharing the sign-in counter, a household's mistyped passwords would block an invitee on
+ * the same network from creating the account, and every wrong link would cost a sign-in attempt (and the reverse).
+ */
+export function attemptInvitation(req: IncomingMessage): { succeeded(): void } {
+  return attemptKeys([`invite:${clientNet(req)}`]);
+}
+
+function attemptKeys(keys: string[]): { succeeded(): void } {
+  if (keys.some(limited)) throw new HttpError(429, 'Too many failed attempts, try again later');
+  const counted = keys.map(bump);
   let done = false;
   return {
     succeeded() {
@@ -209,6 +223,11 @@ export async function loginWithPasskey(req: IncomingMessage, body: Record<string
   );
   if (!used) throw new HttpError(401, 'Passkey signature was already used');
   return (await one<User>(`SELECT ${USER_COLS} FROM users WHERE id = $1`, [key.user_id]))!;
+}
+
+/** An account by its name (also a disabled one). */
+export async function getUser(id: string): Promise<User | undefined> {
+  return one<User>(`SELECT ${USER_COLS} FROM users WHERE id = $1`, [id]);
 }
 
 export async function createSession(req: IncomingMessage, res: ServerResponse, userId: string): Promise<void> {

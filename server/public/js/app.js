@@ -1,6 +1,6 @@
 // App shell: login, navigation and routing (plain addresses: /files/12, /settings…).
 import { get, post, patch } from './api.js';
-import { h, icon, showError, showMenu, closeMenu, formatSize, navigate, currentView, modal, toast, confirmDialog, setLeaveGuard, mayLeave } from './ui.js';
+import { h, icon, avatar, isolate, showError, showMenu, closeMenu, formatSize, navigate, currentView, modal, toast, confirmDialog, setLeaveGuard, mayLeave } from './ui.js';
 import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash, placeOf, restorePlace } from './files.js';
 import { renderCalendar } from './calendar.js';
 import { renderContacts } from './contacts.js';
@@ -138,14 +138,20 @@ function markNav(view) {
   });
 }
 
-// The sidebar's "x used": read at sign-in, then again after files change (at most every 10 seconds).
+// The rail's "x of y used" (with a bar when there is a quota): read at sign-in, then again after files change (at most
+// every 10 seconds).
 let usageLine = null;
 let usageTimer = null;
 function showUsage() {
   if (!usageLine || !ctx.me) return;
-  usageLine.textContent = ctx.me.quotaBytes != null
-    ? t('{used} of {quota} used', { used: formatSize(ctx.me.used), quota: formatSize(ctx.me.quotaBytes) })
-    : t('{used} used', { used: formatSize(ctx.me.used) });
+  const { used, quotaBytes } = ctx.me;
+  const pct = quotaBytes ? Math.min(100, (used / quotaBytes) * 100) : null;
+  usageLine.replaceChildren(...[
+    pct != null && h('div', { class: `usage-bar${pct >= 90 ? ' full' : ''}`, 'aria-hidden': 'true' }, h('span', { style: { width: `${pct}%` } })),
+    h('span', {}, quotaBytes != null
+      ? t('{used} of {quota} used', { used: formatSize(used), quota: formatSize(quotaBytes) })
+      : t('{used} used', { used: formatSize(used) })),
+  ].filter(Boolean));
 }
 function refreshUsageSoon() {
   if (usageTimer) return;
@@ -214,6 +220,7 @@ function renderLogin(message, notice = false, keep = {}) {
   };
   const passkeyBtn = passkeysSupported() && !ipAddressHost() && h('button', { class: 'btn block', type: 'button', onclick: () => passkeyLogin(false) }, icon('key'), t('Sign in with a passkey'));
   app.replaceChildren(h('main', { class: 'login' },
+    loginHero(),
     h('form', { class: 'login-card', onsubmit: async (e) => {
       e.preventDefault();
       passkeyAbort?.abort();
@@ -237,7 +244,6 @@ function renderLogin(message, notice = false, keep = {}) {
         passkeyAutofillAvailable().then((ok) => ok && passkeyAbort?.signal.aborted && app.contains(user) && passkeyLogin(true));
       }
     } },
-      loginHero(),
       h('label', { class: 'field' }, h('span', {}, t('Username')), user),
       h('label', { class: 'field' }, h('span', {}, t('Password')), pass),
       forgot,
@@ -255,16 +261,105 @@ function renderLogin(message, notice = false, keep = {}) {
 
 function authCard(...kids) {
   passkeyAbort?.abort();
-  app.replaceChildren(h('main', { class: 'login' }, h('form', { class: 'login-card' }, loginHero(), ...kids.filter(Boolean))));
+  app.replaceChildren(h('main', { class: 'login' }, loginHero(), h('form', { class: 'login-card' }, ...kids.filter(Boolean))));
   return app.querySelector('form');
 }
 
-/** The mark, the name and what Cloudy is, above the sign-in form. */
+/** The mark, the name and what Cloudy is, on the night sky above the form. */
 function loginHero() {
   return h('div', { class: 'login-hero' },
-    h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 64, height: 64 }),
+    h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 60, height: 60 }),
     h('h1', {}, 'Cloudy'),
     h('p', { class: 'tagline' }, t('Your files, calendars and contacts, on your own server.')));
+}
+
+// ---------------------------------------------------------------- invitations
+// An administrator's invitation link (/invite#<token>, the token stays out of server logs like reset links): the person
+// picks their own username and password, and is signed in straight away. The token waits in this tab's storage until
+// the account exists, so a reload does not lose the invitation. The server counts wrong links per address: the link is
+// checked once per page, never again for a language switch.
+const INVITE_KEY = 'cloudy-invite';
+function keepInvite(token) {
+  try { token ? sessionStorage.setItem(INVITE_KEY, token) : sessionStorage.removeItem(INVITE_KEY); } catch { /* storage unavailable */ }
+}
+function keptInvite() {
+  try { return sessionStorage.getItem(INVITE_KEY); } catch { return null; }
+}
+const toLoginFromInvite = (e) => { e?.preventDefault(); keepInvite(null); history.replaceState(null, '', '/'); renderLogin(); };
+
+/** The link could not be used: invalid or expired (said by the server), too many tries, or no connection. */
+function inviteProblem(token, err) {
+  const unreachable = !err?.status || err.status >= 500;
+  if (err?.status === 400) keepInvite(null);
+  document.title = 'Cloudy';
+  authCard(
+    h('h2', { class: 'card-title' }, unreachable ? t('This page could not be loaded.') : t('This invitation can’t be used')),
+    h('p', { class: 'card-lead' }, t(err?.message || String(err))),
+    unreachable && h('button', { class: 'btn primary block', type: 'button', onclick: () => renderInvite(token) }, icon('restore'), t('Try again')),
+    h('a', { class: `btn block${unreachable ? '' : ' primary'}`, href: '/', onclick: toLoginFromInvite }, t('Go to sign in')),
+    languagePicker(() => inviteProblem(token, err)));
+}
+
+async function renderInvite(token, keep = {}, known = null) {
+  stopAllUploads();
+  let { info, signedIn } = known ?? {};
+  if (!info) {
+    try {
+      [info, signedIn] = await Promise.all([post('/api/invitations/check', { token }), get('/api/me').catch(() => null)]);
+    } catch (err) {
+      return inviteProblem(token, err);
+    }
+  }
+  document.title = `${t('Create your account')} – Cloudy`;
+  const name = h('input', { type: 'text', autocomplete: 'name', maxlength: 100, value: keep.name ?? info.displayName ?? '', dir: 'auto' });
+  const user = h('input', { type: 'text', autocomplete: 'username', required: true, maxlength: 64, pattern: '[A-Za-z0-9][A-Za-z0-9._@\\-]{0,63}', value: keep.user ?? info.username ?? '', dir: 'ltr', autocapitalize: 'none', spellcheck: 'false' });
+  const email = !info.email && h('input', { type: 'email', autocomplete: 'email', value: keep.email ?? '', dir: 'ltr' });
+  const pw1 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true, value: keep.pw1 ?? '' });
+  const pw2 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true, value: keep.pw2 ?? '' });
+  const msg = h('p', { class: 'error', role: 'alert' });
+  const btn = h('button', { class: 'btn primary block', type: 'submit' }, t('Create account'));
+  const form = authCard(
+    h('h2', { class: 'card-title' }, t('Create your account')),
+    h('div', { class: 'invite-from' }, icon('mail'),
+      h('p', {}, info.invitedBy ? t('{who} invited you to Cloudy. Choose how you want to sign in.', { who: isolate(info.invitedBy) }) : t('You are invited to Cloudy. Choose how you want to sign in.'))),
+    // Someone already signed in here (an administrator trying the link): the new account takes this browser over.
+    signedIn && h('p', { class: 'notice' }, icon('user'),
+      t('You are signed in as {name} in this browser. Creating the account signs you out of it.', { name: isolate(signedIn.displayName || signedIn.id) })),
+    h('label', { class: 'field' }, h('span', {}, t('Your name')), name),
+    h('label', { class: 'field' }, h('span', {}, t('Username')), user, h('small', {}, t('Letters, digits and . _ @ - (you sign in with it)'))),
+    email ? h('label', { class: 'field' }, h('span', {}, t('Email (optional)')), email, h('small', {}, t('For password reset links.')))
+      : h('p', { class: 'muted small' }, t('Password reset links go to {email}.', { email: isolate(info.email) })),
+    h('label', { class: 'field' }, h('span', {}, t('Password (8+ characters)')), pw1),
+    h('label', { class: 'field' }, h('span', {}, t('Repeat password')), pw2),
+    msg, btn,
+    languagePicker(() => renderInvite(token, { name: name.value, user: user.value, email: email?.value, pw1: pw1.value, pw2: pw2.value }, { info, signedIn })));
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.textContent = '';
+    if (pw1.value !== pw2.value) { msg.textContent = t('The passwords do not match.'); pw2.focus(); return; }
+    btn.disabled = true;
+    let created = false;
+    try {
+      if (signedIn) { await post('/api/logout').catch(() => {}); signedIn = null; }
+      await post('/api/invitations/accept', {
+        token, username: user.value.trim(), displayName: name.value.trim() || undefined, password: pw1.value,
+        ...(email && email.value.trim() ? { email: email.value.trim() } : {}),
+      });
+      created = true;
+      keepInvite(null);
+      history.replaceState(null, '', '/');
+      await refreshMe();
+      toast(t('Welcome to Cloudy!'));
+    } catch (err) {
+      // The account exists and this browser is signed in to it: only opening the app failed. Start it afresh (a second
+      // try of the form would say the link is used up).
+      if (created) return void location.assign('/');
+      msg.textContent = t(err.message);
+      btn.disabled = false;
+      if (err.status === 409 || /username/i.test(err.message)) user.select();
+    }
+  });
+  (user.value ? pw1 : user).focus();
 }
 
 function renderForgot(initial = '') {
@@ -341,16 +436,17 @@ let main;
 let nav;
 
 function renderShell() {
-  search = h('input', { type: 'search', placeholder: t('Search files'), 'aria-label': t('Search files'), enterkeyhint: 'search', onkeydown: (e) => {
+  search = h('input', { type: 'search', placeholder: t('Search your files'), 'aria-label': t('Search files'), enterkeyhint: 'search', onkeydown: (e) => {
     if (e.key === 'Enter' && search.value.trim()) navigate(`/search?q=${encodeURIComponent(search.value.trim())}`);
   } });
+  // The rail: the mark, the places, then Settings and the storage meter at the foot. (Administration is in the
+  // account menu, for administrators only.)
   nav = h('nav', { class: 'sidebar', id: 'sidebar', 'aria-label': t('Main'), onclick: (e) => { if (e.target.closest('a')) setNavOpen(false); } },
-    h('ul', {}, NAV.map((item) => item === '-' ? h('li', { class: 'sep' }) : h('li', {},
+    h('a', { class: 'rail-brand', href: '/' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 32, height: 32 }), 'Cloudy'),
+    h('ul', {}, NAV.map((item) => item === '-' ? h('li', { class: 'sep', role: 'presentation' }) : h('li', {},
       h('a', { href: `/${item[0]}`, 'data-view': item[0] }, icon(item[2]), h('span', {}, t(item[1])))))),
     h('div', { class: 'grow' }),
-    h('ul', {},
-      h('li', {}, h('a', { href: '/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings')))),
-      ctx.me.isAdmin && h('li', {}, h('a', { href: '/admin', 'data-view': 'admin' }, icon('shield'), h('span', {}, t('Administration'))))),
+    h('ul', {}, h('li', {}, h('a', { href: '/settings', 'data-view': 'settings' }, icon('settings'), h('span', {}, t('Settings'))))),
     usageLine = h('div', { class: 'usage' }),
   );
   showUsage();
@@ -358,24 +454,55 @@ function renderShell() {
   const header = h('header', { class: 'topbar' },
     menuToggle = h('button', { class: 'icon-btn menu-toggle', 'aria-label': t('Toggle menu'), 'aria-controls': 'sidebar', 'aria-expanded': 'false',
       onclick: () => setNavOpen(!document.body.classList.contains('nav-open')) }, icon('menu')),
-    h('a', { class: 'brand', href: '/' }, h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 26, height: 26 }), 'Cloudy'),
-    h('div', { class: 'search' }, icon('search'), search),
-    h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), 'aria-haspopup': 'menu', onclick: (e) => showMenu(e.currentTarget, [
-      { label: ctx.me.displayName, icon: 'contacts', onclick: () => navigate('/settings') },
-      { label: t('Log out'), icon: 'logout', onclick: async () => {
-        if (uploadsRunning() && !(await confirmDialog(t('Log out'), t('Uploads that are still running will stop.'), t('Log out'), true))) return;
-        stopLiveUpdates();
-        await post('/api/logout').catch(() => {});
-        ctx.me = null;
-        document.body.classList.remove('nav-open');
-        renderLogin();
-      } },
-    ]) }, (ctx.me.displayName || ctx.me.id).slice(0, 1).toUpperCase()),
+    h('div', { class: 'search', role: 'search' }, icon('search'), search, h('kbd', { title: t('Press / to search'), 'aria-hidden': 'true' }, '/')),
+    h('div', { class: 'topbar-end' },
+      h('button', { class: 'avatar-btn', 'aria-label': t('Account menu'), 'aria-haspopup': 'menu', onclick: (e) => accountMenu(e.currentTarget) }, avatar(ctx.me))),
   );
-  // Phones: the sidebar is a drawer over the page; a tap beside it closes it.
+  // Phones: the rail is a drawer over the page; a tap beside it closes it.
   const scrim = h('div', { class: 'nav-scrim', 'aria-hidden': 'true', onclick: () => setNavOpen(false) });
-  app.replaceChildren(header, h('div', { class: 'layout' }, nav, scrim, main));
+  app.replaceChildren(h('div', { class: 'layout' }, nav, scrim, h('div', { class: 'workspace' }, header, main)));
 }
+
+/**
+ * The account menu: who is signed in (name and username; opens Settings), Administration for administrators only,
+ * and Log out. Whether the entry is shown is a convenience: the server refuses every administration request from
+ * anyone else.
+ */
+function accountMenu(anchor) {
+  const me = ctx.me;
+  if (!me) return;
+  const name = me.displayName || me.id;
+  const label = name === me.id ? t('{name}: account settings', { name: isolate(name) }) : t('{name} ({user}): account settings', { name: isolate(name), user: isolate(me.id) });
+  showMenu(anchor, [
+    { label, cls: 'account-head', onclick: () => navigate('/settings'),
+      content: [avatar(me), h('span', { class: 'who' }, h('strong', { dir: 'auto' }, name), h('small', { dir: 'auto' }, me.id)), icon('right')] },
+    me.isAdmin === true && '-',
+    me.isAdmin === true && { label: t('Administration'), icon: 'shield', onclick: () => navigate('/admin') },
+    '-',
+    { label: t('Log out'), icon: 'logout', onclick: logOut },
+  ], { className: 'account', label: t('Account') });
+}
+
+async function logOut() {
+  if (uploadsRunning() && !(await confirmDialog(t('Log out'), t('Uploads that are still running will stop.'), t('Log out'), true))) return;
+  stopLiveUpdates();
+  await post('/api/logout').catch(() => {});
+  ctx.me = null;
+  document.body.classList.remove('nav-open');
+  renderLogin();
+}
+
+// "/" goes to the search box (as on many sites), unless the key is typed into a field.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !ctx.me || !search?.isConnected) return;
+  const el = document.activeElement;
+  if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+  if (document.querySelector('dialog[open], .menu')) return;
+  e.preventDefault();
+  setNavOpen(false);
+  search.focus();
+  search.select();
+});
 
 let menuToggle;
 let search;
@@ -436,8 +563,8 @@ async function route({ refresh = false, scrollTo = null } = {}) {
       case 'trash': await renderTrash(slot, ctx); break;
       case 'calendar': await renderCalendar(slot, ctx); break;
       case 'contacts': await renderContacts(slot, ctx); break;
-      case 'settings': await renderSettings(slot, ctx); break;
-      case 'admin': await renderAdmin(slot, ctx); break;
+      case 'settings': await renderSettings(slot, ctx, arg); break;
+      case 'admin': await renderAdmin(slot, ctx, arg); break;
       default:
         notFound = true;
         slot.replaceChildren(h('div', { class: 'empty', role: 'alert' }, icon('cloud'), h('h1', { class: 'view-title' }, t('Page not found')),
@@ -448,7 +575,8 @@ async function route({ refresh = false, scrollTo = null } = {}) {
     if (seq === routeSeq) {
       if (place) restorePlace(main, place);
       else if (scrollTo != null) restoreScroll(scrollTo);
-      document.title = `${notFound ? t('Page not found') : nav.querySelector('a.active span:not(.icon)')?.textContent || t('Files')} – Cloudy`;
+      const label = view === 'admin' ? t('Administration') : nav.querySelector('a.active span:not(.icon)')?.textContent;
+      document.title = `${notFound ? t('Page not found') : label || t('Files')} – Cloudy`;
       // Keyboard and screen-reader users start at the new page's content (focus was left on the clicked link,
       // or fell back to the page when the link was replaced).
       if (!refresh && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) main.focus({ preventScroll: true });
@@ -558,9 +686,17 @@ fromOldAddress();
 // Reset links are /reset#<token>: browsers don't send the part after "#", so the token stays out of the access logs
 // of the server and any proxy in front of it. Once read, the address bar shows just /reset. (/reset/<token> = an old link.)
 const resetToken = location.pathname === '/reset' ? /^#([\w-]+)$/.exec(location.hash)?.[1] : /^\/reset\/([\w-]+)$/.exec(location.pathname)?.[1];
+// Invitations work the same way: /invite#<token>. Opened while signed in (an administrator trying the link), the page
+// still shows: creating the account signs in as the new person.
+const inviteToken = location.pathname === '/invite' ? (/^#([\w-]+)$/.exec(location.hash)?.[1] ?? keptInvite()) : null;
+if (location.pathname === '/invite' && !inviteToken) history.replaceState(null, '', '/');
 if (resetToken) {
   history.replaceState(null, '', '/reset');
   renderReset(resetToken);
+} else if (inviteToken) {
+  keepInvite(inviteToken); // a reload of /invite finds it again
+  history.replaceState(null, '', '/invite');
+  renderInvite(inviteToken);
 } else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => {
   if (location.pathname === '/forgot') return renderForgot();
   let notice = null;

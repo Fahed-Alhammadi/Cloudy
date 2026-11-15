@@ -1,6 +1,6 @@
 // Contacts app over CardDAV-backed address books.
 import { api, get, post, put, patch, del } from './api.js';
-import { h, icon, toast, showError, confirmDialog, promptDialog, showMenu, copyText, modal, setLeaveGuard } from './ui.js';
+import { h, icon, nameColor, toast, showError, confirmDialog, promptDialog, showMenu, copyText, modal, setLeaveGuard } from './ui.js';
 import { attachDropZone } from './files.js';
 import { t, locale } from './i18n.js';
 
@@ -70,7 +70,7 @@ export async function renderContacts(main, ctx) {
         if (!(await leaveEdits())) return;
         currentUri = c.uri; drawList(); drawDetail(c, true);
       } },
-        h('span', { class: 'avatar', 'aria-hidden': 'true' }, initials(c)),
+        h('span', { class: 'avatar', 'aria-hidden': 'true', style: { '--av': nameColor(displayName(c)) } }, initials(c)),
         h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, displayName(c)), h('small', { class: 'muted', dir: c.emails[0] || c.phones[0] ? 'ltr' : 'auto' }, c.emails[0] || c.phones[0] || c.org || ''))))) : [h('li', { class: 'muted pad' }, contacts.length ? t('No matches') : t('No contacts yet'))]));
   };
   search.addEventListener('input', () => { filter = search.value; drawList(); });
@@ -142,7 +142,7 @@ export async function renderContacts(main, ctx) {
         edited = false;
         list.scrollIntoView({ block: 'start', behavior: 'smooth' });
       } }, icon('left'), t('All contacts')),
-      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big' }, isNew ? icon('plus') : initials(c)), h('h2', { dir: 'auto' }, isNew ? t('New contact') : displayName(c))),
+      h('div', { class: 'contact-head wide' }, h('span', { class: 'avatar big', 'aria-hidden': 'true', style: isNew ? null : { '--av': nameColor(displayName(c)) } }, isNew ? icon('plus') : initials(c)), h('h2', { dir: 'auto' }, isNew ? t('New contact') : displayName(c))),
       h('label', { class: 'field' }, h('span', {}, t('First name')), f.givenName),
       h('label', { class: 'field' }, h('span', {}, t('Last name')), f.familyName),
       h('label', { class: 'field' }, h('span', {}, t('Organization')), f.org),

@@ -1,8 +1,30 @@
-// Personal settings and the admin console.
-import { get, post, put, patch, del } from './api.js';
-import { h, icon, formatSize, fullDate, toast, showError, modal, confirmDialog, promptDialog, copyText } from './ui.js';
+// Personal settings and the admin console. Both are pages with tabs: /settings, /settings/security,
+// /settings/apps; /admin, /admin/groups, /admin/email, /admin/limits.
+import { get, post, put, patch, del, api } from './api.js';
+import { h, icon, avatar, isolate, formatSize, fullDate, toast, showError, modal, confirmDialog, promptDialog, copyText } from './ui.js';
 import { passkeysSupported, createPasskey, isPasskeyCancel } from './passkey.js';
-import { t, LANGUAGES, setLanguage } from './i18n.js';
+import { t, LANGUAGES, setLanguage, locale } from './i18n.js';
+
+/** When an invitation ends, always as a relative time ("in 7 days", "in 5 hours"): the translations are written for it. */
+function until(iso) {
+  const rtf = new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' });
+  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
+  return Math.abs(seconds) < 86400 ? rtf.format(Math.round(seconds / 3600), 'hour') : rtf.format(Math.round(seconds / 86400), 'day');
+}
+
+/** A page's tabs as links (each tab has its own address, so Back and bookmarks work). */
+function tabs(base, list, current, label) {
+  return h('nav', { class: 'tabs', 'aria-label': label },
+    list.map(([key, text]) => h('a', { class: 'tab', href: key ? `${base}/${key}` : base, 'aria-current': key === current ? 'page' : null }, t(text))));
+}
+
+/** A storage bar: `used` of `quota` bytes (nothing when there is no quota). */
+function meter(used, quota, cls = '') {
+  if (!quota) return null;
+  const pct = Math.min(100, (used / quota) * 100);
+  return h('div', { class: `meter ${cls} ${pct >= 90 ? 'full' : ''}`, role: 'img', 'aria-label': t('{used} of {quota} used', { used: formatSize(used), quota: formatSize(quota) }) },
+    h('span', { style: { width: `${pct}%` } }));
+}
 
 // ---------------------------------------------------------------- password confirmation
 // Sensitive changes ask for the current password. A wrong one (or any other refusal) is shown inside the
@@ -40,12 +62,97 @@ export async function withPasswordDialog({ title, okLabel, danger = false, intro
   return result;
 }
 
-export async function renderSettings(main, ctx) {
-  const me = await get('/api/me');
-  const [appPasswords, passkeys, options] = await Promise.all([get('/api/me/app-passwords'), get('/api/me/passkeys'), get('/api/auth/options').catch(() => ({}))]);
-  const rerender = () => renderSettings(main, ctx).catch(showError);
-  const davBase = `${location.origin}/dav`;
+const SETTINGS_TABS = [['', 'Account'], ['security', 'Security'], ['apps', 'Apps & devices']];
 
+export async function renderSettings(main, ctx, tab = '') {
+  if (!SETTINGS_TABS.some(([k]) => k === tab)) tab = '';
+  const me = await get('/api/me');
+  const rerender = () => renderSettings(main, ctx, tab).catch(showError);
+  const sections = tab === 'security' ? await securitySections(me, rerender)
+    : tab === 'apps' ? await appsSections(me, rerender)
+    : await accountSections(me, ctx, rerender);
+  main.replaceChildren(h('section', { class: 'settings-view' },
+    h('div', { class: 'page-head' }, h('h1', { class: 'view-title' }, icon('settings'), t('Settings'))),
+    tabs('/settings', SETTINGS_TABS, tab, t('Settings')),
+    sections));
+}
+
+// ---------------------------------------------------------------- account: picture, profile, storage, delete
+
+/**
+ * A picture chosen on this device as a square of at most 512 px (the middle of it), as WebP (JPEG where the browser
+ * cannot write WebP). Made here, so the server never has to read the original, and what it stores carries no
+ * location or camera data.
+ */
+async function squarePicture(file, size = 512) {
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const out = Math.max(1, Math.min(size, side));
+  const canvas = h('canvas', { width: out, height: out });
+  const draw = (background) => {
+    const g = canvas.getContext('2d');
+    g.clearRect(0, 0, out, out);
+    if (background) { g.fillStyle = background; g.fillRect(0, 0, out, out); }
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, out, out);
+  };
+  const encode = (type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  draw(null);
+  let blob = await encode('image/webp', 0.9);
+  if (!blob || blob.type !== 'image/webp') {
+    draw('#ffffff'); // JPEG has no transparency: white instead of black behind see-through parts
+    blob = await encode('image/jpeg', 0.9);
+  }
+  bitmap.close?.();
+  if (!blob) throw new Error('encode');
+  return blob;
+}
+
+function pictureSection(me, ctx) {
+  const input = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/gif,image/heic,image/avif,image/*', hidden: true, onchange: (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) choose(file).catch(showError);
+  } });
+  const choose = async (file) => {
+    let blob;
+    try { blob = await squarePicture(file); } catch { return void toast(t('This picture can’t be read. Use a JPEG, PNG or WebP picture.'), 'error'); }
+    const url = URL.createObjectURL(blob);
+    const saved = await modal({
+      title: t('New profile picture'),
+      body: h('div', { class: 'avatar-preview' }, h('img', { src: url, alt: t('Preview of your new profile picture') }),
+        h('p', { class: 'muted small' }, t('This is how other people see you in Cloudy.'))),
+      buttons: [{ label: t('Cancel'), value: null }, { label: t('Save picture'), value: 'ok', primary: true }],
+      focusPrimary: true,
+      onSubmit: async () => { await api('PUT', '/api/me/avatar', blob); return true; },
+    });
+    URL.revokeObjectURL(url);
+    if (saved) {
+      toast(t('Profile picture saved'));
+      await ctx.refreshMe();
+    }
+  };
+  const remove = async () => {
+    if (!(await confirmDialog(t('Remove profile picture'), t('Your initials are shown instead.'), t('Remove'), true))) return;
+    try {
+      await del('/api/me/avatar');
+      toast(t('Profile picture removed'));
+      await ctx.refreshMe();
+    } catch (e) { showError(e); }
+  };
+  return h('div', { class: 'card first' },
+    h('div', { class: 'avatar-editor' }, avatar(me, 'xl'),
+      h('div', { class: 'actions' },
+        h('h2', {}, t('Profile picture')),
+        h('p', {}, t('Shown next to your name in Cloudy, for example when you share something.')),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', type: 'button', onclick: () => input.click() }, icon('camera'), me.avatar ? t('Change picture') : t('Upload picture')),
+          me.avatar && h('button', { class: 'btn ghost danger', type: 'button', onclick: remove }, t('Remove'))),
+        input)));
+}
+
+async function accountSections(me, ctx, rerender) {
+  const options = await get('/api/auth/options').catch(() => ({}));
   const name = h('input', { type: 'text', value: me.displayName });
   const email = h('input', { type: 'email', value: me.email });
   const notifyShares = h('input', { type: 'checkbox', checked: me.notifyShares !== false });
@@ -56,7 +163,6 @@ export async function renderSettings(main, ctx) {
   const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const timezone = h('select', {}, [...new Set([me.timezone || browserZone, ...zones])].filter(Boolean)
     .map((z) => h('option', { value: z, selected: z === (me.timezone || browserZone) }, z.replace(/_/g, ' '))));
-  const cur = h('input', { type: 'password', autocomplete: 'current-password', required: true });
   // Changing the email address needs the current password (reset links go there); other profile edits don't.
   const emailPw = passwordInput(t('Current password (needed to change the email)'));
   const emailPwBox = h('div', { class: 'wide', hidden: true }, emailPw.field, emailPw.error);
@@ -67,23 +173,9 @@ export async function renderSettings(main, ctx) {
     if (!emailChanged()) { emailPw.input.value = ''; emailPw.error.textContent = ''; }
   });
   emailPw.input.required = false;
-  const pwError = h('p', { class: 'error wide', role: 'alert' });
-  const pw1 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
-  const pw2 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
-  const showPw = h('input', { type: 'checkbox', onchange: (e) => { for (const i of [cur, pw1, pw2]) i.type = e.target.checked ? 'text' : 'password'; } });
-  const pct = me.quotaBytes ? Math.min(100, (me.used / me.quotaBytes) * 100) : 0;
 
-  const urlRow = (label, url) => h('div', { class: 'url-row' }, h('span', { class: 'muted' }, label),
-    h('code', { dir: 'ltr' }, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
-
-  main.replaceChildren(h('section', { class: 'settings-view' },
-    h('h1', { class: 'view-title' }, icon('settings'), t('Settings')),
-
-    h('div', { class: 'card' }, h('h2', {}, t('Storage')),
-      me.quotaBytes ? h('progress', { max: 100, value: pct, class: 'quota' }) : null,
-      h('p', {}, me.quotaBytes
-        ? t('{used} of {quota} used, including trash and versions.', { used: formatSize(me.used), quota: formatSize(me.quotaBytes) })
-        : t('{used} used (no quota), including trash and versions.', { used: formatSize(me.used) }))),
+  return [
+    pictureSection(me, ctx),
 
     h('form', { class: 'card form-grid', onsubmit: busyForm(async () => {
       emailPw.error.textContent = '';
@@ -112,7 +204,27 @@ export async function renderSettings(main, ctx) {
       h('p', { class: 'muted small wide' }, t('Your language is used here, in the Android and desktop apps and in emails. Your email is also used for password reset links and security notices.')),
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save profile')))),
 
-    h('form', { class: 'card form-grid', onsubmit: busyForm(async (e) => {
+    h('div', { class: 'card' }, h('h2', {}, t('Storage')),
+      meter(me.used, me.quotaBytes),
+      h('p', { class: 'muted' }, me.quotaBytes
+        ? t('{used} of {quota} used, including trash and versions.', { used: formatSize(me.used), quota: formatSize(me.quotaBytes) })
+        : t('{used} used (no quota), including trash and versions.', { used: formatSize(me.used) }))),
+
+    deleteAccountCard(),
+  ];
+}
+
+// ---------------------------------------------------------------- security: password, passkeys, two-factor
+
+async function securitySections(me, rerender) {
+  const passkeys = await get('/api/me/passkeys');
+  const cur = h('input', { type: 'password', autocomplete: 'current-password', required: true });
+  const pwError = h('p', { class: 'error wide', role: 'alert' });
+  const pw1 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
+  const pw2 = h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: true });
+  const showPw = h('input', { type: 'checkbox', onchange: (e) => { for (const i of [cur, pw1, pw2]) i.type = e.target.checked ? 'text' : 'password'; } });
+  return [
+    h('form', { class: 'card form-grid first', onsubmit: busyForm(async (e) => {
       pwError.textContent = '';
       if (pw1.value !== pw2.value) { pwError.textContent = t('The passwords do not match.'); pw2.focus(); return; }
       try {
@@ -134,8 +246,18 @@ export async function renderSettings(main, ctx) {
 
     passkeysCard(passkeys, rerender),
     twoFactorCard(me, rerender),
+  ];
+}
 
-    h('div', { class: 'card' }, h('h2', {}, t('Connect apps and devices')),
+// ---------------------------------------------------------------- apps & devices: DAV addresses, app passwords
+
+async function appsSections(me, rerender) {
+  const appPasswords = await get('/api/me/app-passwords');
+  const davBase = `${location.origin}/dav`;
+  const urlRow = (label, url) => h('div', { class: 'url-row' }, h('span', { class: 'muted' }, label),
+    h('code', { dir: 'ltr' }, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
+  return [
+    h('div', { class: 'card first' }, h('h2', {}, t('Connect apps and devices')),
       h('p', {}, t('Use these addresses in a WebDAV client (Finder, Windows Explorer, rclone, Cyberduck) or a calendar/contacts app (Thunderbird, DAVx⁵, Apple Calendar/Contacts). Sign in with your username and an app password.')),
       urlRow(t('Files (WebDAV)'), `${davBase}/files/${encodeURIComponent(me.id)}/`),
       urlRow(t('Calendars & contacts'), `${davBase}/`),
@@ -159,9 +281,7 @@ export async function renderSettings(main, ctx) {
           h('div', { class: 'url-row' }, h('code', { class: 'secret', dir: 'ltr' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
         rerender();
       } }, icon('plus'), t('Create app password'))),
-
-    deleteAccountCard(),
-  ));
+  ];
 }
 
 /** Form submit handler that disables the form's buttons while `fn` runs (no double submits). */
@@ -189,7 +309,7 @@ function deleteAccountCard() {
       location.assign('/'); // the session is gone: back to the sign-in page, which says the account was deleted
     }
   };
-  return h('div', { class: 'card' }, h('h2', {}, t('Delete account')),
+  return h('div', { class: 'card danger-zone' }, h('h2', {}, t('Delete account')),
     h('p', {}, t('Deletes your account and all your data on this server for good.')),
     h('button', { class: 'btn danger', onclick: open }, icon('trash'), t('Delete account')));
 }
@@ -325,7 +445,7 @@ const GB = 1024 ** 3;
 async function userDialog(user, groups, rerender) {
   const isNew = !user;
   const f = {
-    id: h('input', { type: 'text', required: true, value: user?.id ?? '', disabled: !isNew, pattern: '[A-Za-z0-9._@\\-]{1,64}', maxlength: 64 }),
+    id: h('input', { type: 'text', required: true, value: user?.id ?? '', disabled: !isNew, pattern: isNew ? '[A-Za-z0-9][A-Za-z0-9._@\\-]{0,63}' : null, maxlength: 64 }),
     displayName: h('input', { type: 'text', value: user?.displayName ?? '' }),
     email: h('input', { type: 'email', value: user?.email ?? '' }),
     password: h('input', { type: 'password', autocomplete: 'new-password', minlength: 8, required: isNew, placeholder: isNew ? '' : t('Leave empty to keep') }),
@@ -334,6 +454,7 @@ async function userDialog(user, groups, rerender) {
     disabled: h('input', { type: 'checkbox', checked: !!user?.disabled }),
     resetTwoFactor: h('input', { type: 'checkbox' }),
     removePasskeys: h('input', { type: 'checkbox' }),
+    removeAvatar: h('input', { type: 'checkbox' }),
     groups: h('select', { multiple: true, size: Math.min(6, Math.max(2, groups.length)) }, groups.map((g) => h('option', { value: g.id, selected: user?.groups.includes(g.id) }, g.id))),
   };
   await modal({
@@ -348,6 +469,7 @@ async function userDialog(user, groups, rerender) {
       h('label', { class: 'check' }, f.isAdmin, t('Administrator')),
       user?.twoFactor && h('label', { class: 'check' }, f.resetTwoFactor, t('Reset two-factor authentication (lost phone)')),
       user?.passkeys > 0 && h('label', { class: 'check' }, f.removePasskeys, t('Remove all passkeys ({n})', { n: user.passkeys })),
+      user?.avatar && h('label', { class: 'check' }, f.removeAvatar, t('Remove profile picture')),
       !isNew && h('label', { class: 'check' }, f.disabled, t('Disabled')),
     ),
     buttons: [{ label: t('Cancel'), value: null }, { label: isNew ? t('Create') : t('Save'), value: 'save', primary: true }],
@@ -359,7 +481,7 @@ async function userDialog(user, groups, rerender) {
       };
       try {
         if (isNew) await post('/api/admin/users', { ...data, id: f.id.value.trim(), password: f.password.value });
-        else await patch(`/api/admin/users/${encodeURIComponent(user.id)}`, { ...data, disabled: f.disabled.checked, password: f.password.value || undefined, resetTwoFactor: f.resetTwoFactor.checked || undefined, removePasskeys: f.removePasskeys.checked || undefined });
+        else await patch(`/api/admin/users/${encodeURIComponent(user.id)}`, { ...data, disabled: f.disabled.checked, password: f.password.value || undefined, resetTwoFactor: f.resetTwoFactor.checked || undefined, removePasskeys: f.removePasskeys.checked || undefined, removeAvatar: f.removeAvatar.checked || undefined });
         toast(isNew ? t('User created') : f.password.value ? t('User saved, password changed') : t('User saved'));
         rerender();
         return true;
@@ -371,44 +493,191 @@ async function userDialog(user, groups, rerender) {
   });
 }
 
-export async function renderAdmin(main, ctx) {
-  const [users, groups, mail, limits] = await Promise.all([get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/mail'), get('/api/admin/limits')]);
-  const rerender = () => renderAdmin(main, ctx).catch(showError);
-  main.replaceChildren(h('section', { class: 'settings-view' },
-    h('div', { class: 'toolbar' }, h('h1', { class: 'view-title' }, icon('shield'), t('Administration')), h('div', { class: 'grow' }),
-      h('button', { class: 'btn primary', onclick: () => userDialog(null, groups, rerender) }, icon('plus'), t('New user'))),
-    h('div', { class: 'card' }, h('h2', {}, t('Users ({n})', { n: users.length })),
-      h('div', { class: 'table-wrap' }, h('table', { class: 'data-table' },
-        // Phones: Email and Groups are left out (both are in the Edit dialog); Edit and Delete stay at the right edge.
-        h('thead', {}, h('tr', {}, [[t('User')], [t('Email'), 'col-email'], [t('Groups'), 'col-groups'], [t('Storage')], [t('Role')],
-          [h('span', { class: 'sr-only' }, t('Actions')), 'col-actions']].map(([th, cls]) => h('th', { class: cls ?? null }, th)))),
-        h('tbody', {}, users.map((u) => h('tr', { class: u.disabled ? 'dim' : '' },
-          h('td', {}, h('strong', {}, u.displayName), h('div', { class: 'muted small' }, u.id)),
-          h('td', { class: 'col-email' }, u.email),
-          h('td', { class: 'col-groups' }, u.groups.join(', ')),
-          h('td', { class: 'nowrap' }, `${formatSize(u.used)}${u.quotaBytes ? ` / ${formatSize(u.quotaBytes)}` : ''}`),
-          h('td', {}, u.isAdmin ? h('span', { class: 'pill' }, t('admin')) : '', u.twoFactor ? h('span', { class: 'pill' }, '2FA') : '', u.passkeys ? h('span', { class: 'pill' }, t('passkey')) : '', u.disabled ? h('span', { class: 'pill warn' }, t('disabled')) : ''),
-          h('td', { class: 'nowrap col-actions' },
-            h('button', { class: 'icon-btn', 'aria-label': t('Edit {name}', { name: u.id }), onclick: () => userDialog(u, groups, rerender) }, icon('edit')),
-            u.id !== ctx.me.id && h('button', { class: 'icon-btn', 'aria-label': t('Delete {name}', { name: u.id }), onclick: async () => {
-              if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files, calendars and contacts? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
-                await del(`/api/admin/users/${encodeURIComponent(u.id)}`).then(rerender, showError);
-              }
-            } }, icon('trash'))),
-        )))))),
-    h('div', { class: 'card' }, h('h2', {}, t('Groups')),
-      groups.length ? h('ul', { class: 'plain-list' }, groups.map((g) => h('li', {}, icon('users'),
-        h('span', { class: 'grow' }, g.id, h('small', { class: 'muted' }, ' · ' + t('{n} member(s)', { n: g.members }))),
-        h('button', { class: 'icon-btn', 'aria-label': t('Delete group {name}', { name: g.id }), onclick: async () => {
-          if (await confirmDialog(t('Delete group'), t('Delete group "{name}"? Shares with this group are removed.', { name: g.id }), t('Delete'), true)) await del(`/api/admin/groups/${encodeURIComponent(g.id)}`).then(rerender, showError);
-        } }, icon('trash'))))) : h('p', { class: 'muted' }, t('No groups yet.')),
-      h('button', { class: 'btn', onclick: async () => {
+const ADMIN_TABS = [['', 'Users'], ['groups', 'Groups'], ['email', 'Email'], ['limits', 'Limits']];
+
+export async function renderAdmin(main, ctx, tab = '') {
+  // Only administrators reach these pages from the menu; anyone else who types the address gets this, not a failed
+  // request (the server answers every /api/admin request from them with 403 anyway).
+  if (ctx.me?.isAdmin !== true) {
+    main.replaceChildren(h('div', { class: 'empty forbidden', role: 'alert' }, icon('shield'),
+      h('h1', { class: 'view-title' }, t('Administrators only')),
+      h('p', {}, t('Ask an administrator of this server if you need something changed.')),
+      h('a', { class: 'btn primary', href: '/' }, icon('folder'), t('Go to Files'))));
+    return;
+  }
+  if (!ADMIN_TABS.some(([k]) => k === tab)) tab = '';
+  const rerender = () => renderAdmin(main, ctx, tab).catch(showError);
+  const body = tab === 'groups' ? await groupsTab(rerender)
+    : tab === 'email' ? mailCard(await get('/api/admin/mail'), ctx, rerender)
+    : tab === 'limits' ? limitsCard(await get('/api/admin/limits'), ctx, rerender)
+    : await usersTab(ctx, rerender);
+  main.replaceChildren(h('section', { class: 'settings-view admin-view' },
+    h('div', { class: 'page-head' }, h('h1', { class: 'view-title' }, icon('shield'), t('Administration'))),
+    tabs('/admin', ADMIN_TABS, tab, t('Administration')),
+    body));
+}
+
+async function usersTab(ctx, rerender) {
+  const [users, groups, invitations, options] = await Promise.all([
+    get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/invitations').catch(() => []), get('/api/auth/options').catch(() => ({}))]);
+  const mailOn = !!options.passwordReset;
+  const deleteUser = (u) => async () => {
+    if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files, calendars and contacts? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
+      await del(`/api/admin/users/${encodeURIComponent(u.id)}`).then(rerender, showError);
+    }
+  };
+  const roles = (u) => [
+    u.isAdmin && h('span', { class: 'pill night' }, t('Administrator')),
+    u.twoFactor && h('span', { class: 'pill quiet' }, '2FA'),
+    u.passkeys > 0 && h('span', { class: 'pill quiet' }, t('passkey')),
+    u.disabled && h('span', { class: 'pill warn' }, t('disabled')),
+  ].filter(Boolean);
+  return h('div', { class: 'card first' },
+    h('div', { class: 'section-head' },
+      h('h2', {}, t('Users ({n})', { n: users.length })), h('div', { class: 'grow' }),
+      h('button', { class: 'btn', onclick: () => userDialog(null, groups, rerender) }, icon('plus'), t('New user')),
+      h('button', { class: 'btn primary', onclick: () => inviteDialog(groups, mailOn, rerender) }, icon('userPlus'), t('Invite someone'))),
+    invitations.length ? [
+      h('h3', { class: 'invites-title' }, t('Invited, not joined yet'), h('span', { class: 'pill quiet' }, String(invitations.length))),
+      h('ul', { class: 'invites' }, invitations.map((inv) => invitationRow(inv, mailOn, rerender))),
+    ] : null,
+    h('div', { class: 'table-wrap' }, h('table', { class: 'data-table' },
+      // Phones: Email and Groups are left out (both are in the Edit dialog); Edit and Delete stay at the end.
+      h('thead', {}, h('tr', {}, [[t('User')], [t('Email'), 'col-email'], [t('Groups'), 'col-groups'], [t('Storage')], [t('Role'), 'col-role'],
+        [h('span', { class: 'sr-only' }, t('Actions')), 'col-actions']].map(([th, cls]) => h('th', { class: cls ?? null }, th)))),
+      h('tbody', {}, users.map((u) => h('tr', { class: u.disabled ? 'dim' : '' },
+        h('td', {}, h('div', { class: 'person' }, avatar(u, 'sm'),
+          h('div', { class: 'who' }, h('strong', { dir: 'auto' }, u.displayName), h('small', { dir: 'auto' }, u.id),
+            // Phones: the Role column is left out (it lay under the sticky Edit/Delete buttons); the badges go here.
+            roles(u).length ? h('span', { class: 'roles-inline' }, roles(u)) : null))),
+        h('td', { class: 'col-email' }, u.email),
+        h('td', { class: 'col-groups' }, u.groups.join(', ')),
+        h('td', { class: 'nowrap' }, `${formatSize(u.used)}${u.quotaBytes ? ` / ${formatSize(u.quotaBytes)}` : ''}`, meter(u.used, u.quotaBytes, 'small')),
+        h('td', { class: 'col-role' }, roles(u)),
+        h('td', { class: 'col-actions' },
+          h('button', { class: 'icon-btn', 'aria-label': t('Edit {name}', { name: u.id }), title: t('Edit {name}', { name: u.id }), onclick: () => userDialog(u, groups, rerender) }, icon('edit')),
+          u.id !== ctx.me.id && h('button', { class: 'icon-btn', 'aria-label': t('Delete {name}', { name: u.id }), title: t('Delete {name}', { name: u.id }), onclick: deleteUser(u) }, icon('trash'))),
+      ))))));
+}
+
+async function groupsTab(rerender) {
+  const groups = await get('/api/admin/groups');
+  return h('div', { class: 'card first' },
+    h('div', { class: 'section-head' }, h('h2', {}, t('Groups')), h('div', { class: 'grow' }),
+      h('button', { class: 'btn primary', onclick: async () => {
         const id = await promptDialog(t('New group'), t('Group name (letters, digits and . _ -)'), '', t('Create'));
         if (id) await post('/api/admin/groups', { id }).then(() => { toast(t('Group created')); rerender(); }, showError);
       } }, icon('plus'), t('New group'))),
-    limitsCard(limits, ctx, rerender),
-    mailCard(mail, ctx, rerender),
-  ));
+    h('p', { class: 'lead' }, t('Sharing a folder with a group shares it with everyone in the group. Add people to groups when you edit them.')),
+    groups.length ? h('ul', { class: 'plain-list' }, groups.map((g) => h('li', {}, icon('users'),
+      h('span', { class: 'grow' }, h('strong', { dir: 'auto' }, g.id), h('small', { class: 'muted' }, ' · ' + t('{n} member(s)', { n: g.members }))),
+      h('button', { class: 'icon-btn', 'aria-label': t('Delete group {name}', { name: g.id }), title: t('Delete group {name}', { name: g.id }), onclick: async () => {
+        if (await confirmDialog(t('Delete group'), t('Delete group "{name}"? Shares with this group are removed.', { name: g.id }), t('Delete'), true)) await del(`/api/admin/groups/${encodeURIComponent(g.id)}`).then(rerender, showError);
+      } }, icon('trash'))))) : h('p', { class: 'muted' }, t('No groups yet.')));
+}
+
+// ---------------------------------------------------------------- invitations
+// The administrator invites someone by email (or copies a link); the person chooses their own username and password
+// on /invite. Invitations never make administrators: that stays a choice made in Edit user afterwards.
+
+function invitationRow(inv, mailOn, rerender) {
+  const renew = (send) => async (e) => {
+    const btn = e.currentTarget;
+    // A new link without an email makes the emailed one stop working: said before it happens.
+    if (!send && inv.emailedAt && inv.email && !(await confirmDialog(t('New link'),
+      t('The link already emailed to {email} stops working.', { email: isolate(inv.email) }), t('New link')))) return;
+    btn.disabled = true;
+    try {
+      const r = await post(`/api/admin/invitations/${inv.id}/resend`, { send });
+      rerender();
+      await showInvitation(r, inv.email);
+    } catch (err) { showError(err); btn.disabled = false; }
+  };
+  const facts = [
+    inv.displayName && inv.email ? inv.email : null,
+    inv.invitedByName ? t('Invited by {name}', { name: isolate(inv.invitedByName) }) : null,
+    t('Expires {when}', { when: until(inv.expiresAt) }),
+    inv.emailedAt ? t('Email sent') : null,
+  ].filter(Boolean);
+  return h('li', {},
+    h('span', { class: 'invite-icon' }, icon('mail')),
+    h('div', { class: 'who' }, h('strong', { dir: 'auto' }, inv.displayName || inv.email || t('Invitation link')), h('small', { dir: 'auto' }, facts.join(' · '))),
+    // Screen readers hear whose invitation the buttons belong to.
+    h('div', { class: 'acts', role: 'group', 'aria-label': inv.displayName || inv.email || t('Invitation link') },
+      mailOn && inv.email && h('button', { class: 'btn ghost', type: 'button', onclick: renew(true) }, icon('send'), t('Send again')),
+      h('button', { class: 'btn ghost', type: 'button', onclick: renew(false) }, icon('link'), t('New link')),
+      h('button', { class: 'btn ghost danger', type: 'button', onclick: async () => {
+        if (!(await confirmDialog(t('Withdraw invitation'), t('The link in this invitation stops working.'), t('Withdraw'), true))) return;
+        await del(`/api/admin/invitations/${inv.id}`).then(() => { toast(t('Invitation withdrawn')); rerender(); }, showError);
+      } }, t('Withdraw'))));
+}
+
+async function inviteDialog(groups, mailOn, rerender) {
+  const email = h('input', { type: 'email', autocomplete: 'off', placeholder: 'name@example.com', dir: 'ltr' });
+  const name = h('input', { type: 'text', maxlength: 100, autocomplete: 'off', dir: 'auto' });
+  const quota = h('input', { type: 'number', min: 0, step: 0.5, placeholder: t('Unlimited'), title: t('Empty or 0 = unlimited') });
+  const groupSel = h('select', { multiple: true, size: Math.min(5, Math.max(2, groups.length)) }, groups.map((g) => h('option', { value: g.id }, g.id)));
+  const error = h('p', { class: 'error wide', role: 'alert' });
+  let result = null;
+  const willSend = () => mailOn && !!email.value.trim();
+  const dialog = modal({
+    title: t('Invite someone'),
+    body: h('div', { class: 'form-grid' },
+      h('p', { class: 'lead wide' }, mailOn
+        ? t('They get an email with a link to choose their own username and password. The link works once, for 7 days.')
+        : t('Email is not set up on this server, so you get a link to send yourself. It works once, for 7 days.')),
+      h('label', { class: 'field wide' }, h('span', {}, mailOn ? t('Email address') : t('Email address (optional)')), email),
+      h('label', { class: 'field wide' }, h('span', {}, t('Name (optional)')), name),
+      h('details', { class: 'more-options wide' }, h('summary', {}, icon('right'), t('Storage and groups')),
+        h('div', { class: 'form-grid' },
+          h('label', { class: 'field' }, h('span', {}, t('Quota (GB)')), quota),
+          h('label', { class: 'field' }, h('span', {}, t('Groups')), groups.length ? groupSel : h('span', { class: 'muted' }, t('No groups yet'))))),
+      error),
+    buttons: [{ label: t('Cancel'), value: null }, { label: mailOn ? t('Send invitation') : t('Create link'), value: 'ok', primary: true }],
+    onSubmit: async () => {
+      error.textContent = '';
+      try {
+        result = await post('/api/admin/invitations', {
+          email: email.value.trim() || undefined,
+          displayName: name.value.trim() || undefined,
+          quotaBytes: quota.value ? Math.round(Number(quota.value) * GB) : null,
+          groups: [...groupSel.selectedOptions].map((o) => o.value),
+          send: willSend(),
+        });
+        return true;
+      } catch (e) {
+        error.textContent = t(e.message);
+        return false;
+      }
+    },
+  });
+  // The main button says what will happen: an email goes out only when there is an address to send it to.
+  const submit = email.closest('dialog')?.querySelector('footer button[type=submit]');
+  if (submit && mailOn) email.addEventListener('input', () => { submit.textContent = willSend() ? t('Send invitation') : t('Create link'); });
+  if (submit && mailOn) submit.textContent = t('Create link');
+  email.focus();
+  await dialog;
+  if (!result) return;
+  rerender();
+  await showInvitation(result, email.value.trim());
+}
+
+/** After inviting: whether the email went out, and the link to copy (it is shown this once). */
+async function showInvitation(r, address) {
+  const link = h('input', { type: 'text', readonly: true, value: r.url, dir: 'ltr', 'aria-label': t('Invitation link'), onclick: (e) => e.target.select() });
+  await modal({
+    title: r.emailed ? t('Invitation sent') : t('Invitation link'),
+    body: h('div', {},
+      r.emailed && h('span', { class: 'success-mark' }, icon('check')),
+      h('p', {}, r.emailed
+        ? t('An email with the link went to {email}. You can also copy the link and send it another way.', { email: isolate(address) })
+        : t('Send this link to the person you invite. It works once and expires {when}.', { when: until(r.expiresAt) })),
+      r.emailError && h('p', { class: 'error' }, t('The email could not be sent.'), ' ', h('span', { class: 'muted small' }, r.emailError)),
+      h('div', { class: 'link-box' }, link, h('button', { type: 'button', class: 'btn', onclick: () => copyText(r.url) }, icon('copy'), t('Copy'))),
+      h('p', { class: 'muted small' }, t('Anyone with this link can create an account until it is used or it expires.'))),
+    buttons: [{ label: t('Done'), value: 'ok', primary: true }],
+    focusPrimary: true,
+  });
 }
 
 // ---------------------------------------------------------------- limits (trash, versions, sign-in)
@@ -420,7 +689,7 @@ function limitsCard(limits, ctx, rerender) {
     maxVersions: num(limits.maxVersions, 0, 1000),
     sessionDays: num(limits.sessionDays, 1, 365),
   };
-  return h('form', { class: 'card form-grid', onsubmit: async (e) => {
+  return h('form', { class: 'card form-grid first', onsubmit: async (e) => {
     e.preventDefault();
     const next = { trashDays: Number(f.trashDays.value), maxVersions: Number(f.maxVersions.value), sessionDays: Number(f.sessionDays.value) };
     // Lower limits delete data for good: older trash within the hour, extra versions when a file is next saved.
@@ -461,7 +730,7 @@ function mailCard(mail, ctx, rerender) {
     host: f.host.value.trim(), port: Number(f.port.value), security: f.security.value, user: f.user.value.trim(),
     password: f.password.value, fromName: f.fromName.value.trim(), fromEmail: f.fromEmail.value.trim(),
   });
-  return h('form', { class: 'card form-grid', onsubmit: async (e) => {
+  return h('form', { class: 'card form-grid first', onsubmit: async (e) => {
     e.preventDefault();
     try { await save(); toast(f.host.value.trim() ? t('Email settings saved') : t('Email turned off')); rerender(); } catch (err) { showError(err); }
   } },

@@ -13,6 +13,8 @@ import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes, repair
 import { handleDav } from './dav/server.ts';
 import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
+import { registerAvatars } from './api/avatars.ts';
+import { registerInvitations, expireInvitations } from './api/invitations.ts';
 import { registerPasskeys } from './api/passkeys.ts';
 import { registerFiles, registerUploadChunks, expireUploads } from './api/files.ts';
 import { registerShares } from './api/shares.ts';
@@ -38,6 +40,8 @@ const admin = (h: Authed) => authed(async (ctx, user) => {
 
 const router = new Router();
 registerAccount(router, authed, admin);
+registerAvatars(router, authed);
+registerInvitations(router, admin);
 registerPasskeys(router, authed);
 registerFiles(router, authed);
 registerUploadChunks(router);
@@ -64,7 +68,7 @@ router.get('/status', async ({ res }) => {
 const STATIC_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
-  '.json': 'application/json',
+  '.json': 'application/json', '.woff2': 'font/woff2', '.webp': 'image/webp',
 };
 
 const CSP = [
@@ -74,7 +78,8 @@ const CSP = [
 
 // The web app's pages have plain addresses (/files/12, /settings…; "#/…" before 1.18): each one is the app, which
 // reads the path itself. /app is an older address of the app. Public links: /s/<token> and its folders /s/<token>/<id>.
-const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin|forgot|reset)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
+// /invite#<token> is where an invited person creates their account.
+const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin|forgot|reset|invite)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
 const PUBLIC_PAGES = /^\/s\/[\w-]+(?:\/\d+)?$/;
 
 const compressedStatic = new Map<string, Buffer>();
@@ -175,6 +180,7 @@ async function jobs(): Promise<void> {
     ['office previews', pruneOfficeCache],
     ['thumbnails', pruneThumbnails],
     ['password resets', expirePasswordResets],
+    ['invitations', expireInvitations],
     ['trash', async () => { const n = await expireTrash(); if (n) console.log(`purged ${n} expired trash item(s)`); }],
     ['hashes', gcHashes],
   ];

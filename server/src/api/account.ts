@@ -16,6 +16,7 @@ import { notifyPasswordChanged, notifyEmailChanged, validEmail } from '../mail.t
 import { thumbnailsAvailable } from '../thumbs.ts';
 import { canonicalTimeZone } from '../timezones.ts';
 import { isLanguage } from '../i18n.ts';
+import { removeAvatar } from './avatars.ts';
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
   const codes = newRecoveryCodes();
@@ -31,6 +32,11 @@ async function resetTwoFactor(userId: string): Promise<void> {
 }
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
+
+/** The signed-in user as GET /api/me answers it (also after accepting an invitation). */
+export async function meJson(user: User) {
+  return { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: limits().trashDays, thumbnails: thumbnailsAvailable() };
+}
 
 export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => Promise<void>, admin: (h: Authed) => (ctx: Ctx) => Promise<void>) {
   r.post('/api/login', async ({ req, res }) => {
@@ -62,7 +68,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   });
 
   r.get('/api/me', authed(async ({ res }, user) => {
-    json(res, { ...(await userJson(user)), rootId: (await rootOf(user.id)).id, trashDays: limits().trashDays, thumbnails: thumbnailsAvailable() });
+    json(res, await meJson(user));
   }));
 
   r.patch('/api/me', authed(async ({ req, res }, user) => {
@@ -181,11 +187,11 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     noContent(res);
   }));
 
-  // Sharee autocomplete: users and groups.
+  // Sharee autocomplete: users (with their profile picture's version, or null) and groups.
   r.get('/api/sharees', authed(async ({ res, url }, user) => {
     const pattern = '%' + (url.searchParams.get('q') ?? '').replace(/[\\%_]/g, (c) => '\\' + c) + '%';
-    const users = await q(`SELECT id, display_name AS "displayName" FROM users
-                            WHERE id <> $1 AND NOT disabled AND (id ILIKE $2 OR display_name ILIKE $2) ORDER BY id LIMIT 20`,
+    const users = await q(`SELECT u.id, u.display_name AS "displayName", a.etag AS avatar FROM users u LEFT JOIN avatars a ON a.user_id = u.id
+                            WHERE u.id <> $1 AND NOT u.disabled AND (u.id ILIKE $2 OR u.display_name ILIKE $2) ORDER BY u.id LIMIT 20`,
       [user.id, pattern]);
     const groups = await q(`SELECT id FROM groups WHERE id ILIKE $1 ORDER BY id LIMIT 20`, [pattern]);
     json(res, { users, groups });
@@ -234,6 +240,8 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     // Lost phone: an administrator can turn two-factor off so the user can sign in and set it up again.
     if (b.resetTwoFactor === true) await resetTwoFactor(params.id);
     if (b.removePasskeys === true) await q(`DELETE FROM passkeys WHERE user_id = $1`, [params.id]);
+    // Moderation: a profile picture that should not be shown to everyone.
+    if (b.removeAvatar === true) await removeAvatar(params.id);
     forgetBasicCache();
     noContent(res);
   }));

@@ -11,6 +11,44 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.20.0 (2026-11-15)
+
+A new look for the web app, profile pictures, and invitations. Nothing to do before you update.
+
+**New look**
+
+- The web app now looks like the Cloudy website: the navigation sits on the night-sky blue of the logo, the page
+  itself is quiet and white, and text is set in IBM Plex (IBM Plex Sans Arabic for Arabic). The fonts are served by
+  your server; the web app still makes no requests anywhere else.
+- File types have the same colours as in the Android and iPhone apps; documents, spreadsheets and presentations
+  each get their own icon.
+- **Settings** has tabs: *Account* (profile picture, name, email, language, time zone, storage, delete account),
+  *Security* (password, passkeys, two-factor) and *Apps & devices* (WebDAV/CalDAV addresses, app passwords).
+- **Administration** moved from the sidebar into the menu under your picture (top right). The menu shows your name
+  and username (which opens Settings), *Administration* for administrators only, and *Log out*. Administration has
+  tabs too: *Users*, *Groups*, *Email*, *Limits*. Anyone else who opens `/admin` is told the page is for
+  administrators; the server refuses their requests as before.
+- Press `/` anywhere to jump to the search box.
+
+**Profile pictures**
+
+- Everyone can add a profile picture under *Settings → Account*. The browser crops the middle of the picture to a
+  square and makes it small (at most 512 px) before sending it. The server also removes what a picture says about the
+  photo (place, camera, comments) before storing it, whichever app sends it: everyone signed in can see it.
+- Pictures show in the top bar, in Administration, next to the people a file is shared with, and under
+  *Shared with you*. Administrators can remove someone's picture under *Administration → Edit user*.
+
+**Invitations**
+
+- Administrators can invite people instead of choosing a username and password for them: *Administration →
+  Users → Invite someone*. With email set up, the person gets an email with a link; without email, you get the link
+  to send yourself. The link works once and for 7 days; the person chooses their own username and password and is
+  signed in straight away.
+- Invited accounts are never administrators; give the role later under *Edit user* if you want. Pending invitations
+  are listed above the users, where you can send them again, make a new link or withdraw them.
+- New usernames (invited or created by you) start with a letter or a digit, and can't be another account's email
+  address. Existing accounts keep their names.
+
 ## 1.19.1 (2026-11-15)
 
 A fix for invitations in the calendar. Nothing to do before you update.

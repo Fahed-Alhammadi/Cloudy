@@ -6,6 +6,26 @@ import { chromium } from 'playwright';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { deflateSync, crc32 } from 'node:zlib';
+
+/** A plain RGB PNG that browsers decode (a picture to upload as a profile picture). */
+function solidPng(width, height, [r, g, b]) {
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length, 0);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])) >>> 0, 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8); // 8 bits per channel, RGB, no interlace
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [r, g, b]).flat())]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk('IEND', Buffer.alloc(0))]);
+}
 
 const [BASE, ADMIN, ADMIN_PW] = process.argv.slice(2);
 if (!ADMIN_PW) { console.error('usage: node run.mjs <base url> <admin> <password>'); process.exit(2); }
@@ -444,10 +464,97 @@ console.log('== phone');
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
+console.log('== account menu, administration');
+{
+  // A regular user: their name and username (which opens Settings), then Log out. Nothing about administration.
+  await page.goto(`${BASE}/files`); await page.waitForSelector('.file-row');
+  await page.locator('.avatar-btn').click();
+  const items = await page.getByRole('menuitem').allTextContents();
+  check('a regular user\'s menu: name and username, then Log out only',
+    items.length === 2 && /Web Test/.test(items[0]) && items[0].includes(USER) && /Log out/.test(items[1]), items);
+  await page.getByRole('menuitem').first().click();
+  await page.waitForSelector('.settings-view');
+  check('the name in the menu opens Settings', new URL(page.url()).pathname === '/settings');
+  check('the rail has no Administration entry', (await page.locator('.sidebar a[href="/admin"]').count()) === 0);
+  await page.goto(`${BASE}/admin`); await page.waitForSelector('.forbidden');
+  check('a regular user typing /admin is told it is for administrators', await page.locator('.forbidden').isVisible() && (await page.locator('.admin-view').count()) === 0);
+}
+
+console.log('== profile picture');
+{
+  const png = path.join(dir, 'me.png');
+  writeFileSync(png, solidPng(640, 480, [10, 85, 196])); // wider than tall: the middle square is kept
+  await page.goto(`${BASE}/settings`); await page.waitForSelector('.avatar-editor');
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Upload picture' }).click();
+  await (await chooser).setFiles(png);
+  await page.locator('dialog[open]').getByRole('button', { name: 'Save picture' }).click();
+  const shown = await page.waitForFunction(() => document.querySelector('.avatar-btn img')?.naturalWidth > 0, null, { timeout: 8000 }).then(() => true, () => false);
+  const saved = (await api('GET', '/api/me')).body.avatar;
+  check('a new profile picture is saved and shows in the top bar', shown && typeof saved === 'string' && saved.length > 0, saved);
+  await page.getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.locator('dialog[open]').getByRole('button', { name: 'Remove', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.avatar-btn img'), null, { timeout: 8000 }).catch(() => {});
+  check('removing it brings the initials back', (await api('GET', '/api/me')).body.avatar === null && (await page.locator('.avatar-btn img').count()) === 0);
+}
+
+console.log('== invitations');
+{
+  const adminCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await adminCtx.request.post(`${BASE}/api/login`, { headers: H, data: { user: ADMIN, password: ADMIN_PW } });
+  const ap = await adminCtx.newPage();
+  ap.on('pageerror', (e) => errors.push(e.message));
+  await ap.goto(`${BASE}/files`); await ap.waitForSelector('.files-view');
+  await ap.locator('.avatar-btn').click();
+  const items = await ap.getByRole('menuitem').allTextContents();
+  check('an administrator\'s menu adds Administration', items.length === 3 && /Administration/.test(items[1]), items);
+  await ap.getByRole('menuitem', { name: 'Administration' }).click();
+  await ap.waitForSelector('.admin-view');
+  const address = `new-${USER}@example.com`;
+  await ap.getByRole('button', { name: 'Invite someone' }).click();
+  await ap.locator('dialog[open] input[type=email]').fill(address);
+  // No email set up on the test server (the e2e run sets it later): the dialog makes a link to send by hand.
+  await ap.locator('dialog[open] footer button[type=submit]').click();
+  const link = await ap.locator('dialog[open] .link-box input').inputValue().catch(() => '');
+  check('inviting gives a one-time link to /invite#…', /\/invite#[\w-]+$/.test(link), link);
+  await ap.locator('dialog[open]').getByRole('button', { name: 'Done' }).click();
+  await ap.locator('.invites li', { hasText: address }).waitFor({ timeout: 5000 }).catch(() => {});
+  check('the invitation is listed until it is used', await ap.locator('.invites li', { hasText: address }).isVisible());
+  // The person opens the link in their own browser and picks a username and password.
+  const guest = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const gp = await guest.newPage();
+  gp.on('pageerror', (e) => errors.push(e.message));
+  const target = BASE + new URL(link).pathname + new URL(link).hash; // the server may answer with its PUBLIC_URL
+  await gp.goto(target); await gp.waitForSelector('.login-card input[autocomplete=username]');
+  check('the address bar no longer shows the token', new URL(gp.url()).pathname === '/invite' && !new URL(gp.url()).hash, gp.url());
+  const invited = `inv${USER}`.slice(0, 64);
+  await gp.locator('input[autocomplete=username]').fill(invited);
+  await gp.locator('input[autocomplete=new-password]').nth(0).fill('invited-pass-123');
+  await gp.locator('input[autocomplete=new-password]').nth(1).fill('invited-pass-123');
+  await gp.getByRole('button', { name: 'Create account' }).click();
+  await gp.waitForSelector('.files-view', { timeout: 8000 }).catch(() => {});
+  check('accepting creates the account and signs the person in', (await gp.locator('.files-view').count()) === 1);
+  await gp.locator('.avatar-btn').click();
+  const theirs = await gp.getByRole('menuitem').allTextContents();
+  check('the invited person is not an administrator', theirs.length === 2 && !theirs.some((x) => /Administration/.test(x)), theirs);
+  const users = (await admin('GET', '/api/admin/users')).body;
+  const made = users.find((u) => u.id === invited);
+  check('their account has the invited address and no admin rights', made?.email === address && made?.isAdmin === false, made);
+  // The link worked once.
+  const again = await browser.newContext();
+  const p2 = await again.newPage();
+  await p2.goto(target); await p2.waitForSelector('.login-card');
+  check('an invitation link works only once', (await p2.locator('.card-title').innerText()).includes('can'), await p2.locator('.card-title').innerText());
+  await ap.reload(); await ap.waitForSelector('.admin-view');
+  check('a used invitation leaves the list', (await ap.locator('.invites li', { hasText: address }).count()) === 0);
+  await Promise.all([guest.close(), again.close(), adminCtx.close()]);
+  await admin('DELETE', `/api/admin/users/${invited}`);
+}
+
 console.log('== right to left');
 {
   await api('PATCH', '/api/me', { language: 'ar' });
-  await page.goto(`${BASE}/settings`); await page.waitForSelector('code');
+  await page.goto(`${BASE}/settings/apps`); await page.waitForSelector('code');
   const dir = await page.locator('.url-row code').first().getAttribute('dir');
   check('addresses read left to right in Arabic', dir === 'ltr', dir);
   await api('PATCH', '/api/me', { language: null });

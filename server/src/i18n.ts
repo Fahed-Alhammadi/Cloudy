@@ -18,16 +18,18 @@ export function pickLanguage(saved: string | null | undefined, req?: IncomingMes
   return 'en';
 }
 
+// inviteName is the optional part of inviteText's greeting ({name}): filled in when the invitation names the person.
 type MailKey =
   | 'open' | 'shareSubject' | 'shareFile' | 'shareFolder' | 'shareGroup'
-  | 'pwSubject' | 'pwText' | 'emailSubject' | 'emailText' | 'resetSubject' | 'resetText' | 'resetAction' | 'testSubject' | 'testText';
+  | 'pwSubject' | 'pwText' | 'emailSubject' | 'emailText' | 'resetSubject' | 'resetText' | 'resetAction' | 'testSubject' | 'testText'
+  | 'inviteSubject' | 'inviteText' | 'inviteName' | 'inviteAction';
 
 const MAIL: Record<Lang, Record<MailKey, string>> = {
   en: {
     open: 'Open Cloudy',
     shareSubject: '{who} shared "{name}" with you',
-    shareFile: 'Hi {user},\n\n{who} shared the file "{name}" with you{group}. You\'ll find it under "Shared with you".\n\nYou can turn these emails off in Cloudy under Settings → Profile.',
-    shareFolder: 'Hi {user},\n\n{who} shared the folder "{name}" with you{group}. You\'ll find it under "Shared with you".\n\nYou can turn these emails off in Cloudy under Settings → Profile.',
+    shareFile: 'Hi {user},\n\n{who} shared the file "{name}" with you{group}. You\'ll find it under "Shared with you".\n\nYou can turn these emails off in Cloudy under Settings → Account.',
+    shareFolder: 'Hi {user},\n\n{who} shared the folder "{name}" with you{group}. You\'ll find it under "Shared with you".\n\nYou can turn these emails off in Cloudy under Settings → Account.',
     shareGroup: ' (group {group})',
     pwSubject: 'Your Cloudy password was changed',
     pwText: 'Hi {user},\n\nThe password of your Cloudy account "{id}" was just changed (from {ip}).\n\nIf this wasn\'t you, reset your password right away and tell your administrator.',
@@ -38,12 +40,16 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     resetAction: 'Choose a new password',
     testSubject: 'Cloudy test email',
     testText: 'This is a test email from your Cloudy server.\n\nEmail is set up correctly — Cloudy can send password reset links and notifications.',
+    inviteSubject: '{who} invited you to Cloudy',
+    inviteText: 'Hi{name},\n\n{who} invited you to Cloudy, a private cloud for your files, calendars and contacts. Choose your username and password to create your account.\n\nThe link works once and expires in {days} days. If you didn\'t expect this invitation, ignore this email.',
+    inviteName: ' {name}',
+    inviteAction: 'Create your account',
   },
   ar: {
     open: 'فتح Cloudy',
     shareSubject: 'شارك {who} «{name}» معك',
-    shareFile: 'مرحبًا {user}،\n\nشارك {who} الملف «{name}» معك{group}. ستجده ضمن «تمت مشاركتها معك».\n\nيمكنك إيقاف هذه الرسائل في Cloudy من الإعدادات ← الملف الشخصي.',
-    shareFolder: 'مرحبًا {user}،\n\nشارك {who} المجلد «{name}» معك{group}. ستجده ضمن «تمت مشاركتها معك».\n\nيمكنك إيقاف هذه الرسائل في Cloudy من الإعدادات ← الملف الشخصي.',
+    shareFile: 'مرحبًا {user}،\n\nشارك {who} الملف «{name}» معك{group}. ستجده ضمن «تمت مشاركتها معك».\n\nيمكنك إيقاف هذه الرسائل في Cloudy من الإعدادات ← الحساب.',
+    shareFolder: 'مرحبًا {user}،\n\nشارك {who} المجلد «{name}» معك{group}. ستجده ضمن «تمت مشاركتها معك».\n\nيمكنك إيقاف هذه الرسائل في Cloudy من الإعدادات ← الحساب.',
     shareGroup: ' (المجموعة {group})',
     pwSubject: 'تم تغيير كلمة مرور Cloudy الخاصة بك',
     pwText: 'مرحبًا {user}،\n\nتم للتو تغيير كلمة مرور حسابك «{id}» في Cloudy (من {ip}).\n\nإذا لم تكن أنت من فعل ذلك، فأعد تعيين كلمة المرور فورًا وأبلغ المسؤول.',
@@ -54,12 +60,16 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     resetAction: 'اختيار كلمة مرور جديدة',
     testSubject: 'رسالة تجريبية من Cloudy',
     testText: 'هذه رسالة تجريبية من خادم Cloudy.\n\nتم إعداد البريد الإلكتروني بشكل صحيح — يستطيع Cloudy إرسال روابط إعادة تعيين كلمة المرور والإشعارات.',
+    inviteSubject: 'دعاك {who} إلى Cloudy',
+    inviteText: 'مرحبًا{name}،\n\nدعاك {who} إلى Cloudy، وهي سحابة خاصة لملفاتك وتقاويمك وجهات اتصالك. اختر اسم المستخدم وكلمة المرور لإنشاء حسابك.\n\nيعمل الرابط مرة واحدة وتنتهي صلاحيته خلال {days} أيام. إذا لم تكن تتوقع هذه الدعوة، فتجاهل هذه الرسالة.',
+    inviteName: ' {name}',
+    inviteAction: 'إنشاء حسابك',
   },
   de: {
     open: 'Cloudy öffnen',
     shareSubject: '{who} hat „{name}“ mit dir geteilt',
-    shareFile: 'Hallo {user},\n\n{who} hat die Datei „{name}“ mit dir geteilt{group}. Du findest sie unter „Mit dir geteilt“.\n\nDiese E-Mails kannst du in Cloudy unter Einstellungen → Profil abschalten.',
-    shareFolder: 'Hallo {user},\n\n{who} hat den Ordner „{name}“ mit dir geteilt{group}. Du findest ihn unter „Mit dir geteilt“.\n\nDiese E-Mails kannst du in Cloudy unter Einstellungen → Profil abschalten.',
+    shareFile: 'Hallo {user},\n\n{who} hat die Datei „{name}“ mit dir geteilt{group}. Du findest sie unter „Mit dir geteilt“.\n\nDiese E-Mails kannst du in Cloudy unter Einstellungen → Konto abschalten.',
+    shareFolder: 'Hallo {user},\n\n{who} hat den Ordner „{name}“ mit dir geteilt{group}. Du findest ihn unter „Mit dir geteilt“.\n\nDiese E-Mails kannst du in Cloudy unter Einstellungen → Konto abschalten.',
     shareGroup: ' (Gruppe {group})',
     pwSubject: 'Dein Cloudy-Passwort wurde geändert',
     pwText: 'Hallo {user},\n\ndas Passwort deines Cloudy-Kontos „{id}“ wurde soeben geändert (von {ip}).\n\nWarst du das nicht, setze dein Passwort sofort zurück und informiere deine Administration.',
@@ -70,12 +80,16 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     resetAction: 'Neues Passwort wählen',
     testSubject: 'Cloudy-Test-E-Mail',
     testText: 'Dies ist eine Test-E-Mail deines Cloudy-Servers.\n\nE-Mail ist richtig eingerichtet – Cloudy kann Links zum Zurücksetzen von Passwörtern und Benachrichtigungen senden.',
+    inviteSubject: '{who} hat dich zu Cloudy eingeladen',
+    inviteText: 'Hallo{name},\n\n{who} hat dich zu Cloudy eingeladen, einer privaten Cloud für deine Dateien, Kalender und Kontakte. Wähle deinen Benutzernamen und dein Passwort, um dein Konto zu erstellen.\n\nDer Link funktioniert einmal und läuft in {days} Tagen ab. Wenn du diese Einladung nicht erwartet hast, ignoriere diese E-Mail.',
+    inviteName: ' {name}',
+    inviteAction: 'Konto erstellen',
   },
   fr: {
     open: 'Ouvrir Cloudy',
     shareSubject: '{who} a partagé « {name} » avec vous',
-    shareFile: 'Bonjour {user},\n\n{who} a partagé le fichier « {name} » avec vous{group}. Vous le trouverez dans « Partagés avec vous ».\n\nVous pouvez désactiver ces e-mails dans Cloudy sous Paramètres → Profil.',
-    shareFolder: 'Bonjour {user},\n\n{who} a partagé le dossier « {name} » avec vous{group}. Vous le trouverez dans « Partagés avec vous ».\n\nVous pouvez désactiver ces e-mails dans Cloudy sous Paramètres → Profil.',
+    shareFile: 'Bonjour {user},\n\n{who} a partagé le fichier « {name} » avec vous{group}. Vous le trouverez dans « Partagés avec vous ».\n\nVous pouvez désactiver ces e-mails dans Cloudy sous Paramètres → Compte.',
+    shareFolder: 'Bonjour {user},\n\n{who} a partagé le dossier « {name} » avec vous{group}. Vous le trouverez dans « Partagés avec vous ».\n\nVous pouvez désactiver ces e-mails dans Cloudy sous Paramètres → Compte.',
     shareGroup: ' (groupe {group})',
     pwSubject: 'Votre mot de passe Cloudy a été modifié',
     pwText: 'Bonjour {user},\n\nLe mot de passe de votre compte Cloudy « {id} » vient d’être modifié (depuis {ip}).\n\nSi ce n’était pas vous, réinitialisez votre mot de passe immédiatement et prévenez votre administrateur.',
@@ -86,12 +100,16 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     resetAction: 'Choisir un nouveau mot de passe',
     testSubject: 'E-mail de test Cloudy',
     testText: 'Ceci est un e-mail de test de votre serveur Cloudy.\n\nL’e-mail est correctement configuré — Cloudy peut envoyer des liens de réinitialisation de mot de passe et des notifications.',
+    inviteSubject: '{who} vous invite à rejoindre Cloudy',
+    inviteText: 'Bonjour{name},\n\n{who} vous invite à rejoindre Cloudy, un cloud privé pour vos fichiers, agendas et contacts. Choisissez votre nom d’utilisateur et votre mot de passe pour créer votre compte.\n\nLe lien fonctionne une seule fois et expire dans {days} jours. Si vous ne vous attendiez pas à cette invitation, ignorez cet e-mail.',
+    inviteName: ' {name}',
+    inviteAction: 'Créer votre compte',
   },
   es: {
     open: 'Abrir Cloudy',
     shareSubject: '{who} ha compartido «{name}» contigo',
-    shareFile: 'Hola, {user}:\n\n{who} ha compartido el archivo «{name}» contigo{group}. Lo encontrarás en «Compartidos contigo».\n\nPuedes desactivar estos correos en Cloudy, en Ajustes → Perfil.',
-    shareFolder: 'Hola, {user}:\n\n{who} ha compartido la carpeta «{name}» contigo{group}. La encontrarás en «Compartidos contigo».\n\nPuedes desactivar estos correos en Cloudy, en Ajustes → Perfil.',
+    shareFile: 'Hola, {user}:\n\n{who} ha compartido el archivo «{name}» contigo{group}. Lo encontrarás en «Compartidos contigo».\n\nPuedes desactivar estos correos en Cloudy, en Ajustes → Cuenta.',
+    shareFolder: 'Hola, {user}:\n\n{who} ha compartido la carpeta «{name}» contigo{group}. La encontrarás en «Compartidos contigo».\n\nPuedes desactivar estos correos en Cloudy, en Ajustes → Cuenta.',
     shareGroup: ' (grupo {group})',
     pwSubject: 'Se ha cambiado tu contraseña de Cloudy',
     pwText: 'Hola, {user}:\n\nSe acaba de cambiar la contraseña de tu cuenta de Cloudy «{id}» (desde {ip}).\n\nSi no has sido tú, restablece tu contraseña de inmediato y avisa a tu administrador.',
@@ -102,6 +120,10 @@ const MAIL: Record<Lang, Record<MailKey, string>> = {
     resetAction: 'Elegir una contraseña nueva',
     testSubject: 'Correo de prueba de Cloudy',
     testText: 'Este es un correo de prueba de tu servidor Cloudy.\n\nEl correo está bien configurado: Cloudy puede enviar enlaces para restablecer contraseñas y notificaciones.',
+    inviteSubject: '{who} te ha invitado a Cloudy',
+    inviteText: 'Hola{name}:\n\n{who} te ha invitado a Cloudy, una nube privada para tus archivos, calendarios y contactos. Elige tu nombre de usuario y tu contraseña para crear tu cuenta.\n\nEl enlace funciona una sola vez y caduca en {days} días. Si no esperabas esta invitación, ignora este correo.',
+    inviteName: ', {name}',
+    inviteAction: 'Crear tu cuenta',
   },
 };
 

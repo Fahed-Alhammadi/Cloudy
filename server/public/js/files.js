@@ -1,7 +1,7 @@
 // Files app: folder browser, special lists (recent, favorites, shares, search, trash) and dialogs.
 import { get, post, patch, del, api } from './api.js';
 import {
-  h, icon, fileIcon, formatSize, formatDate, fullDate, toast, showError, modal, confirmDialog,
+  h, icon, fileIcon, avatar, formatSize, formatDate, fullDate, toast, showError, modal, confirmDialog,
   promptDialog, showMenu, copyText, navigate, currentView,
 } from './ui.js';
 import { openViewer, kindOf } from './viewer.js';
@@ -275,7 +275,7 @@ function fileTable(opts) {
           h('td', { class: 'col-name' }, h('div', { class: 'name-cell' }, fileIcon(item),
             h('div', { class: 'name-lines' }, h('span', { class: 'name', title: item.name, dir: 'auto' }, item.name),
               // Phones hide the Modified (and Location / Shared by) columns: the same facts go under the name there.
-              h('span', { class: 'row-meta', dir: 'auto' }, [opts.extraColumn && opts.extraColumn.render(item).textContent, formatDate(item.mtime)].filter(Boolean).join(' · '))),
+              h('span', { class: 'row-meta', dir: 'auto' }, [opts.extraColumn && (opts.extraColumn.text?.(item) ?? opts.extraColumn.render(item).textContent), formatDate(item.mtime)].filter(Boolean).join(' · '))),
             badges)),
           opts.extraColumn ? h('td', { class: 'col-extra' }, opts.extraColumn.render(item)) : null,
           h('td', { class: 'col-size' }, formatSize(item.size)),
@@ -618,7 +618,8 @@ export async function shareDialog(item, reload) {
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
 
   const shareRow = (s) => h('li', {},
-    icon(s.type === 'group' ? 'users' : 'contacts'),
+    s.type === 'group' ? h('span', { class: 'avatar sm group-avatar', 'aria-hidden': 'true' }, icon('users'))
+      : avatar({ id: s.shareWith, displayName: s.shareWithName || s.shareWith, avatar: s.shareWithAvatar }, 'sm'),
     h('span', { class: 'grow', dir: 'auto' }, s.type === 'group' ? t('Group {name}', { name: s.shareWith }) : personName(s)),
     h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: s.canEdit, onchange: toggleShare(s) }), t('Can edit')),
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Remove share with {name}', { name: s.type === 'group' ? s.shareWith : personName(s) }), onclick: async () => { await del(`/api/shares/${s.id}`).catch(showError); refresh().catch(showError); } }, icon('x')),
@@ -811,7 +812,9 @@ export async function renderFolder(main, id, ctx) {
   );
 
   const list = fileTable(opts);
-  const view = h('section', { class: 'files-view' }, toolbar, !canEdit && h('p', { class: 'notice' }, icon('lock'), t('Shared with you as read-only')), list);
+  // The path shows the folder's name as the page title; screen readers get it as the page's heading too.
+  const view = h('section', { class: 'files-view' }, h('h1', { class: 'sr-only', dir: 'auto' }, here.name), toolbar,
+    !canEdit && h('p', { class: 'notice' }, icon('lock'), t('Shared with you as read-only')), list);
   // Files dragged in from the computer (drop.js): this folder, or the folder under the pointer.
   main.replaceChildren(view);
   // Only the folder that is on screen takes the drops (a late redraw of the folder before must not take them over).
@@ -892,7 +895,12 @@ export async function renderSharedIn(main, ctx) {
     title: t('Shared with you'), iconName: 'users', items: await get('/api/shares/incoming'), emptyText: t('Nothing has been shared with you yet'),
     canModify: () => false,
     showInFolder: false, // each is shared on its own: its folder is the owner's
-    extraColumn: { title: t('Shared by'), render: (i) => h('span', {}, i.ownerName, i.canEdit ? [' ', h('span', { class: 'pill' }, t('can edit'))] : null) },
+    extraColumn: {
+      title: t('Shared by'),
+      render: (i) => h('span', {}, avatar({ id: i.owner, displayName: i.ownerName, avatar: i.ownerAvatar }, 'xs'), h('span', { dir: 'auto' }, i.ownerName),
+        i.canEdit ? [' ', h('span', { class: 'pill' }, t('can edit'))] : null),
+      text: (i) => i.ownerName + (i.canEdit ? ` (${t('can edit')})` : ''),
+    },
   });
 }
 
@@ -1011,8 +1019,8 @@ export async function renderTrash(main, ctx) {
     } }, t('Empty trash')));
   main.replaceChildren(h('section', { class: 'files-view' },
     toolbar,
+    h('p', { class: 'muted small view-lead' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
     items.length ? h('div', {}, bar, table) : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
-    h('p', { class: 'muted small' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
   ));
   if (toolbar.isConnected) watchToolbar(toolbar);
 }

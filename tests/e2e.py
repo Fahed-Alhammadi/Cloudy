@@ -54,7 +54,7 @@ check('me has rootId', s == 200 and root)
 s, _ = Client().req('GET', '/api/me')
 check('anonymous /api/me is 401', s == 401)
 # The web app's pages have plain addresses (no "#"): each is the app; other paths stay 404.
-pages = ['/', '/files', f'/files/{root}', '/recent', '/shared-in', '/search?q=a%2Fb', '/settings', '/admin', '/forgot', '/reset', '/app']
+pages = ['/', '/files', f'/files/{root}', '/recent', '/shared-in', '/search?q=a%2Fb', '/settings', '/admin', '/forgot', '/reset', '/invite', '/app']
 served = {p: Client().req('GET', p, raw=True)[:2] for p in pages}
 check('app served at its plain addresses', all(st == 200 and b'/js/app.js' in body for st, body in served.values()),
       [p for p, (st, body) in served.items() if st != 200])
@@ -120,6 +120,197 @@ s, _ = bobc.req('POST', '/api/login', {'user': bob, 'password': 'bob-pass-123'})
 check('new user can log in', s == 200)
 s, _ = bobc.req('GET', '/api/admin/users')
 check('non-admin blocked from admin API', s == 403)
+
+print('== profile pictures')
+import struct, zlib
+def png_pic(w, h, pad=0):
+    chunk = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    rows = b''.join(b'\0' + b'\x80\x40\x20' * w for _ in range(h)) if w * h <= 4096 else b''  # big ones: the header is what counts
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows))
+            + (chunk(b'tEXt', b'pad\0' + b'x' * pad) if pad else b'') + chunk(b'IEND', b''))
+def jpeg_pic(w, h):
+    seg = lambda m, d: b'\xff' + bytes([m]) + struct.pack('>H', len(d) + 2) + d
+    # EXIF with a frame header of its own (its small preview) comes before the real one: skipped
+    return (b'\xff\xd8' + seg(0xe0, b'JFIF\0\x01\x01\0\0\x01\0\x01\0\0') + seg(0xe1, b'Exif\0\0\xff\xc0\0\x11\x08\x7f\xff\x7f\xff' + bytes(12))
+            + seg(0xdb, bytes(65)) + seg(0xc0, struct.pack('>BHHB', 8, h, w, 1) + b'\x01\x11\0') + b'\xff\xd9')
+def webp_x(w, h):
+    body = b'WEBPVP8X' + struct.pack('<I', 10) + b'\0' * 4 + (w - 1).to_bytes(3, 'little') + (h - 1).to_bytes(3, 'little')
+    return b'RIFF' + struct.pack('<I', len(body)) + body
+webp_pics = {k: base64.b64decode(v) for k, v in {  # 1×1 pictures: simple lossy (VP8), lossless (VP8L), with alpha (VP8X)
+    'lossy': 'UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA',
+    'lossless': 'UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==',
+    'alpha': 'UklGRkoAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAwAAAARBxAR/Q9ERP8DAABWUDggGAAAABQBAJ0BKgEAAQAAAP4AAA3AAP7mtQAAAA=='}.items()}
+pic_h = {'Content-Type': 'application/octet-stream'}
+admin_pic = f'/api/users/{ADMIN}/avatar'
+admin.req('DELETE', '/api/me/avatar')  # (a clean start)
+s, _ = bobc.req('GET', admin_pic)
+check('no profile picture: 404', s == 404, s)
+pic = png_pic(48, 48)
+s, r = admin.req('PUT', '/api/me/avatar', pic, headers=pic_h)
+check('upload a PNG profile picture', s == 200 and re.fullmatch(r'[0-9a-f]{16}', r.get('avatar', '')), (s, r))
+v1 = r.get('avatar')
+check('/api/me names the picture version', admin.req('GET', '/api/me')[1].get('avatar') == v1)
+s, body, hd = bobc.req('GET', admin_pic, raw=True)
+check('another user sees it', s == 200 and body == pic and hd.get('Content-Type') == 'image/png' and hd.get('Content-Length') == str(len(pic)), (s, hd.get('Content-Type')))
+check('picture headers: version, no sniffing, sandboxed, this site only', hd.get('ETag') == f'"{v1}"' and hd.get('X-Content-Type-Options') == 'nosniff'
+      and hd.get('Content-Security-Policy') == "default-src 'none'; sandbox" and hd.get('Cross-Origin-Resource-Policy') == 'same-origin', dict(hd))
+check('without ?v= the browser asks again each time', hd.get('Cache-Control') == 'private, no-cache', hd.get('Cache-Control'))
+s, _, hd = bobc.req('GET', f'{admin_pic}?v={v1}', raw=True)
+check('with ?v=<version> it is kept for good', s == 200 and hd.get('Cache-Control') == 'private, max-age=31536000, immutable', hd.get('Cache-Control'))
+s, _, hd = bobc.req('GET', f'{admin_pic}?v=0123456789abcdef', raw=True)
+check('an old ?v= is not kept', s == 200 and hd.get('Cache-Control') == 'private, no-cache', hd.get('Cache-Control'))
+s, body, _ = bobc.req('GET', admin_pic, headers={'If-None-Match': f'"{v1}"'}, raw=True)
+check('unchanged picture: 304', s == 304 and body == b'', s)
+s, body, hd = bobc.req('HEAD', admin_pic, raw=True)
+check('HEAD: headers only', s == 200 and body == b'' and hd.get('Content-Length') == str(len(pic)), (s, hd.get('Content-Length')))
+s, _ = Client().req('GET', admin_pic)
+check('pictures need a sign-in', s == 401, s)
+for name, data, mime in [('JPEG', jpeg_pic(320, 200), 'image/jpeg')] + [(f'WebP ({k})', v, 'image/webp') for k, v in webp_pics.items()]:
+    s, r = admin.req('PUT', '/api/me/avatar', data, headers=pic_h)
+    s2, body, hd = bobc.req('GET', f"{admin_pic}?v={r.get('avatar') if s == 200 else ''}", raw=True)
+    # Stored without what it says about the photo (the JPEG's EXIF segment); the WebPs carry none: unchanged.
+    want = body == data if mime == 'image/webp' else (b'Exif' in data and b'Exif' not in body and b'JFIF' in body)
+    check(f'{name} picture accepted', s == 200 and s2 == 200 and hd.get('Content-Type') == mime and want, (s, r, hd.get('Content-Type')))
+s, r = admin.req('PUT', '/api/me/avatar', pic, headers=pic_h)
+check('the same picture again: the same version', s == 200 and r.get('avatar') == v1, r)
+for name, data in [('SVG', b'<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"><script>alert(1)</script></svg>'),
+                   ('GIF', base64.b64decode('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==')),
+                   ('text', b'just some text'), ('HTML', b'<!doctype html><script>alert(1)</script>'), ('empty', b''),
+                   ('a cut-off PNG', pic[:20])]:
+    s, e = admin.req('PUT', '/api/me/avatar', data, headers={'Content-Type': 'image/png'})  # the type the client claims is not believed
+    check(f'{name} refused', s == 400 and e.get('error') == 'Use a JPEG, PNG or WebP picture', (s, e))
+for name, data in [('PNG 4096 × 16', png_pic(4096, 16)), ('JPEG 1000 × 3000', jpeg_pic(1000, 3000)), ('WebP 1025 × 1025', webp_x(1025, 1025))]:
+    s, e = admin.req('PUT', '/api/me/avatar', data, headers=pic_h)
+    check(f'{name} refused (too many pixels for other browsers)', s == 400 and e.get('error') == 'Picture is too large (max 1024 × 1024 pixels)', (s, e))
+s, e = admin.req('PUT', '/api/me/avatar', png_pic(8, 8, pad=1024 * 1024), headers=pic_h)
+check('over 1 MiB refused (413)', s == 413 and e.get('error') == 'Picture is too large (max 1 MB)', (s, e))
+check('a refused picture keeps the one before', admin.req('GET', '/api/me')[1].get('avatar') == v1)
+s, r = admin.req('PUT', '/api/me/avatar', png_pic(1024, 1024), headers=pic_h)
+check('1024 × 1024 is allowed', s == 200, (s, r))
+s, r = admin.req('PUT', '/api/me/avatar', png_pic(8, 8, pad=40), headers=pic_h)
+s2, body, _ = bobc.req('GET', f"{admin_pic}?v={r.get('avatar')}", raw=True)
+check('a PNG\'s text chunks are cut out', s == 200 and s2 == 200 and b'tEXt' not in body and b'IEND' in body, (s, r))
+s, r = admin.req('PUT', '/api/me/avatar', pic, headers=pic_h)
+# names in lists come with the picture's version
+s, r = bobc.req('PUT', '/api/me/avatar', jpeg_pic(64, 64), headers=pic_h)
+vb = r.get('avatar')
+s, found = admin.req('GET', f'/api/sharees?q={bob}')
+check('people search: their picture version', any(u['id'] == bob and u.get('avatar') == vb for u in found.get('users', [])), found)
+s, pf = admin.req('POST', f'/api/nodes/{root}/folders', {'name': 'pictures-' + uuid.uuid4().hex[:6]})
+admin.req('POST', f"/api/nodes/{pf['id']}/shares", {'type': 'user', 'shareWith': bob})
+admin.req('POST', f"/api/nodes/{pf['id']}/shares", {'type': 'link'})
+s, lst = admin.req('GET', f"/api/nodes/{pf['id']}/shares")
+check("a share: the person's picture (links have none)", any(x['shareWith'] == bob and x.get('shareWithAvatar') == vb for x in lst)
+      and all(x.get('shareWithAvatar') is None for x in lst if x['type'] == 'link'), lst)
+s, inc = bobc.req('GET', '/api/shares/incoming')
+check("shared with you: the owner's picture", any(x['id'] == pf['id'] and x.get('ownerAvatar') == v1 for x in inc), [(x['id'], x.get('ownerAvatar')) for x in inc])
+s, users = admin.req('GET', '/api/admin/users')
+check('administration: picture versions', all('avatar' in u for u in users) and any(u['id'] == bob and u['avatar'] == vb for u in users), users)
+s, _ = admin.req('PATCH', f'/api/admin/users/{bob}', {'removeAvatar': True})
+check('an administrator removes a picture', s == 204 and bobc.req('GET', f'/api/users/{bob}/avatar')[0] == 404 and bobc.req('GET', '/api/me')[1].get('avatar') is None)
+admin.req('DELETE', f"/api/nodes/{pf['id']}")
+s, _ = admin.req('DELETE', '/api/me/avatar')
+check('delete own picture', s == 204 and bobc.req('GET', admin_pic)[0] == 404 and admin.req('GET', '/api/me')[1].get('avatar') is None, s)
+check('unknown user: 404', bobc.req('GET', f'/api/users/nobody-{uuid.uuid4().hex[:6]}/avatar')[0] == 404)
+
+print('== invitations')
+# (wrong links count against a limit per address of their own, apart from sign-ins: this section uses at most 6 of 10)
+import datetime
+adm = admin.req('GET', '/api/me')[1]
+invalid = 'This invitation is invalid or has expired. Ask for a new one.'
+tok_of = lambda inv: inv.get('url', '#').split('#', 1)[1]
+check_inv = lambda tok: Client().req('POST', '/api/invitations/check', {'token': tok})
+inv_admin = [('GET', '/api/admin/invitations', None), ('POST', '/api/admin/invitations', {'email': 'x@example.com'}),
+             ('POST', '/api/admin/invitations/1/resend', {}), ('DELETE', '/api/admin/invitations/1', None)]
+check('invitations: administrators only', all(bobc.req(m, p, b)[0] == 403 for m, p, b in inv_admin) and all(Client().req(m, p, b)[0] == 401 for m, p, b in inv_admin))
+for body, why in [({'email': 'not-an-address'}, 'Invalid email address'), ({'send': True}, 'Enter the email address to send the invitation to'),
+                  ({'groups': ['nope-' + uuid.uuid4().hex[:6]]}, 'Unknown group: nope-'), ({'displayName': 'x' * 101}, 'Display name is too long (max 100)'),
+                  ({'quotaBytes': 'lots'}, 'Invalid quota')]:
+    s, e = admin.req('POST', '/api/admin/invitations', body)
+    check(f'invitation refused: {why}', s == 400 and e.get('error', '').startswith(why), (s, e))
+guest = 'guest' + uuid.uuid4().hex[:6]
+s, inv = admin.req('POST', '/api/admin/invitations', {'email': f'{guest}@Example.com', 'displayName': 'Gina Guest', 'quotaBytes': 5_000_000,
+                                                      'groups': ['staff'], 'isAdmin': True})
+check('invitation: a link with the token in the fragment', s == 201 and re.search(r'/invite#[\w-]{43}$', inv.get('url', '')) and inv.get('emailed') is False
+      and 'emailError' not in inv, inv)
+expires = datetime.datetime.fromisoformat(inv.get('expiresAt', '2000-01-01T00:00:00Z').replace('Z', '+00:00'))
+check('...valid for 7 days', abs((expires - datetime.datetime.now(datetime.timezone.utc)).total_seconds() - 7 * 86400) < 600, inv.get('expiresAt'))
+s, lst = admin.req('GET', '/api/admin/invitations')
+mine = next((i for i in lst if i['id'] == inv.get('id')), {})
+check('invitation listed first, without its token and without any admin flag', lst and lst[0]['id'] == inv['id'] and mine.get('email') == f'{guest}@Example.com'
+      and mine.get('displayName') == 'Gina Guest' and mine.get('invitedBy') == ADMIN and mine.get('invitedByName') == adm['displayName']
+      and mine.get('quotaBytes') == 5_000_000 and mine.get('groups') == ['staff'] and mine.get('emailedAt') is None
+      and mine.get('createdAt') and mine.get('expiresAt') and not any(k in mine for k in ('token', 'tokenHash', 'url', 'isAdmin')), mine)
+itok = tok_of(inv)
+s, c = check_inv(itok)
+check('the link shows the invitation and suggests a username', s == 200 and c == {'email': f'{guest}@Example.com', 'displayName': 'Gina Guest',
+      'invitedBy': adm['displayName'], 'expiresAt': inv['expiresAt'], 'username': guest}, c)
+s, e = check_inv('A' * 43)
+check('an unknown link is refused', s == 400 and e.get('error') == invalid, (s, e))
+s, e = Client().req('POST', '/api/invitations/accept', {'token': 'cut-off', 'username': 'x' + guest, 'password': 'guest-pass-123'})
+check('accepting with a broken link is refused', s == 400 and e.get('error') == invalid, (s, e))
+s, _ = Client().req('POST', '/api/invitations/check', {'token': itok}, headers={'X-Cloudy-Request': '0'})
+check('the invitation pages need the CSRF header too', s == 403, s)
+gc2 = Client()
+# Someone else's email address as a username would catch their password reset requests (reset looks the name up first).
+holder = f'holder{uuid.uuid4().hex[:6]}'
+admin.req('POST', '/api/admin/users', {'id': holder, 'password': 'holder-pass-123', 'email': f'{holder}@example.com'})
+for change, st, why in [({'username': bob.upper()}, 409, 'User already exists'), ({'username': 'no spaces'}, 400, 'Username may contain'),
+                        ({'username': '..'}, 400, 'Usernames start with a letter or a digit'), ({'username': '.'}, 400, 'Usernames start with a letter or a digit'),
+                        ({'username': f'{holder}@EXAMPLE.com'}, 409, 'This username is the email address of another account'),
+                        ({'password': 'short'}, 400, 'Password must be at least 8 characters'), ({'displayName': 'x' * 101}, 400, 'Display name is too long')]:
+    s, e = gc2.req('POST', '/api/invitations/accept', {'token': itok, 'username': guest, 'password': 'guest-pass-123', **change})
+    check(f'accept refused ({why}); the invitation still works', s == st and e.get('error', '').startswith(why) and check_inv(itok)[0] == 200, (s, e))
+s, acc = gc2.req('POST', '/api/invitations/accept', {'token': itok, 'username': guest, 'password': 'guest-pass-123', 'isAdmin': True,
+                                                     'email': 'someone-else@example.com'})
+check('accept creates the account', s == 201 and acc.get('id') == guest and acc.get('rootId'), (s, acc))
+admin.req('DELETE', f'/api/admin/users/{holder}')
+check("...never an administrator, with the invitation's address, name, quota and groups", acc.get('isAdmin') is False and acc.get('email') == f'{guest}@Example.com'
+      and acc.get('displayName') == 'Gina Guest' and acc.get('quotaBytes') == 5_000_000 and acc.get('groups') == ['staff'], acc)
+s, gme = gc2.req('GET', '/api/me')
+check('...and signs the browser in', s == 200 and gme.get('id') == guest and gme.get('isAdmin') is False, (s, gme))
+s, e = check_inv(itok)
+check('the link works only once', s == 400 and e.get('error') == invalid, (s, e))
+check('a used invitation leaves the list', not any(i['id'] == inv['id'] for i in admin.req('GET', '/api/admin/invitations')[1]))
+s, _ = Client().req('POST', '/api/login', {'user': guest, 'password': 'guest-pass-123'})
+check('the new account signs in with its own password', s == 200, s)
+# a suggested name that is taken gets a number; a new invitation to the same address replaces the one before
+s, inv2 = admin.req('POST', '/api/admin/invitations', {'email': f'{bob.upper()}+work@example.com'})
+s, c2 = check_inv(tok_of(inv2))
+check('suggested username: the taken one with a number', s == 200 and c2.get('username') == f'{bob}2', (s, c2))
+s, inv2b = admin.req('POST', '/api/admin/invitations', {'email': f'{bob}+WORK@example.com'})
+ids = [i['id'] for i in admin.req('GET', '/api/admin/invitations')[1]]
+check('a new invitation to the same address replaces the one before', inv2b['id'] in ids and inv2['id'] not in ids, ids)
+admin.req('DELETE', f"/api/admin/invitations/{inv2b['id']}")
+# one link used three times at the same moment: one account
+s, inv3 = admin.req('POST', '/api/admin/invitations', {})
+racers = [f'racer{i}-{uuid.uuid4().hex[:6]}' for i in range(3)]
+raced = [None] * 3
+def race(i):
+    raced[i] = Client().req('POST', '/api/invitations/accept', {'token': tok_of(inv3), 'username': racers[i], 'password': 'racer-pass-123',
+                                                                 'email': f'{racers[i]}@example.com'})
+threads = [threading.Thread(target=race, args=(i,)) for i in range(3)]
+[t.start() for t in threads]; [t.join() for t in threads]
+made = [u['id'] for u in admin.req('GET', '/api/admin/users')[1] if u['id'] in racers]
+check('one invitation used three times at once: one account', sorted(r[0] for r in raced) == [201, 400, 400] and len(made) == 1, ([r[0] for r in raced], made))
+winner = next((r[1] for r in raced if r[0] == 201), {})
+check('an invitation without an address takes the one typed in', winner.get('email') == f"{winner.get('id')}@example.com", winner)
+# withdraw, renew
+s, inv4 = admin.req('POST', '/api/admin/invitations', {'displayName': 'Withdrawn'})
+s, _ = admin.req('DELETE', f"/api/admin/invitations/{inv4['id']}")
+check('a withdrawn invitation stops working', s == 204 and check_inv(tok_of(inv4))[0] == 400, s)
+s, inv5 = admin.req('POST', '/api/admin/invitations', {'displayName': 'Renewed'})
+s, re5 = admin.req('POST', f"/api/admin/invitations/{inv5['id']}/resend", {})
+old_s = check_inv(tok_of(inv5))[0]
+new_s, c5 = check_inv(tok_of(re5))
+check('resending makes a new link; the old one stops working', s == 200 and re5.get('id') == inv5['id'] and re5.get('url') != inv5['url']
+      and re5.get('emailed') is False and old_s == 400 and new_s == 200 and c5.get('displayName') == 'Renewed', (s, re5, old_s, new_s))
+s, e = admin.req('POST', f"/api/admin/invitations/{inv5['id']}/resend", {'send': True})
+check('emailing an invitation needs its address', s == 400 and e.get('error') == 'Enter the email address to send the invitation to', (s, e))
+check('an unknown invitation: 404', admin.req('POST', '/api/admin/invitations/999999999/resend', {})[0] == 404)
+admin.req('DELETE', f"/api/admin/invitations/{inv5['id']}")
+for u in [guest] + made:
+    admin.req('DELETE', f'/api/admin/users/{u}')
 
 print('== limits (Administration, applied without a restart)')
 s, lim0 = admin.req('GET', '/api/admin/limits')
@@ -584,12 +775,32 @@ else:
     admin.req('POST', f"/api/nodes/{f4['id']}/shares", {'type': 'user', 'shareWith': dave})
     check('share email in the recipient\'s language', got(lambda m: f4['name'] in m['subject'] and 'mit dir geteilt' in m['subject']), mails)
     admin.req('DELETE', f"/api/nodes/{f4['id']}")
-    srv.shutdown()
+    # invitations: emailed at once, so the administrator learns about a failure
+    ina = f'ina-{uuid.uuid4().hex[:6]}@example.com'
+    s, iv = admin.req('POST', '/api/admin/invitations', {'email': ina, 'displayName': 'Ina', 'send': True})
+    check('invitation emailed', s == 201 and iv.get('emailed') is True and 'emailError' not in iv, (s, iv))
+    check('invitation email: who invited, the name, the link', got(lambda m: m['to'] == [ina] and 'invited you to Cloudy' in m['subject']
+          and m['body'].startswith('Hi Ina,') and iv.get('url', '-') in m['body']), [m for m in mails if m['to'] == [ina]])
+    s, c = Client().req('POST', '/api/invitations/check', {'token': iv['url'].split('#', 1)[1]})
+    check('the emailed link works', s == 200 and c.get('email') == ina, (s, c))
+    check('the list says when it was emailed', any(i['id'] == iv['id'] and i['emailedAt'] for i in admin.req('GET', '/api/admin/invitations')[1]))
+    s, iv2 = admin.req('POST', f"/api/admin/invitations/{iv['id']}/resend", {'send': True})
+    check('resent by email with the new link', s == 200 and iv2.get('emailed') is True
+          and got(lambda m: m['to'] == [ina] and iv2.get('url', '-') in m['body']), (s, iv2))
+    srv.shutdown(); srv.server_close()
+    s, iv3 = admin.req('POST', f"/api/admin/invitations/{iv['id']}/resend", {'send': True})
+    listed = [i for i in admin.req('GET', '/api/admin/invitations')[1] if i['id'] == iv['id']]
+    check('a failed invitation email is reported; the invitation stays', s == 200 and iv3.get('emailed') is False
+          and iv3.get('emailError', '').startswith('Sending failed: ') and listed and listed[0]['emailedAt'] is None, (s, iv3, listed))
+    admin.req('DELETE', f"/api/admin/invitations/{iv['id']}")
     admin.req('DELETE', f"/api/nodes/{f2['id']}"); admin.req('DELETE', f"/api/nodes/{f3['id']}")
     admin.req('DELETE', f'/api/admin/users/{dave}')
 s, _ = admin.req('PUT', '/api/admin/mail', {'host': ''})
 s, opts = Client().req('GET', '/api/auth/options')
 check('turning email off hides password reset', opts['passwordReset'] is False)
+s, iv = admin.req('POST', '/api/admin/invitations', {'email': f'nomail-{uuid.uuid4().hex[:6]}@example.com', 'send': True})
+check('without email set up, an invitation is a link to pass on', s == 201 and iv.get('emailed') is False and 'emailError' not in iv and '/invite#' in iv.get('url', ''), (s, iv))
+admin.req('DELETE', f"/api/admin/invitations/{iv.get('id')}")
 
 # (before the 2FA section: its deliberate failures use up the per-address login limit, and DAV checks it again)
 print('== review 2026-11-04 (races, DAV, recurrence guard, account safety)')
