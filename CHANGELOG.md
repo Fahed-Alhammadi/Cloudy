@@ -11,6 +11,14 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.20.1 (2026-11-15)
+
+A fix for the web app's new look. Nothing to do before you update.
+
+- The checkboxes in front of files and folders (Files, Recent, Favorites, shared items, search results and Deleted
+  files) are always shown again, with a clearer outline that also stands out in the dark theme. 1.20.0 showed them
+  only while the mouse was over a row, so they were easy to miss.
+
 ## 1.20.0 (2026-11-15)
 
 A new look for the web app, profile pictures, and invitations. Nothing to do before you update.

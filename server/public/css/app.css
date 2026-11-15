@@ -33,6 +33,7 @@
   --border: #d7e1ef;
   --border-soft: #e7edf6;
   --border-strong: #b6c5db;
+  --check-border: #6b7c99;   /* checkbox outline: 4.2:1 on white, 3.6:1 on a selected row */
 
   /* One colour for actions and selection. */
   --accent: #0a55c4;       /* 6.8:1 with white */
@@ -115,6 +116,7 @@
     --border: #24364f;
     --border-soft: #1b2a41;
     --border-strong: #3a5274;
+    --check-border: #8b9cb8;
 
     --accent: #5aa9ff;
     --accent-hover: #7ab9ff;
@@ -250,7 +252,25 @@ input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var
 input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--ring); }
 input:disabled, select:disabled, textarea:disabled { background: var(--bg-soft); color: var(--muted); cursor: not-allowed; }
 textarea { resize: vertical; }
-input[type=checkbox], input[type=radio] { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); cursor: pointer; flex: none; }
+input[type=radio] { width: 17px; height: 17px; margin: 0; accent-color: var(--accent); cursor: pointer; flex: none; }
+/* Checkboxes: drawn here, so they read clearly on every background of the new palette (the browser's own outline was
+   faint, and in the dark theme nearly invisible). Outline ≥ 3:1 against the page, the row hover and the selected row. */
+input[type=checkbox] {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px; margin: 0; flex: none; cursor: pointer;
+  display: inline-grid; place-content: center; vertical-align: middle;
+  border: 1.5px solid var(--check-border); border-radius: 5px; background: var(--bg);
+  transition: background-color var(--ease), border-color var(--ease), box-shadow var(--ease);
+}
+input[type=checkbox]::before {
+  content: ''; width: 10px; height: 10px; background: var(--accent-text); transform: scale(0); transition: transform 90ms ease-out;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); /* the tick */
+}
+input[type=checkbox]:hover { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+input[type=checkbox]:checked, input[type=checkbox]:indeterminate { background: var(--accent); border-color: var(--accent); }
+input[type=checkbox]:checked::before { transform: scale(1); }
+input[type=checkbox]:indeterminate::before { clip-path: none; width: 9px; height: 2px; border-radius: 1px; transform: scale(1); }
+input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=checkbox]:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
 progress { accent-color: var(--accent); }
 
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -457,11 +477,6 @@ progress { accent-color: var(--accent); }
 .name-cell .badge.fav, .tile .badge.fav { color: var(--star); }
 .name-cell .badge.fav svg, .tile .badge.fav svg { fill: currentColor; }
 .file-table .col-actions .icon-btn { color: var(--muted); }
-/* Mouse and trackpad: a row's checkbox shows up on hover (and stays while anything is ticked), so the list reads cleanly. */
-@media (hover: hover) and (pointer: fine) {
-  .file-table:not(.selecting) tbody .col-check input:not(:checked):not(:focus-visible) { opacity: 0; }
-  .file-table tbody .file-row:hover .col-check input, .file-table tbody .file-row:focus-within .col-check input { opacity: 1; }
-}
 
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); padding: 80px 20px; text-align: center; }
 .empty > .icon { width: 76px; height: 76px; padding: 20px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); margin-bottom: 10px; }
