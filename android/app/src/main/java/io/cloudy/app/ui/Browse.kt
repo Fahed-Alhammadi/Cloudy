@@ -46,9 +46,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -115,10 +117,15 @@ fun ViewActions(grid: Boolean, sort: String, onGrid: (Boolean) -> Unit, onSort: 
     }
 }
 
+/** Types the server makes thumbnails of (server/src/thumbs.ts THUMBABLE). */
+private val THUMB_TYPES = Regex("^(image/(jpeg|png|gif|webp|avif|heic|heif|tiff)|application/pdf)$")
+
 /** Tiles with image thumbnails; tap opens, long-press or ⋮ shows the actions. [selected] non-null = selection mode. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (FileNode) -> Unit, selected: Set<Long>? = null) {
+    val user by Services.session.user.collectAsStateWithLifecycle()
+    val serverThumbs = user?.thumbnails == true
     // Bigger tiles on tablets (a 10-inch screen would otherwise show ten tiny columns).
     LazyVerticalGrid(GridCells.Adaptive(if (wideWindow()) 148.dp else 112.dp), Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 88.dp),
@@ -126,6 +133,19 @@ fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (File
         items(items, key = { it.id }) { node ->
             val isSelected = selected?.contains(node.id) == true
             val isImage = node.mime.startsWith("image/") && node.size in 1..20_000_000
+            // The server's small thumbnail (pictures and PDFs, server 1.19+) instead of the whole picture: a grid of
+            // photos loads a few hundred KB instead of many MB. A picture without one (BMP, a file the server could not
+            // read, an older server) falls back to the picture itself; anything else to its icon.
+            val thumb = serverThumbs && node.size > 0 && THUMB_TYPES.matches(node.mime)
+            var stage by remember(node.id, node.etag, thumb) { mutableIntStateOf(if (thumb) 0 else 1) } // 0 thumbnail, 1 picture, 2 icon
+            val local = if (isImage) Services.offline.localFile(node) else null
+            val model: Any? = when {
+                local != null -> local
+                stage == 0 -> Services.api.thumbUrl(node)
+                stage == 1 && isImage -> Services.api.downloadUrl(node.id, inline = true)
+                else -> null
+            }
+            var loaded by remember(model) { mutableStateOf(false) }
             val tileColor by animateColorAsState(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, label = "tile")
             Column(Modifier.animateItem().clip(RoundedCornerShape(18.dp))
                 .background(tileColor)
@@ -136,11 +156,11 @@ fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (File
                 Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(16.dp))
                     .background(iconFor(node).second.forTheme().copy(alpha = if (isSystemInDarkTheme()) 0.22f else 0.12f)),
                     contentAlignment = Alignment.Center) {
-                    // Thumbnails for images (Coil downsamples and caches); other types show their icon.
-                    if (isImage) {
-                        val model: Any = Services.offline.localFile(node) ?: Services.api.downloadUrl(node.id, inline = true)
-                        AsyncImage(model, node.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    } else FileIcon(node, Modifier.fillMaxSize(0.4f))
+                    // The icon shows until the preview has loaded (Coil downsamples and caches), and stays if there is none.
+                    if (model == null || !loaded) FileIcon(node, Modifier.fillMaxSize(0.4f))
+                    if (model != null) AsyncImage(model, node.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
+                        onSuccess = { loaded = true },
+                        onError = { if (local == null) stage = if (stage == 0 && isImage) 1 else 2 })
                     // Badges and the ⋮ button sit on small discs, so they stay readable on any photo.
                     val disc = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f)
                     val pinned = Services.offline.isPinned(node.id)
@@ -156,7 +176,7 @@ fun NodeGrid(items: List<FileNode>, onOpen: (FileNode) -> Unit, onActions: (File
                     // 48 dp to tap, a 28 dp disc to look at.
                     ) else Box(Modifier.align(Alignment.TopEnd).size(48.dp).clip(CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button) { onActions(node) },
                         contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(28.dp).clip(CircleShape).background(if (isImage) disc else androidx.compose.ui.graphics.Color.Transparent), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(28.dp).clip(CircleShape).background(if (model != null) disc else androidx.compose.ui.graphics.Color.Transparent), contentAlignment = Alignment.Center) {
                             Icon(Icons.Outlined.MoreVert, stringResource(R.string.actions_for, node.name), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                         }
                     }

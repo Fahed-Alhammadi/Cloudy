@@ -15,6 +15,8 @@ struct User: Codable, Hashable {
     var language: String?
     /// Days the server keeps deleted files in the trash.
     var trashDays: Int?
+    /// The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only).
+    var thumbnails: Bool?
 
     var name: String { (displayName ?? "").isEmpty ? id : displayName! }
 }
@@ -154,6 +156,9 @@ struct EventInput: Codable {
     var location: String
     var description: String
     var rrule: String
+    /// The iPhone's time zone (IANA name): new timed events are stored in it, so a repeating event keeps its local time
+    /// when the clocks change (server 1.19+; without it the account's zone is used, else UTC). Older servers ignore it.
+    var tz: String? = TimeZone.current.identifier
 }
 
 struct Contact: Codable, Hashable, Identifiable {

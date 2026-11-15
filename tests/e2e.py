@@ -1140,6 +1140,80 @@ s, _, hd = d19.req('OPTIONS', f'/dav/files/{ADMIN}/', raw=True)
 check('files still do', 'MOVE' in hd.get('Allow', ''), hd.get('Allow'))
 admin.req('DELETE', f'/api/nodes/{F19}')
 
+print('== 1.19.1')
+import urllib.parse
+# Invitations to single meetings of a series kept elsewhere: an object holding changed occurrences only (one UID, no
+# series of its own). Each is listed under its own address, and an edit or delete reaches that meeting only (saving
+# one answered "Not an event").
+uid = 'e2e-invited-' + uuid.uuid4().hex[:8]
+occ = lambda u, day, title: (f'BEGIN:VEVENT\r\nUID:{u}\r\nRECURRENCE-ID:2027{day}T150000Z\r\nDTSTAMP:20270101T000000Z\r\n'
+                             f'DTSTART:2027{day}T150000Z\r\nDTEND:2027{day}T160000Z\r\nSUMMARY:{title}\r\nEND:VEVENT\r\n')
+cal = lambda body: f'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//e2e//EN\r\n{body}END:VCALENDAR\r\n'
+d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics", cal(occ(uid, '1104', 'Board (Nov)') + occ(uid, '1202', 'Board (Dec)')),
+        headers={'Content-Type': 'text/calendar'})
+evs = lambda: [e for e in admin.req('GET', f"/api/calendars/{c19['id']}/events?start=2027-11-01T00:00:00Z&end=2028-01-01T00:00:00Z")[1] if e['uid'] == uid]
+at = lambda u: f"/api/calendars/{c19['id']}/events/{urllib.parse.quote(u, safe='')}"
+listed = evs()
+check('each invited meeting has its own address', sorted(e['uri'] for e in listed) == [f'{uid}.ics#20271104T150000Z', f'{uid}.ics#20271202T150000Z'],
+      [e['uri'] for e in listed])
+nov = next((e for e in listed if e['summary'] == 'Board (Nov)'), {})
+dec = next((e for e in listed if e['summary'] == 'Board (Dec)'), {})
+s, _ = admin.req('PUT', at(dec.get('uri', '')), {'summary': 'Board (Dec) moved', 'start': '2027-12-02T16:00:00.000Z', 'end': '2027-12-02T17:00:00.000Z',
+                                                  'allDay': False, 'location': '', 'description': '', 'rrule': ''})
+moved = next((e for e in evs() if e['uri'] == dec.get('uri')), {})
+_, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
+blocks = [b.split('END:VEVENT')[0] for b in raw.split('BEGIN:VEVENT')[1:]]
+nov_b = next((b for b in blocks if 'RECURRENCE-ID:20271104T150000Z' in b), '')
+check('editing one invited meeting changes that one only', s == 204 and moved.get('summary') == 'Board (Dec) moved'
+      and moved.get('start') == '2027-12-02T16:00:00.000Z' and len(blocks) == 2 and 'SUMMARY:Board (Nov)' in nov_b
+      and 'DTSTART:20271104T150000Z' in nov_b and not any('RRULE' in b for b in blocks), (s, moved, raw))
+s, e = admin.req('PUT', at(nov.get('uri', '')), {'summary': 'Board (Nov)', 'start': nov.get('start'), 'end': nov.get('end'), 'allDay': False, 'rrule': 'WEEKLY'})
+check('an invited meeting cannot repeat on its own', s == 400 and 'repeat' in (e or {}).get('error', ''), (s, e))
+s, _ = admin.req('PUT', at(f'{uid}.ics'), {'summary': 'x', 'start': nov.get('start'), 'end': nov.get('end')})
+check('the plain object address of two meetings names neither', s == 404, s)
+s, _ = admin.req('DELETE', at(nov.get('uri', '')))
+left = evs()
+check('deleting one invited meeting keeps the other', s == 204 and [x['summary'] for x in left] == ['Board (Dec) moved'], (s, [x['summary'] for x in left]))
+s, _ = admin.req('DELETE', at(left[0]['uri'] if left else f'{uid}.ics#none'))
+s2, _ = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
+check('deleting the last one removes the calendar object', s == 204 and s2 == 404, (s, s2))
+s, _ = admin.req('DELETE', at(f'{uid}.ics#20271104T150000Z'))
+check('a meeting that is gone is 404', s == 404, s)
+# 1.19.0 listed such a meeting under the object's own address: a meeting alone there is still found by it
+uid1 = 'e2e-invited1-' + uuid.uuid4().hex[:8]
+d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics", cal(occ(uid1, '1104', 'Alone')), headers={'Content-Type': 'text/calendar'})
+s, _ = admin.req('PUT', at(f'{uid1}.ics'), {'summary': 'Alone renamed', 'start': '2027-11-04T15:00:00.000Z', 'end': '2027-11-04T16:00:00.000Z'})
+_, raw1 = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics")
+check('a meeting alone is still found by the plain address', s == 204 and 'SUMMARY:Alone renamed' in raw1 and 'RECURRENCE-ID:20271104T150000Z' in raw1, (s, raw1))
+d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics")
+# ...but a plain address of two meetings deletes neither (it deleted both)
+uid2 = 'e2e-invited2-' + uuid.uuid4().hex[:8]
+d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics", cal(occ(uid2, '1104', 'One') + occ(uid2, '1202', 'Two')), headers={'Content-Type': 'text/calendar'})
+s, _ = admin.req('DELETE', at(f'{uid2}.ics'))
+s2, raw2 = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics")
+check('a plain address of two meetings deletes neither', s == 404 and s2 == 200 and raw2.count('BEGIN:VEVENT') == 2, (s, s2))
+d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics")
+# Addresses come from the stored RECURRENCE-ID: meetings in a zone the object has no VTIMEZONE for keep theirs when
+# another one is edited (adding the zone shifted them), and one that cannot be read hides none of the others.
+uid3 = 'e2e-invited3-' + uuid.uuid4().hex[:8]
+zoned = lambda day, title: (f'BEGIN:VEVENT\r\nUID:{uid3}\r\nRECURRENCE-ID;TZID=Europe/Berlin:2027{day}T160000\r\nDTSTAMP:20270101T000000Z\r\n'
+                            f'DTSTART;TZID=Europe/Berlin:2027{day}T160000\r\nDTEND;TZID=Europe/Berlin:2027{day}T170000\r\nSUMMARY:{title}\r\nEND:VEVENT\r\n')
+unreadable = (f'BEGIN:VEVENT\r\nUID:{uid3}\r\nRECURRENCE-ID:notadate\r\nDTSTAMP:20270101T000000Z\r\n'
+              f'DTSTART:20271215T150000Z\r\nDTEND:20271215T160000Z\r\nSUMMARY:Unreadable\r\nEND:VEVENT\r\n')
+d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid3}.ics", cal(unreadable + zoned('1104', 'Zoned Nov') + zoned('1202', 'Zoned Dec')),
+        headers={'Content-Type': 'text/calendar'})
+mine3 = lambda: {e['summary']: e['uri'] for e in admin.req('GET', f"/api/calendars/{c19['id']}/events?start=2027-11-01T00:00:00Z&end=2028-01-01T00:00:00Z")[1] if e['uid'] == uid3}
+before3 = mine3()
+check('a meeting that cannot be read hides none of the others', {'Zoned Nov', 'Zoned Dec'} <= set(before3), before3)
+s, _ = admin.req('PUT', at(before3.get('Zoned Nov', '')), {'summary': 'Zoned Nov', 'start': '2027-11-04T16:00:00.000Z', 'end': '2027-11-04T17:00:00.000Z',
+                                                           'allDay': False, 'location': '', 'description': '', 'rrule': ''})
+after3 = mine3()
+check("editing one meeting keeps the others' addresses", s == 204 and after3.get('Zoned Dec') == before3.get('Zoned Dec') == f'{uid3}.ics#20271202T160000',
+      (s, before3, after3))
+s, _ = admin.req('DELETE', at(before3.get('Zoned Dec', '')))
+check('...so it still deletes by its address', s == 204 and 'Zoned Dec' not in mine3() and 'Zoned Nov' in mine3(), s)
+d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid3}.ics")
+
 print('== cleanup')
 s, _ = admin.req('DELETE', f'/api/admin/users/{bob}')
 check('delete user', s == 204)

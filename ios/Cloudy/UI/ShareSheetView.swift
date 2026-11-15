@@ -32,6 +32,9 @@ struct ShareSheetView: View {
                 }
                 Section {
                     PasswordField("Password (optional)", text: $password, contentType: nil)
+                    if passwordTooShort {
+                        Text("At least 4 characters").font(.footnote).foregroundStyle(.red)
+                    }
                     Toggle("Expires", isOn: $expires.animation())
                     if expires {
                         DatePicker("Last day", selection: $expiry, in: Date()..., displayedComponents: .date)
@@ -40,7 +43,7 @@ struct ShareSheetView: View {
                     Button(action: createLink) {
                         if creating { ProgressView() } else { Label("Create link", systemImage: "link.badge.plus") }
                     }
-                    .disabled(creating)
+                    .disabled(creating || passwordTooShort)
                 } header: {
                     Text("New link")
                 } footer: {
@@ -124,6 +127,10 @@ struct ShareSheetView: View {
     private func load() async {
         do { shares = try await API.shared.shares(node.id) } catch { self.error = errorText(error) }
     }
+
+    /// The server refuses link passwords under 4 characters (1.19+); said here, in the phone's language. Counted as the
+    /// server counts them (UTF-16 units). An empty field means no password.
+    private var passwordTooShort: Bool { !password.isEmpty && password.utf16.count < 4 }
 
     private func createLink() {
         creating = true

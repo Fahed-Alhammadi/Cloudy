@@ -126,6 +126,7 @@
     <string name="copy_here">نسخ هنا</string>
     <string name="link_anyone">يمكن لأي شخص لديه الرابط فتح «%1$s».</string>
     <string name="link_password">كلمة المرور (اختيارية)</string>
+    <string name="link_password_short">4 أحرف على الأقل</string>
     <string name="link_expires_never">لا ينتهي أبدًا</string>
     <string name="link_expires_on">ينتهي في %1$s</string>
     <string name="link_remove_expiry">إزالة تاريخ الانتهاء</string>

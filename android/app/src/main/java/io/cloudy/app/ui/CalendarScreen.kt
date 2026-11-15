@@ -342,7 +342,7 @@ private fun EventEditor(ev: CalEvent?, day: LocalDate, calendars: List<DavCollec
     fun input(): EventInput {
         val (s, e) = if (allDay) startDate.toString() to endDate.plusDays(1).toString()
         else startDate.atTime(startTime).atZone(zone).toInstant().toString() to endDate.atTime(endTime).atZone(zone).toInstant().toString()
-        return EventInput(summary.trim(), s, e, allDay, location, notes, rrule)
+        return EventInput(summary.trim(), s, e, allDay, location, notes, rrule, tz = zone.id)
     }
 
     AlertDialog(

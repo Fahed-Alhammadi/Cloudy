@@ -97,17 +97,56 @@ function expand(calendarId: number, obj: DavObject, from: Date, to: Date): Event
   return out;
 }
 
-/** One VEVENT without a series of its own (a changed occurrence whose series is not here). */
+/**
+ * Which occurrence of its series a VEVENT replaces (its RECURRENCE-ID), as stored: "20271104T150000Z", "20271104T160000"
+ * (in the series' zone) or "20271104" for a day. From the text, not a converted time: the same whatever the server's own
+ * zone and whether the object has that zone's VTIMEZONE yet (adding it would have changed the other meetings' addresses),
+ * and a value that cannot be read never throws (it hid the whole object).
+ */
+function occurrenceKey(v: Comp): string {
+  return String(v.getFirstProperty('recurrence-id')?.toJSON()[3] ?? '').replace(/[^0-9A-Za-z]/g, '');
+}
+
+/**
+ * One VEVENT without a series of its own (a changed occurrence whose series is not here). Several can share one
+ * calendar object (invitations to two meetings of the same series have the same UID), so each gets its own address,
+ * "<object>#<occurrence>": an edit or delete then reaches that meeting only. The apps send the address back as it is.
+ */
 function expandSingle(calendarId: number, obj: DavObject, v: Comp, from: Date, to: Date): EventOut[] {
   const ev = new ICAL.Event(v);
   if (!ev.startDate) return [];
   const end = ev.endDate ?? (ev.startDate.isDate ? (() => { const x = ev.startDate.clone(); x.day += 1; return x; })() : ev.startDate);
   if (!(ev.startDate.toJSDate() < to && end.toJSDate() > from)) return [];
   const start = timeOut(ev.startDate);
+  const key = occurrenceKey(v);
   return [{
-    calendarId, uri: obj.uri, uid: ev.uid ?? '', summary: ev.summary ?? '', location: ev.location ?? '', description: ev.description ?? '',
-    start, end: timeOut(end), allDay: ev.startDate.isDate, recurring: false, rrule: '', masterStart: start, masterEnd: timeOut(end),
+    calendarId, uri: key ? `${obj.uri}#${key}` : obj.uri, uid: ev.uid ?? '', summary: ev.summary ?? '', location: ev.location ?? '',
+    description: ev.description ?? '', start, end: timeOut(end), allDay: ev.startDate.isDate, recurring: false, rrule: '',
+    masterStart: start, masterEnd: timeOut(end),
   }];
+}
+
+/**
+ * The calendar object and the VEVENT an event address names: a plain object address is its series or single event
+ * (for an object holding only changed occurrences: its only one, as 1.19.0 listed them); "<object>#<occurrence>" is
+ * that changed occurrence. An object whose own name contains "#" is still found by its full name first.
+ */
+async function eventAt(c: G.Collection, address: string) {
+  let obj = await G.getObject(G.CAL, c.id, address);
+  let occurrence: string | null = null;
+  const hash = address.lastIndexOf('#');
+  if (!obj && hash > 0) {
+    obj = await G.getObject(G.CAL, c.id, address.slice(0, hash));
+    occurrence = address.slice(hash + 1);
+  }
+  if (!obj) throw new HttpError(404, 'Event not found');
+  const vcal = G.parseComponent(obj.data);
+  const vevents = vcal.getAllSubcomponents('vevent');
+  const vevent = occurrence !== null
+    ? vevents.find((v) => v.hasProperty('recurrence-id') && occurrenceKey(v) === occurrence)
+    : vevents.find((v) => !v.hasProperty('recurrence-id')) ?? (vevents.length === 1 ? vevents[0] : undefined);
+  if (!vevent) throw new HttpError(404, 'Event not found');
+  return { obj, vcal, vevent };
 }
 
 const FREQS = ['', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'];
@@ -172,6 +211,9 @@ function setTime(vevent: Comp, name: string, time: Time, tzid: string | null): v
  */
 function applyEvent(vcal: Comp, vevent: Comp, b: any, accountTz: string | null) {
   if (!String(b.summary ?? '').trim()) throw new HttpError(400, 'Title required');
+  // A changed occurrence of a series kept elsewhere (an invited meeting) has no rule of its own: one would turn it into
+  // an invalid object that calendar apps refuse.
+  if (vevent.hasProperty('recurrence-id') && String(b.rrule ?? '')) throw new HttpError(400, 'One event of a series cannot repeat on its own');
   const allDay = !!b.allDay;
   const start = timeIn(b.start, allDay);
   const end = timeIn(b.end ?? b.start, allDay);
@@ -421,11 +463,7 @@ export function registerGroupware(r: Router, authed: Wrap) {
 
   r.put('/api/calendars/:id/events/:uri', authed(async ({ req, res, params }, user) => {
     const c = await G.collectionById(G.CAL, user.id, params.id);
-    const obj = await G.getObject(G.CAL, c.id, params.uri);
-    if (!obj) throw new HttpError(404, 'Event not found');
-    const vcal = G.parseComponent(obj.data);
-    const vevent = vcal.getAllSubcomponents('vevent').find((v) => !v.hasProperty('recurrence-id'));
-    if (!vevent) throw new HttpError(400, 'Not an event');
+    const { obj, vcal, vevent } = await eventAt(c, params.uri);
     applyEvent(vcal, vevent, await readJson(req), user.timezone ?? null);
     await G.putObject(G.CAL, c, obj.uri, vcal.toString() + '\r\n', { ifMatch: obj.etag });
     noContent(res);
@@ -433,7 +471,22 @@ export function registerGroupware(r: Router, authed: Wrap) {
 
   r.delete('/api/calendars/:id/events/:uri', authed(async ({ res, params }, user) => {
     const c = await G.collectionById(G.CAL, user.id, params.id);
-    if (!(await G.deleteObject(G.CAL, c, params.uri))) throw new HttpError(404, 'Event not found');
+    // An object that cannot be read here (never listed, so only named exactly) still goes as a whole.
+    const found = await eventAt(c, params.uri).catch((e) => { if (e instanceof HttpError) throw e; return null; });
+    if (!found) {
+      if (!(await G.deleteObject(G.CAL, c, params.uri))) throw new HttpError(404, 'Event not found');
+      return noContent(res);
+    }
+    // A series or single event goes with its changed occurrences: the whole object. One changed occurrence of a series
+    // kept elsewhere goes alone, and the object with it when it was the last. A plain address of an object holding
+    // several of them (as 1.19.0 listed them) names none (eventAt: 404): it used to delete all of them.
+    const { obj, vcal, vevent } = found;
+    if (!vevent.hasProperty('recurrence-id') || vcal.getAllSubcomponents('vevent').length === 1) {
+      if (!(await G.deleteObject(G.CAL, c, obj.uri, obj.etag))) throw new HttpError(404, 'Event not found');
+    } else {
+      vcal.removeSubcomponent(vevent);
+      await G.putObject(G.CAL, c, obj.uri, vcal.toString() + '\r\n', { ifMatch: obj.etag });
+    }
     noContent(res);
   }));
 

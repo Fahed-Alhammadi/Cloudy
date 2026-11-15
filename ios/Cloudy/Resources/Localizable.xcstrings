@@ -704,6 +704,34 @@
         }
       }
     },
+    "At least 4 characters" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "4 أحرف على الأقل"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mindestens 4 Zeichen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al menos 4 caracteres"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Au moins 4 caractères"
+          }
+        }
+      }
+    },
     "At least 8 characters" : {
       "localizations" : {
         "ar" : {

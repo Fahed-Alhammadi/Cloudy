@@ -15,6 +15,8 @@ data class User(
     val language: String? = null,
     /** Days deleted files stay in the trash (`/api/me` only). */
     val trashDays: Int? = null,
+    /** The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only). */
+    val thumbnails: Boolean = false,
 )
 
 /** An app password / device token (Settings → App passwords on the web, More → Devices here). */
@@ -133,6 +135,11 @@ data class EventInput(
     val location: String,
     val description: String,
     val rrule: String,
+    /**
+     * The phone's time zone (IANA name): new timed events are stored in it, so a repeating event keeps its local time
+     * when the clocks change (server 1.19+; without it the account's zone is used, else UTC). Older servers ignore it.
+     */
+    val tz: String? = null,
 )
 
 @Serializable

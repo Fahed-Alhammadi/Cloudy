@@ -11,6 +11,18 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 1.19.1 (2026-11-15)
+
+A fix for invitations in the calendar. Nothing to do before you update.
+
+- **Invitations to one meeting of a series** (synced into Cloudy by a phone's or computer's calendar app): 1.19.0
+  showed them, but saving a change to one failed with "Not an event". Each such meeting now has its own address, so
+  editing or deleting it changes that meeting only, also from the apps as they are. A repeat can't be set on one
+  (it belongs to a series kept elsewhere); the editor says so.
+- The apps that came with this release (Android 1.18.0, iPhone 1.17.0) use the server's thumbnails in their grid view,
+  send the phone's time zone with new events and link end dates, and check link passwords (at least 4 characters)
+  before sending them. Older app versions keep working with this server.
+
 ## 1.19.0 (2026-11-15)
 
 A new Files page in the web app, thumbnails, time zones in the calendar, and the rest of the fixes from the full

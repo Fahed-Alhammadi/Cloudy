@@ -163,11 +163,17 @@ final class API: @unchecked Sendable {
     // MARK: shares
 
     func shares(_ nodeId: Int64) async throws -> [Share] { try await get("/api/nodes/\(nodeId)/shares") }
-    /// `expires`: last day the link works; `canEdit`: visitors may upload (folders only).
+    /// `expires`: last day the link works, until the end of that day where this iPhone is: sent with the phone's offset
+    /// (a time without one was read in the server's zone, UTC in the container); `canEdit`: visitors may upload (folders only).
     func createLink(_ nodeId: Int64, password: String?, expires: Date?, canEdit: Bool) async throws -> Share {
         var b: [String: Any?] = ["type": "link"]
         if let password, !password.isEmpty { b["password"] = password }
-        if let expires { b["expiresAt"] = dayFormatter.string(from: expires) + "T23:59:59" }
+        if let expires {
+            let end = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: expires) ?? expires
+            let iso = ISO8601DateFormatter()
+            iso.timeZone = .current
+            b["expiresAt"] = iso.string(from: end) // "2026-12-31T23:59:59+04:00"
+        }
         if canEdit { b["canEdit"] = true }
         return try decode(await sendJSON("POST", "/api/nodes/\(nodeId)/shares", b))
     }

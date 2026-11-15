@@ -22,6 +22,9 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.net.URLEncoder
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 /** [twoFactor] is true when the server asks for (or rejected) a two-factor code. */
@@ -133,14 +136,22 @@ class Api(private val session: Session) {
 
     // ---------------------------------------------------------------- shares
     suspend fun shares(nodeId: Long): List<Share> = decode(send("GET", "/api/nodes/$nodeId/shares"))
-    /** [expiresAt]: last day the link works (YYYY-MM-DD); [canEdit]: visitors may upload (folders only). */
+    /**
+     * [expiresAt]: last day the link works (YYYY-MM-DD), until the end of that day where this phone is: sent with the
+     * phone's offset (a time without one was read in the server's zone, UTC in the container); [canEdit]: visitors may
+     * upload (folders only).
+     */
     suspend fun createLink(nodeId: Long, password: String?, expiresAt: String? = null, canEdit: Boolean = false): Share =
         decode(sendJson("POST", "/api/nodes/$nodeId/shares", buildJsonObject {
             put("type", "link")
             if (!password.isNullOrBlank()) put("password", password)
-            if (expiresAt != null) put("expiresAt", "${expiresAt}T23:59:59")
+            if (expiresAt != null) put("expiresAt", endOfDay(expiresAt))
             if (canEdit) put("canEdit", true)
         }))
+
+    private fun endOfDay(day: String): String =
+        DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(LocalDate.parse(day).atTime(23, 59, 59).atZone(ZoneId.systemDefault()))
+
     suspend fun shareWith(nodeId: Long, target: String, canEdit: Boolean): Share {
         val group = target.startsWith("group:")
         return decode(sendJson("POST", "/api/nodes/$nodeId/shares", buildJsonObject {
@@ -154,6 +165,12 @@ class Api(private val session: Session) {
 
     // ---------------------------------------------------------------- transfer
     fun downloadUrl(id: Long, inline: Boolean = false) = url("/api/nodes/$id/download" + if (inline) "?inline" else "")
+
+    /**
+     * A small WebP preview of a picture or PDF (server 1.19+, [User.thumbnails]; 404 when the file has none). The etag
+     * in the address gives a changed file a new address, so cached previews never go stale.
+     */
+    fun thumbUrl(node: FileNode) = url("/api/nodes/${node.id}/thumb?v=${enc(node.etag)}")
 
     /** Streams a file (or a folder as ZIP) to [dest]. */
     suspend fun download(id: Long, dest: File, onProgress: (Long) -> Unit = {}) = downloadUrlTo(downloadUrl(id), dest, onProgress = onProgress)

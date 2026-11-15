@@ -182,8 +182,14 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = LocalContext.current.findActivity()
     LaunchedEffect(lifecycleOwner) {
-        // A language chosen for the account (on the web, or before this phone signed in) applies here too.
-        runCatching { Services.api.me() }.onSuccess { me -> activity?.let { Lang.followAccount(it, me.id, me.language) } }
+        runCatching { Services.api.me() }.onSuccess { me ->
+            // The stored account gets what only /api/me says (whether the server makes thumbnails, storage used): the
+            // sign-in answer has none of it, and the More tab was the only place that refreshed it.
+            val known = Services.session.user.value
+            if (known?.id == me.id) Services.session.updateUser(me.copy(rootId = me.rootId.takeIf { r -> r > 0 } ?: known.rootId))
+            // A language chosen for the account (on the web, or before this phone signed in) applies here too.
+            activity?.let { Lang.followAccount(it, me.id, me.language) }
+        }
         Office.load(Services.api)
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) { Live.run(Services.api) }
     }

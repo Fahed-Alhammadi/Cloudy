@@ -126,6 +126,7 @@
     <string name="copy_here">Copiar aquí</string>
     <string name="link_anyone">Cualquiera con el enlace puede abrir «%1$s».</string>
     <string name="link_password">Contraseña (opcional)</string>
+    <string name="link_password_short">Al menos 4 caracteres</string>
     <string name="link_expires_never">No caduca</string>
     <string name="link_expires_on">Caduca el %1$s</string>
     <string name="link_remove_expiry">Quitar fecha de caducidad</string>

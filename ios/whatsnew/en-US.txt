@@ -1,1 +1,4 @@
-• Change your password right in the app: More → Change password. This iPhone stays signed in.
+• Grid view: photos and PDFs show small previews made by your Cloudy server (1.19 or newer), so far less is downloaded. PDFs show their first page.
+• New repeating events keep their time when the clocks change (server 1.19 or newer).
+• A link with an end date now works until the end of that day where you are.
+• Link passwords need at least 4 characters; the app tells you right away.

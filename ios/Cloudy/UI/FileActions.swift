@@ -396,6 +396,8 @@ struct FileTile: View {
     @State private var image: UIImage?
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .caption) private var glyph: CGFloat = 40 // tiles widen with the text size, the icon follows
+    /// The server makes thumbnails of pictures and PDFs (1.19+): read from the account, so tiles follow when it loads.
+    private var serverThumbs: Bool { Session.shared.user?.thumbnails == true }
 
     var body: some View {
         let (icon, color) = fileIcon(node)
@@ -464,9 +466,9 @@ struct FileTile: View {
             }
         }
         .animation(.snappy(duration: 0.2), value: isSelected)
-        .task(id: node.etag) {
-            guard Thumbnails.supports(node) else { return }
-            let loaded = await Thumbnails.shared.image(for: node)
+        .task(id: "\(node.etag ?? "")|\(serverThumbs)") {
+            guard Thumbnails.supports(node, server: serverThumbs) else { return }
+            let loaded = await Thumbnails.shared.image(for: node, server: serverThumbs)
             withAnimation(.easeOut(duration: 0.2)) { image = loaded } // fades in over the icon instead of popping
         }
     }

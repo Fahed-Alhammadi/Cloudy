@@ -557,6 +557,19 @@ test('a decomposed (NFD) local name is the same file as the composed (NFC) serve
   assert.deepEqual(a.trashed, []);
 });
 
+// Servers from 1.19 store every name composed (NFC). Where the disk keeps both forms (Linux), a decomposed local name
+// comes back from the server composed: the file is renamed here once, never uploaded again or duplicated.
+test('a decomposed (NFD) local name takes the server\'s composed spelling once, where the disk keeps both forms', { skip: skip || (fold.normFold && 'the temp folder folds Unicode forms') }, async () => {
+  const { a, folder } = await setup('nfd-keep');
+  await writeFile(path.join(a.dir, 'café.txt'), 'same');
+  for (let i = 0; i < 3; i++) assert.deepEqual(await a.sync(), []);
+  assert.deepEqual(await readdir(a.dir), ['café.txt'], 'renamed to the composed form, no duplicate');
+  assert.deepEqual(await names(folder.id), ['café.txt']);
+  const [file] = (await api.node(folder.id)).children ?? [];
+  assert.deepEqual(await api.json('GET', `/api/nodes/${file.id}/versions`), [], 'uploaded once');
+  assert.deepEqual(a.trashed, []);
+});
+
 test('a local symlink spelled differently from a server folder is never written through', { skip: noCaseFold }, async () => {
   const { a, b } = await setup('case-symlink');
   const outside = await mkdtemp(path.join(tmpdir(), 'cloudy-outside-'));

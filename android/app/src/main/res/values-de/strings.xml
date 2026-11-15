@@ -126,6 +126,7 @@
     <string name="copy_here">Hierher kopieren</string>
     <string name="link_anyone">Jeder mit dem Link kann „%1$s“ öffnen.</string>
     <string name="link_password">Passwort (optional)</string>
+    <string name="link_password_short">Mindestens 4 Zeichen</string>
     <string name="link_expires_never">Läuft nie ab</string>
     <string name="link_expires_on">Läuft am %1$s ab</string>
     <string name="link_remove_expiry">Ablaufdatum entfernen</string>

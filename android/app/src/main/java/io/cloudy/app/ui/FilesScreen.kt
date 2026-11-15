@@ -669,13 +669,18 @@ fun LinkDialog(node: FileNode, onDismiss: () -> Unit) {
     var expires by rememberSaveable { mutableStateOf<LocalDate?>(null) } // last day the link works
     var allowUpload by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    // The server refuses link passwords under 4 characters (1.19+); said here, in the phone's language. A blank one
+    // means no password (it is not sent).
+    val passwordTooShort = password.isNotBlank() && password.length < 4
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.share_link)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(R.string.link_anyone, node.name))
-                OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.link_password)) }, singleLine = true)
+                OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.link_password)) }, singleLine = true,
+                    isError = passwordTooShort,
+                    supportingText = if (passwordTooShort) { { Text(stringResource(R.string.link_password_short)) } } else null)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = {
                         val d = expires ?: LocalDate.now().plusDays(7)
@@ -692,7 +697,7 @@ fun LinkDialog(node: FileNode, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(enabled = !busy, onClick = {
+            TextButton(enabled = !busy && !passwordTooShort, onClick = {
                 busy = true
                 scope.launch {
                     try {
