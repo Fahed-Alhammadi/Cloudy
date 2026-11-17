@@ -69,9 +69,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Logout
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material.icons.outlined.Feedback
-import androidx.compose.material.icons.outlined.StarRate
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Delete
@@ -118,7 +115,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import io.cloudy.app.BuildConfig
 import io.cloudy.app.Services
 import io.cloudy.app.work.BackupSettings
 import io.cloudy.app.work.Jobs
@@ -389,25 +385,21 @@ fun MoreScreen(nav: NavController) {
                     headlineContent = { Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error) },
                 )
             }
-            Text(stringResource(R.string.section_support), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            // Help, feedback, rating, the website, the privacy policy and the version all live in About.
             Group {
-                // Web pages open in the browser (no arrow: they leave the app).
-                @Composable
-                fun Link(label: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, open: () -> Unit) =
-                    ListItem(modifier = Modifier.clickable(onClick = open), colors = itemColors, leadingContent = { Badge(icon, color) },
-                        headlineContent = { Text(stringResource(label)) })
-                Link(R.string.help, Icons.AutoMirrored.Outlined.HelpOutline, SettingColor.Blue) { openUrl(context, HELP_URL) }
-                Link(R.string.send_feedback, Icons.Outlined.Feedback, SettingColor.Green) { openUrl(context, FEEDBACK_URL) }
-                Link(R.string.rate_app, Icons.Outlined.StarRate, SettingColor.Pink) { openStoreListing(context) }
-                Entry(R.string.about, Icons.Outlined.Info, SettingColor.Gray, "about")
+                ListItem(modifier = Modifier.clickable { nav.navigate("about") }, colors = itemColors,
+                    leadingContent = { Badge(Icons.Outlined.Info, SettingColor.Gray) },
+                    headlineContent = { Text(stringResource(R.string.about)) },
+                    supportingContent = { Text(stringResource(R.string.about_summary)) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline) })
             }
             // Adding up the offline folder reads the disk: done in the background, shown when ready.
             val offlineBytes by produceState<Long?>(null) { value = withContext(Dispatchers.IO) { Services.offline.usedBytes() } }
-            Text(listOfNotNull(stringResource(R.string.version, BuildConfig.VERSION_NAME),
-                offlineBytes?.let { stringResource(R.string.offline_storage, formatSize(it)) }).joinToString("\n"),
+            offlineBytes?.let {
+                Text(stringResource(R.string.offline_storage, formatSize(it)),
                 Modifier.fillMaxWidth().padding(16.dp), textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            }
         }
     }
     if (deleteAccount) DeleteAccountDialog { deleteAccount = false }

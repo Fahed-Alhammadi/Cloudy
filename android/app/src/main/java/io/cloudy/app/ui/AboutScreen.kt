@@ -16,9 +16,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PrivacyTip
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -63,7 +66,8 @@ private val Stars = listOf(
 
 /**
  * More → About Cloudy, the same as the iPhone app's: one bold element — the website's night-sky panel with the logo,
- * name and version — then the website and privacy policy as plain rows, and the copyright line (the README's footer).
+ * name, copyright line (the README's footer) and version — then Help, Send feedback and Rate Cloudy, then the website
+ * and the privacy policy.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,22 +83,32 @@ fun AboutScreen(nav: NavController) {
 
             val colors = ListItemDefaults.colors(containerColor = Color.Transparent)
             @Composable
-            fun LinkRow(label: Int, detail: String?, icon: androidx.compose.ui.graphics.vector.ImageVector, url: String) =
-                ListItem(modifier = Modifier.clickable { openUrl(context, url) }, colors = colors,
+            fun LinkRow(label: Int, detail: String?, icon: androidx.compose.ui.graphics.vector.ImageVector, open: () -> Unit) =
+                ListItem(modifier = Modifier.clickable(onClick = open), colors = colors,
                     leadingContent = { Icon(icon, null, tint = MaterialTheme.colorScheme.primary) },
                     headlineContent = { Text(stringResource(label)) },
                     supportingContent = detail?.let { { Text(it) } },
                     trailingContent = { Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline) })
-            Column(Modifier.padding(top = 20.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerLowest)) {
-                LinkRow(R.string.website, "fahed-alhammadi.github.io/Cloudy", Icons.Outlined.Language, WEBSITE_URL)
-                HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-                LinkRow(R.string.privacy_policy, null, Icons.Outlined.PrivacyTip, PRIVACY_URL)
+            @Composable
+            fun Card(content: @Composable () -> Unit) = Column(Modifier.padding(top = 20.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerLowest)) { content() }
+            @Composable
+            fun Divider() = HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+            // What you do (help, feedback, rating), then what you read (website, privacy policy).
+            Card {
+                LinkRow(R.string.help, null, Icons.AutoMirrored.Outlined.HelpOutline) { openUrl(context, HELP_URL) }
+                Divider()
+                LinkRow(R.string.send_feedback, null, Icons.Outlined.Feedback) { openUrl(context, FEEDBACK_URL) }
+                Divider()
+                LinkRow(R.string.rate_app, null, Icons.Outlined.StarOutline) { openStoreListing(context) }
+            }
+            Card {
+                LinkRow(R.string.website, "fahed-alhammadi.github.io/Cloudy", Icons.Outlined.Language) { openUrl(context, WEBSITE_URL) }
+                Divider()
+                LinkRow(R.string.privacy_policy, null, Icons.Outlined.PrivacyTip) { openUrl(context, PRIVACY_URL) }
             }
 
-            Text(stringResource(R.string.copyright), Modifier.fillMaxWidth().padding(top = 28.dp), textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(stringResource(R.string.license_note), Modifier.fillMaxWidth().padding(top = 4.dp), textAlign = TextAlign.Center,
+            Text(stringResource(R.string.license_note), Modifier.fillMaxWidth().padding(top = 24.dp), textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -114,8 +128,8 @@ private fun NightSkyPanel() {
                 Modifier.size(84.dp).shadow(14.dp, RoundedCornerShape(19.dp)).border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(19.dp)))
             Text("Cloudy", Modifier.padding(top = 18.dp), color = Color.White,
                 style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.about_tagline), Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.78f),
-                style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.copyright), Modifier.padding(top = 4.dp), color = Color.White.copy(alpha = 0.78f),
+                style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             Text(stringResource(R.string.version, BuildConfig.VERSION_NAME), Modifier.padding(top = 16.dp).clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.09f)).padding(horizontal = 12.dp, vertical = 5.dp),
                 color = SkyBlue, style = MaterialTheme.typography.labelLarge)
