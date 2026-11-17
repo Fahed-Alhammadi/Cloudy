@@ -245,6 +245,7 @@
     <string name="about">About Cloudy</string>
     <string name="about_tagline">The self-hosted cloud for your files.</string>
     <string name="website">Website</string>
+    <string name="privacy_policy">Privacy policy</string>
     <!-- Same line as the README's footer. -->
     <string name="copyright">© 2026 Fahed Alhammadi. All rights reserved.</string>
     <string name="license_note">Open source under the MIT License.</string>
