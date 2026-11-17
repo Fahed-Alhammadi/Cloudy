@@ -53,16 +53,9 @@ struct MoreView: View {
                 } footer: {
                     Text("Deletes your account and all your data on this server for good.")
                 }
-                // Support comes last, as on Android; the version sits under it, at the very bottom.
+                // Help, feedback, rating, the website, the privacy policy and the version all live in About.
                 Section {
-                    Link(destination: helpURL) { SettingsLabel("Help", icon: "questionmark", color: .settingsBlue) }.tint(.primary)
-                    Link(destination: feedbackURL) { SettingsLabel("Send feedback", icon: "bubble.left.fill", color: .settingsGreen) }.tint(.primary)
-                    Link(destination: rateURL) { SettingsLabel("Rate Cloudy", icon: "star.fill", color: .settingsPink) }.tint(.primary)
                     NavigationLink(value: Route.about) { SettingsLabel("About Cloudy", icon: "info", color: .settingsGray) }
-                } header: {
-                    Text("Support")
-                } footer: {
-                    Text("Version \(appVersion)").frame(maxWidth: .infinity).padding(.top, 16)
                 }
             }
             .navigationTitle("More")
@@ -117,11 +110,6 @@ extension MoreView {
         }
     }
 }
-
-private let helpURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#readme")!
-private let feedbackURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy/issues")!
-/// Opens the App Store's review sheet (6826676331 = the app's App Store Connect id for io.cloudy.app).
-private let rateURL = URL(string: "https://apps.apple.com/app/id6826676331?action=write-review")!
 
 /// Settings app tones: fixed, deep and solid in light and dark mode (the dynamic system colors are paler since iOS 26).
 /// Orange, green and teal are a shade deeper than Apple's so the white symbol keeps ~3:1 contrast.

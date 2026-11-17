@@ -8,9 +8,13 @@ let appVersion: String = {
 }()
 
 private let websiteURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/")!
+private let helpURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#readme")!
+private let feedbackURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy/issues")!
+/// Opens the App Store's review sheet (6826676331 = the app's App Store Connect id for io.cloudy.app).
+private let rateURL = URL(string: "https://apps.apple.com/app/id6826676331?action=write-review")!
 
-/// More → About Cloudy. One bold element: the website's night-sky panel with the logo, name and version; below it the
-/// links as plain rows, and the copyright line (the same as the README's footer) at the bottom.
+/// More → About Cloudy. One bold element: the website's night-sky panel with the logo, name, copyright line (the README's
+/// footer) and version; below it Help, Send feedback and Rate Cloudy, then the website and the privacy policy.
 struct AboutView: View {
     var body: some View {
         List {
@@ -19,17 +23,20 @@ struct AboutView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.nightSky)
             }
+            // What you do (help, feedback, rating), then what you read (website, privacy policy).
+            Section {
+                Link(destination: helpURL) { AboutRow(title: "Help", detail: nil, icon: "questionmark.circle") }.tint(.primary)
+                Link(destination: feedbackURL) { AboutRow(title: "Send feedback", detail: nil, icon: "bubble.left") }.tint(.primary)
+                Link(destination: rateURL) { AboutRow(title: "Rate Cloudy", detail: nil, icon: "star") }.tint(.primary)
+            }
             Section {
                 Link(destination: websiteURL) { AboutRow(title: "Website", detail: "fahed-alhammadi.github.io/Cloudy", icon: "globe") }.tint(.primary)
                 Link(destination: privacyPolicyURL) { AboutRow(title: "Privacy policy", detail: nil, icon: "hand.raised") }.tint(.primary)
             } footer: {
-                VStack(spacing: 4) {
-                    Text(verbatim: "© 2026 Fahed Alhammadi. All rights reserved.")
-                    Text("Open source under the MIT License.")
-                }
-                .frame(maxWidth: .infinity)
-                .multilineTextAlignment(.center)
-                .padding(.top, 28)
+                Text("Open source under the MIT License.")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 20)
             }
         }
         .navigationTitle("About Cloudy")
@@ -61,7 +68,7 @@ private struct NightSkyHeader: View {
             Text(verbatim: "Cloudy")
                 .font(.largeTitle.bold()).foregroundStyle(.white)
                 .padding(.top, 18)
-            Text("The self-hosted cloud for your files.")
+            Text(verbatim: "© 2026 Fahed Alhammadi. All rights reserved.")
                 .font(.subheadline).foregroundStyle(.white.opacity(0.78))
                 .multilineTextAlignment(.center)
                 .padding(.top, 4)
