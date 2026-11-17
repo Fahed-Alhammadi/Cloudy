@@ -242,4 +242,10 @@
     <string name="picture_removed">Profile picture removed</string>
     <string name="picture_unreadable">This picture can\'t be read. Choose another one.</string>
     <string name="picture_unsupported">This server can\'t store profile pictures yet. Ask its operator to update Cloudy.</string>
+    <string name="about">About Cloudy</string>
+    <string name="about_tagline">The self-hosted cloud for your files.</string>
+    <string name="website">Website</string>
+    <!-- Same line as the README's footer. -->
+    <string name="copyright">© 2026 Fahed Alhammadi. All rights reserved.</string>
+    <string name="license_note">Open source under the MIT License.</string>
 </resources>

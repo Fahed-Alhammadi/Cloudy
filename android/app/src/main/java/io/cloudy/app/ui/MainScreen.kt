@@ -288,6 +288,7 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
                 composable("backup") { BackupScreen(nav) }
                 composable("devices") { DevicesScreen(nav) }
                 composable("password") { ChangePasswordScreen(nav) }
+                composable("about") { AboutScreen(nav) }
             }
         }
     }
@@ -376,18 +377,6 @@ fun MoreScreen(nav: NavController) {
                 Entry(R.string.change_password, Icons.Outlined.Password, SettingColor.Orange, "password")
                 Entry(R.string.devices, Icons.Outlined.Devices, SettingColor.Indigo, "devices")
             }
-            Text(stringResource(R.string.section_support), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
-                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-            Group {
-                // Web pages open in the browser (no arrow: they leave the app).
-                @Composable
-                fun Link(label: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, open: () -> Unit) =
-                    ListItem(modifier = Modifier.clickable(onClick = open), colors = itemColors, leadingContent = { Badge(icon, color) },
-                        headlineContent = { Text(stringResource(label)) })
-                Link(R.string.help, Icons.AutoMirrored.Outlined.HelpOutline, SettingColor.Blue) { openUrl(context, HELP_URL) }
-                Link(R.string.send_feedback, Icons.Outlined.Feedback, SettingColor.Green) { openUrl(context, FEEDBACK_URL) }
-                Link(R.string.rate_app, Icons.Outlined.StarRate, SettingColor.Pink) { openStoreListing(context) }
-            }
             Group {
                 ListItem(
                     modifier = Modifier.clickable { confirmLogout = true }, colors = itemColors,
@@ -399,6 +388,19 @@ fun MoreScreen(nav: NavController) {
                     leadingContent = { Badge(Icons.Outlined.PersonRemove, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer) },
                     headlineContent = { Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error) },
                 )
+            }
+            Text(stringResource(R.string.section_support), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+            Group {
+                // Web pages open in the browser (no arrow: they leave the app).
+                @Composable
+                fun Link(label: Int, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color, open: () -> Unit) =
+                    ListItem(modifier = Modifier.clickable(onClick = open), colors = itemColors, leadingContent = { Badge(icon, color) },
+                        headlineContent = { Text(stringResource(label)) })
+                Link(R.string.help, Icons.AutoMirrored.Outlined.HelpOutline, SettingColor.Blue) { openUrl(context, HELP_URL) }
+                Link(R.string.send_feedback, Icons.Outlined.Feedback, SettingColor.Green) { openUrl(context, FEEDBACK_URL) }
+                Link(R.string.rate_app, Icons.Outlined.StarRate, SettingColor.Pink) { openStoreListing(context) }
+                Entry(R.string.about, Icons.Outlined.Info, SettingColor.Gray, "about")
             }
             // Adding up the offline folder reads the disk: done in the background, shown when ready.
             val offlineBytes by produceState<Long?>(null) { value = withContext(Dispatchers.IO) { Services.offline.usedBytes() } }
