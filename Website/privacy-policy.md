@@ -31,7 +31,7 @@ Your files, photos and account live on the Cloudy server you sign in to. The per
 | Information | When and why | Where it goes |
 |---|---|---|
 | **Server address, username and password** | When you sign in. The password (and, if you use two-factor authentication, the one-time code) is sent once to your server, which returns a device token. The password is not stored on the phone. | Your server only |
-| **Device token** | Kept so you stay signed in. You can see and revoke it in Cloudy's web interface (Settings → Apps & devices). | Stored in the app's private storage on your phone |
+| **Device token** | Kept so you stay signed in. You can see and revoke it in Cloudy's web interface (Settings → Devices). | Stored in the app's private storage on your phone |
 | **Device name** (manufacturer and model, e.g. "Samsung SM-S911B") | Sent at sign-in to label the device token, so you can recognize it in the list of signed-in devices. | Your server only |
 | **Files and folders** | When you browse, open, upload, download, share, rename, move or delete files, edit text files, or mark files "available offline". Office documents are converted for preview by your server. | Your server; offline copies and temporary previews are stored in the app's private storage. When you use **Send to…**, the file goes to the app you pick (for example WhatsApp or email) |
 | **Photos and videos** (permission: *Photos and videos*) | Only if you turn on **Photo backup**. The app then reads photos and videos from your gallery and uploads new ones to your server in the background. You can also pick individual photos or videos to upload. | Your server only |
@@ -117,7 +117,7 @@ You can delete your Cloudy account and all its data yourself, at any time:
 - **Web:** sign in to your server in a browser, open *Settings → Delete account* and confirm with your password.
 
 This permanently deletes, on your server, your account and everything in it: your files (including the trash and
-older versions), shares and public links, app passwords and signed-in devices. Nothing is kept,
+older versions), shares and public links, and signed-in devices. Nothing is kept,
 and it can't be undone. Files and links that others shared with you stay with their owners. The app also removes what it
 kept on your phone (offline copies, cached previews) and signs you out.
 

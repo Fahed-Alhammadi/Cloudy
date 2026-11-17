@@ -273,7 +273,7 @@ struct ChangePasswordView: View {
     }
 }
 
-/// Signed-in devices and app passwords; revoking one signs that device out.
+/// Signed-in devices; revoking one signs that device out.
 struct DevicesView: View {
     @State private var items: [AppPassword]?
     @State private var loadError: String?

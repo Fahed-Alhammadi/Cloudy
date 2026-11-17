@@ -60,7 +60,7 @@ after a silence). Pausing, signing out and quitting abort running transfers; qui
 belongs to: a state from another folder or account is never applied (an empty state only compares, never deletes).
 After the server signs the app out, "Sign in again" keeps the folder and its state; another account starts over.
 
-Sign-in uses `POST /api/auth/token` (an app password named "Desktop (<hostname>)"). The token is encrypted with
+Sign-in uses `POST /api/auth/token` (a device token named "Desktop (<hostname>)"). The token is encrypted with
 `safeStorage` (the OS keychain).
 
 ## Layout

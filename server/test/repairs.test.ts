@@ -1,11 +1,10 @@
 // Repairs from the 2026-11-15 review (server 1.18.1): request targets that crashed the server, sign-in guesses sent in
-// parallel, patterns that froze the server on crafted input, characters that broke DAV clients.  Run: npm test
+// parallel, patterns that froze the server on crafted input, characters names cannot hold.  Run: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { requestUrl, checkName } from '../src/http.ts';
 import { attempt, checkRate } from '../src/auth.ts';
 import { validEmail } from '../src/mail.ts';
-import { esc } from '../src/dav/xml.ts';
 
 /** Milliseconds `fn` takes. */
 function timed(fn: () => unknown): number {
@@ -64,13 +63,7 @@ test('email check is linear and still right', () => {
   assert.ok(timed(() => validEmail('a@' + '.'.repeat(1_000_000) + ' x')) < 50);
 });
 
-test('DAV text never carries characters XML cannot hold', () => {
-  assert.equal(esc('line one\u000bline two & <b>'), 'line oneline two &amp; &lt;b&gt;');
-  assert.equal(esc('tab\tand\nnew line\r'), 'tab\tand\nnew line\r');
-  assert.equal(esc('￾￿ok'), 'ok');
-});
-
-test('names: XML-illegal characters are refused, normal names pass', () => {
+test('names: control and non-characters are refused, normal names pass', () => {
   for (const bad of ['a￾', 'a￿', 'a\ud800b', 'a\u0000b', 'a/b', '..', '']) assert.throws(() => checkName(bad), undefined, JSON.stringify(bad));
   for (const ok of ['Report.pdf', 'تقرير.txt', 'Résumé.docx', '😀 photo.jpg']) assert.equal(checkName(ok), ok);
 });

@@ -48,7 +48,7 @@
     <string name="locked_title">Cloudy is locked</string>
     <string name="unlock">Unlock</string>
     <string name="unlock_subtitle">Confirm it\'s you to open your files</string>
-    <string name="devices">Devices &amp; app passwords</string>
+    <string name="devices">Devices</string>
     <string name="devices_intro">Every phone, computer and app signed in to your account. Revoke one to sign it out.</string>
     <string name="this_device">This device</string>
     <string name="device_added">Added %1$s</string>
@@ -81,7 +81,7 @@
     <string name="login_https_required">Use an https:// address. Plain http:// only works for a server on your local network.</string>
     <string name="login_button">Log in</string>
     <string name="login_forgot">Forgot password?</string>
-    <string name="login_token_note">Your password is exchanged for a device token, visible under Settings → App passwords on the web.</string>
+    <string name="login_token_note">Your password is exchanged for a device token, visible under Settings → Devices on the web.</string>
     <string name="cannot_read">Cannot read %1$s</string>
     <string name="downloading_name">Downloading %1$s…</string>
     <string name="send_name">Send %1$s</string>

@@ -9,7 +9,7 @@ import { json, noContent, readJson, HttpError, publicOrigin, clientIp, clientNet
 import { config } from './config.ts';
 import { q, one } from './db.ts';
 import type { User } from './auth.ts';
-import { hashPassword, checkPasswordStrength, newToken, sha256, forgetBasicCache } from './auth.ts';
+import { hashPassword, checkPasswordStrength, newToken, sha256 } from './auth.ts';
 import { mailText } from './mailtext.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
@@ -242,11 +242,10 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     if (!row) throw new HttpError(400, 'This reset link is invalid or has expired. Ask for a new one.');
     await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [row.user_id, await hashPassword(password)]);
     await q(`DELETE FROM sessions WHERE user_id = $1`, [row.user_id]);
-    // Device tokens are app passwords: whoever had the account (the reason for a reset) loses those too.
+    // Device tokens: whoever had the account (the reason for a reset) loses those too.
     await q(`DELETE FROM app_passwords WHERE user_id = $1`, [row.user_id]);
     // And passkeys: whoever had the password could have added one, and a passkey signs in without the password.
     await q(`DELETE FROM passkeys WHERE user_id = $1`, [row.user_id]);
-    forgetBasicCache();
     await notifyPasswordChanged(req, row.user_id);
     noContent(res);
   });

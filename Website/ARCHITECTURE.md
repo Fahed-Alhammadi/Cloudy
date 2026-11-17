@@ -16,8 +16,6 @@ browser ───────▶ │  /            static HTML5 app (public/)   
 Android, iPhone, │  /api/*       JSON API (session cookie or device token)                    │
 desktop apps ──▶ │  /api/events  live updates (Server-Sent Events)                            │
                  │  /api/public  public share links (token + optional password)               │
-                 │                                                                            │
-WebDAV apps ───▶ │  /dav/*       WebDAV files                                                 │
                  └─────────────┬──────────────────────────────────┬──────────────────────────┘
                                │                                  │
                          PostgreSQL 17                       /data volume
@@ -85,11 +83,8 @@ Access rules:
 
 ## 4. Protocols
 
-| Path | Purpose |
-|---|---|
-| `/dav/files/<user>/…` | WebDAV: PROPFIND, PROPPATCH, GET, PUT, MKCOL, DELETE, MOVE, COPY, LOCK/UNLOCK. Locks are accepted but not enforced, which macOS Finder and Windows need to mount read-write. |
-
-Calendars and contacts (CalDAV / CardDAV) were removed in server 2.0: Cloudy is about files.
+The browser and every app use the JSON API (`/api/*`) and live updates (`/api/events`); public links use
+`/api/public/*`. Calendars and contacts (CalDAV / CardDAV) were removed in server 2.0, and WebDAV in 2.1.
 
 ## 5. Authentication
 
@@ -97,21 +92,19 @@ Calendars and contacts (CalDAV / CardDAV) were removed in server 2.0: Cloudy is 
 |---|---|
 | Browser | Password or passkey → session cookie (HttpOnly, SameSite=Lax, Secure behind HTTPS) |
 | Android, iPhone and desktop apps | `POST /api/auth/token` → device token, sent as `Authorization: Bearer …` (kept in app-private storage, the iOS Keychain, or encrypted with the OS keychain on desktop) |
-| WebDAV apps | HTTP Basic with the account password or an app password |
 
 - **Two-factor authentication** uses TOTP (RFC 6238: SHA-1, 6 digits, 30 s, ±1 step), implemented in `totp.ts`.
   - Setup keeps the secret pending until a valid code confirms it. Then 10 single-use recovery codes are issued,
     stored as SHA-256 hashes.
   - At login, a missing code returns `401 {twoFactor: true}`, so clients show the code field.
   - The last used time step is stored, so a code can't be replayed.
-  - With 2FA on, HTTP Basic accepts only app passwords, never the account password.
 - **Passkeys** (WebAuthn) are implemented in `webauthn.ts` with `node:crypto` only (minimal CBOR/COSE; ES256, EdDSA,
   RS256). Attestation is `none`, so the authenticator model is not verified.
   - Discoverable credentials with user verification required, so sign-in needs no username and skips TOTP.
   - RP ID = hostname of `PUBLIC_URL`, else of `Host` (`X-Forwarded-Host` with `TRUST_PROXY`); client origin must match.
   - Challenges are single-use, in memory, 5 minutes. A signature counter that fails to increase is rejected.
   - Registering one needs the account password; `user.id` is an HMAC of the username, not the username.
-- Device tokens are app passwords. Users see them, and can revoke them, under *Settings → Apps & devices*.
+- Users see the apps' device tokens, and can sign them out, under *Settings → Devices*.
 - **Invitations** (`api/invitations.ts`): an admin creates one (`POST /api/admin/invitations`, optionally emailed);
   the link is `<origin>/invite#<token>` (fragment, like reset links), stored as SHA-256, valid 7 days. The page
   calls `POST /api/invitations/check`, then `POST /api/invitations/accept {token, username, password}`, which creates
@@ -167,7 +160,7 @@ notifications only after commit and merges identical ones in a transaction, so t
 one per affected folder. `events.ts` keeps one `LISTEN` connection (reconnects), batches for 250 ms, works out
 who can see each changed folder (owner + user/group shares on it or an ancestor) and pushes
 `event: change` / `{folders, shares}` over Server-Sent Events at `GET /api/events` (pings every 25 s,
-`X-Accel-Buffering: no`). Because the triggers sit in the database, every path — JSON API, WebDAV, background
+`X-Accel-Buffering: no`). Because the triggers sit in the database, every path — JSON API, background
 jobs, office saves — is covered. Clients reload the view only when it shows a changed folder, and the web app
 waits while a dialog, menu or selection is open. The phone apps collect the stream while they're in the
 foreground; the desktop app keeps it open and starts a sync pass on every event.

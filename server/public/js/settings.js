@@ -1,5 +1,5 @@
 // Personal settings and the admin console. Both are pages with tabs: /settings, /settings/security,
-// /settings/apps; /admin, /admin/groups, /admin/email, /admin/limits.
+// /settings/devices; /admin, /admin/groups, /admin/email, /admin/limits.
 import { get, post, put, patch, del, api } from './api.js';
 import { h, icon, avatar, isolate, formatSize, fullDate, toast, showError, modal, confirmDialog, promptDialog, copyText } from './ui.js';
 import { passkeysSupported, createPasskey, isPasskeyCancel } from './passkey.js';
@@ -62,14 +62,14 @@ export async function withPasswordDialog({ title, okLabel, danger = false, intro
   return result;
 }
 
-const SETTINGS_TABS = [['', 'Account'], ['security', 'Security'], ['apps', 'Apps & devices']];
+const SETTINGS_TABS = [['', 'Account'], ['security', 'Security'], ['devices', 'Devices']];
 
 export async function renderSettings(main, ctx, tab = '') {
   if (!SETTINGS_TABS.some(([k]) => k === tab)) tab = '';
   const me = await get('/api/me');
   const rerender = () => renderSettings(main, ctx, tab).catch(showError);
   const sections = tab === 'security' ? await securitySections(me, rerender)
-    : tab === 'apps' ? await appsSections(me, rerender)
+    : tab === 'devices' ? await devicesSections(rerender)
     : await accountSections(me, ctx, rerender);
   main.replaceChildren(h('section', { class: 'settings-view' },
     h('div', { class: 'page-head' }, h('h1', { class: 'view-title' }, icon('settings'), t('Settings'))),
@@ -244,37 +244,18 @@ async function securitySections(me, rerender) {
   ];
 }
 
-// ---------------------------------------------------------------- apps & devices: DAV addresses, app passwords
+// ---------------------------------------------------------------- devices: the apps signed in to this account
 
-async function appsSections(me, rerender) {
-  const appPasswords = await get('/api/me/app-passwords');
-  const davBase = `${location.origin}/dav`;
-  const urlRow = (label, url) => h('div', { class: 'url-row' }, h('span', { class: 'muted' }, label),
-    h('code', { dir: 'ltr' }, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
+async function devicesSections(rerender) {
+  const devices = await get('/api/me/app-passwords');
   return [
-    h('div', { class: 'card first' }, h('h2', {}, t('Connect apps and devices')),
-      h('p', {}, t('Use this address in a WebDAV client (Finder, Windows Explorer, rclone, Cyberduck). Sign in with your username and an app password.')),
-      urlRow(t('Files (WebDAV)'), `${davBase}/files/${encodeURIComponent(me.id)}/`),
-      urlRow(t('Username'), me.id),
-      h('h3', {}, t('App passwords')),
-      appPasswords.length ? h('ul', { class: 'plain-list' }, appPasswords.map((p) => h('li', {}, icon('key'),
-        h('span', { class: 'grow' }, p.name, h('small', { class: 'muted' }, ' · ' + t('created {date}', { date: fullDate(p.createdAt) }) + (p.lastUsedAt ? ' · ' + t('last used {date}', { date: fullDate(p.lastUsedAt) }) : ''))),
+    h('div', { class: 'card first' }, h('h2', {}, t('Signed-in devices')),
+      h('p', {}, t('The Android, iPhone and desktop apps signed in to your account. Signing a device out here ends its access at once.')),
+      devices.length ? h('ul', { class: 'plain-list' }, devices.map((d) => h('li', {}, icon('laptop'),
+        h('span', { class: 'grow' }, d.name, h('small', { class: 'muted' }, ' · ' + t('signed in {date}', { date: fullDate(d.createdAt) }) + (d.lastUsedAt ? ' · ' + t('last used {date}', { date: fullDate(d.lastUsedAt) }) : ''))),
         h('button', { class: 'btn ghost danger', onclick: async () => {
-          if (await confirmDialog(t('Revoke app password'), t('Devices using "{name}" will be signed out.', { name: p.name }), t('Revoke'), true)) await del(`/api/me/app-passwords/${p.id}`).then(rerender, showError);
-        } }, t('Revoke'))))) : h('p', { class: 'muted' }, t('No app passwords yet.')),
-      h('button', { class: 'btn', onclick: async () => {
-        const label = h('input', { type: 'text', required: true, maxlength: 100, value: t('My laptop'), 'aria-label': t('Device name') });
-        const r = await withPasswordDialog({
-          title: t('New app password'), okLabel: t('Create'),
-          fields: [h('label', { class: 'field' }, h('span', {}, t('Device name')), label)],
-          submit: (password) => post('/api/me/app-passwords', { name: label.value.trim(), password }),
-        });
-        if (!r?.password) return;
-        await modal({ title: t('App password created'), body: h('div', {},
-          h('p', {}, t('Copy it now — it will not be shown again.')),
-          h('div', { class: 'url-row' }, h('code', { class: 'secret', dir: 'ltr' }, r.password), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Copy'), onclick: () => copyText(r.password) }, icon('copy')))) });
-        rerender();
-      } }, icon('plus'), t('Create app password'))),
+          if (await confirmDialog(t('Sign out device'), t('"{name}" will be signed out.', { name: d.name }), t('Sign out'), true)) await del(`/api/me/app-passwords/${d.id}`).then(rerender, showError);
+        } }, t('Sign out'))))) : h('p', { class: 'muted' }, t('No devices are signed in.'))),
   ];
 }
 
@@ -417,7 +398,7 @@ function twoFactorCard(me, rerender) {
   return h('div', { class: 'card' }, h('h2', {}, t('Two-factor authentication')),
     me.twoFactor
       ? h('div', {},
-          h('p', {}, h('span', { class: 'pill' }, t('on')), ' ', t('Signing in requires a code from your authenticator app. WebDAV apps must use an app password.')),
+          h('p', {}, h('span', { class: 'pill' }, t('on')), ' ', t('Signing in requires a code from your authenticator app.')),
           h('div', { class: 'row' },
             h('button', { class: 'btn', onclick: async () => {
               const r = await withPassword(t('New recovery codes'), t('Create new codes'), false, '/api/me/2fa/recovery-codes');

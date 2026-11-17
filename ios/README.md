@@ -14,7 +14,7 @@ A native iPhone app (Swift, SwiftUI) for your Cloudy server. It needs iOS 17 or 
 - App lock (Face ID / Touch ID / passcode), Devices (revoke sign-ins). The app is in English.
 
 Sign-in works like on Android: the password (plus a two-factor code if needed) is exchanged for a device token stored in
-the Keychain. Each iPhone appears on the web under *Settings → App passwords*.
+the Keychain. Each iPhone appears on the web under *Settings → Devices*.
 
 ## Build and run
 

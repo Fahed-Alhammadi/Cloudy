@@ -17,7 +17,7 @@ data class User(
     val thumbnails: Boolean = false,
 )
 
-/** An app password / device token (Settings → App passwords on the web, More → Devices here). */
+/** A device token (Settings → Devices on the web, More → Devices here). */
 @Serializable
 data class AppPassword(
     val id: Long,

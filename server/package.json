@@ -1,9 +1,9 @@
 {
   "name": "cloudy",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "Self-hosted file cloud with sharing and WebDAV — Node.js server with an HTML5 web app.",
+  "description": "Self-hosted file cloud with sharing — Node.js server with an HTML5 web app.",
   "engines": {
     "node": ">=24"
   },
@@ -13,7 +13,6 @@
     "test": "node --test 'test/*.test.ts'"
   },
   "dependencies": {
-    "fast-xml-parser": "5.12.0",
     "nodemailer": "10.4.0",
     "pg": "8.23.1",
     "qrcode": "1.5.4"

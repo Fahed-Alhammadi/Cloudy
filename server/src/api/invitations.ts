@@ -7,7 +7,7 @@ import type { Router, Ctx } from '../http.ts';
 import { json, noContent, readJson, numId, publicOrigin, HttpError } from '../http.ts';
 import { q, one, tx } from '../db.ts';
 import type { User } from '../auth.ts';
-import { newToken, sha256, hashPassword, attemptInvitation, createSession, forgetBasicCache, getUser } from '../auth.ts';
+import { newToken, sha256, hashPassword, attemptInvitation, createSession, getUser } from '../auth.ts';
 import { checkNewUser, checkGroups, insertUser, quotaValue } from '../users.ts';
 import { mailEnabled, mailOrigin, sendMailNow, validEmail } from '../mail.ts';
 import { mailText } from '../mailtext.ts';
@@ -202,7 +202,6 @@ export function registerInvitations(r: Router, admin: Wrap) {
         [inv.groups, id], db); // its groups that still exist
       await q(`DELETE FROM invitations WHERE id = $1`, [inv.id], db);
     });
-    forgetBasicCache(); // a DAV client that tried this name before must not be answered from the cache of failures
     await createSession(req, res, id);
     json(res, await meJson((await getUser(id))!), 201);
   });

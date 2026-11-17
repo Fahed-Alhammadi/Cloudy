@@ -19,7 +19,7 @@ struct User: Codable, Hashable {
     var name: String { (displayName ?? "").isEmpty ? id : displayName! }
 }
 
-/// An app password / device token (Settings → App passwords on the web, More → Devices here).
+/// A device token (Settings → Devices on the web, More → Devices here).
 struct AppPassword: Codable, Identifiable, Hashable {
     var id: Int64
     var name: String

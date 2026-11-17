@@ -246,8 +246,7 @@ export async function dropOtherSessions(req: IncomingMessage, userId: string): P
 
 /**
  * The signed-in user's password, before a sensitive change. Counted against the account only: the per-address counter
- * also takes wrong DAV passwords from a stale WebDAV client on the same network, which must not block the "confirm
- * your password" step that would fix that app.
+ * also takes wrong guesses from other devices on the same network, which must not block this step.
  */
 export async function requirePassword(_req: IncomingMessage, userId: string, password: unknown, message = 'Wrong password'): Promise<void> {
   const guess = attempt(null, userId);
@@ -275,7 +274,7 @@ export async function sessionUser(req: IncomingMessage): Promise<User | null> {
 }
 
 // ---- Bearer tokens (native mobile apps) ----
-// Tokens are app passwords, so they are listed and revocable in Settings and also work for DAV.
+// Device tokens live in `app_passwords`: listed and revocable under Devices.
 
 export function bearerToken(req: IncomingMessage): string | null {
   const h = req.headers.authorization ?? '';
@@ -298,87 +297,4 @@ export async function createAppToken(userId: string, name: string): Promise<stri
   const token = [newToken(6), newToken(6), newToken(6)].join('-');
   await q(`INSERT INTO app_passwords (user_id, name, token_hash) VALUES ($1, $2, $3)`, [userId, name, sha256(token)]);
   return token;
-}
-
-// ---- HTTP Basic (WebDAV clients) ----
-// Successful checks are cached briefly: DAV clients authenticate every request
-// and scrypt is deliberately slow.
-const basicCache = new Map<string, { user: string; until: number }>();
-/**
- * Credentials that just failed. A DAV client still holding an old password repeats the same wrong credentials on every
- * request; that is one failed guess, not one per request (it used to fill the per-address counter and lock the
- * household's browsers out of signing in). Repeats are refused from here, without counting and without another scrypt.
- */
-const basicFailed = new Map<string, number>();
-
-function rememberFailed(key: string): void {
-  const now = Date.now();
-  if (basicFailed.size > 5000) {
-    for (const [k, until] of basicFailed) if (until <= now) basicFailed.delete(k);
-    if (basicFailed.size > 5000) basicFailed.clear();
-  }
-  basicFailed.set(key, now + WINDOW_MS);
-}
-
-/** Checks running now, by credentials: a client that opens many connections at once (rclone, Finder) needs one. */
-const basicPending = new Map<string, Promise<User | null>>();
-
-export async function basicUser(req: IncomingMessage): Promise<User | null> {
-  const h = req.headers.authorization ?? '';
-  if (!h.startsWith('Basic ')) return null;
-  const key = sha256(h);
-  const cached = basicCache.get(key);
-  if (cached && cached.until > Date.now()) {
-    return (await one<User>(`SELECT ${USER_COLS} FROM users WHERE id = $1 AND NOT disabled`, [cached.user])) ?? null;
-  }
-  // A burst of requests with the same new credentials shares one check (and one counted guess): each used to count
-  // as a failure until its own scrypt finished, so twelve parallel requests with the right password got 429.
-  const running = basicPending.get(key);
-  if (running) return running;
-  const check = checkBasic(req, h, key).finally(() => basicPending.delete(key));
-  basicPending.set(key, check);
-  return check;
-}
-
-async function checkBasic(req: IncomingMessage, h: string, key: string): Promise<User | null> {
-  const decoded = Buffer.from(h.slice(6), 'base64').toString('utf8');
-  const i = decoded.indexOf(':');
-  if (i < 0) return null;
-  const id = decoded.slice(0, i);
-  const pw = decoded.slice(i + 1);
-  const row = ACCOUNT_RE.test(id) ? await one<User & { password_hash: string }>(
-    `SELECT ${USER_COLS}, password_hash FROM users WHERE id = $1 AND NOT disabled`,
-    [id],
-  ) : undefined;
-  // A valid app password always works, before any rate limit: it is a long random token, so a correct one is never
-  // a guess, and a stale DAV client (old password, revoked app password) or a stranger filling the counters must
-  // not lock out the user's other, correctly configured clients.
-  const app = row && await one(
-    `UPDATE app_passwords SET last_used_at = now() WHERE user_id = $1 AND token_hash = $2 RETURNING id`,
-    [id, sha256(pw)],
-  );
-  if (!app && (basicFailed.get(key) ?? 0) > Date.now()) return null;
-  let ok = !!app;
-  if (!app) {
-    // With two-factor on, only app passwords work here (the scrypt still runs, so timing shows nothing); only a real
-    // password check counts against the account, like the login form.
-    const passwordGuess = !!row && !row.totp_enabled;
-    const guess = attempt(req, passwordGuess ? id : undefined);
-    if (row && passwordGuess) ok = await verifyPassword(pw, row.password_hash);
-    else await burnPasswordCheck(pw);
-    if (ok) guess.succeeded();
-  }
-  if (!ok || !row) {
-    rememberFailed(key);
-    return null;
-  }
-  basicCache.set(key, { user: id, until: Date.now() + 5 * 60 * 1000 });
-  const { password_hash: _, ...user } = row;
-  return user;
-}
-
-/** After any password or app-password change: cached answers, good and bad, may no longer be right. */
-export function forgetBasicCache(): void {
-  basicCache.clear();
-  basicFailed.clear();
 }

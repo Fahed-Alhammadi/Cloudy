@@ -34,7 +34,6 @@
   within seconds.
 - **Everything for your files.** Photo backup, offline files, document scanning, previews and sharing links, in one
   place.
-- **Works with the apps you have.** WebDAV for Finder, Windows Explorer, rclone and Cyberduck.
 - **No ads, no analytics, no tracking.** Free and open source under the MIT License.
 
 ## Apps
@@ -45,7 +44,6 @@
 | Android (phones and tablets) | Files, recent and shared files, offline files, photo backup, document scanner | <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="54"></a> |
 | iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, recent and shared files, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
 | Mac, Windows, Linux | Keeps a folder on your computer in sync with your files | [Releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) |
-| Other apps | WebDAV | Finder, Windows Explorer, rclone, Cyberduck |
 
 ### Android app
 
@@ -86,7 +84,7 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   sheet ("Share to Cloudy"), scan documents to PDF, text editing, app lock, Recent and Shared tabs. Android also has
   offline files and automatic photo backup.
 - **Live updates:** file lists in the browser, the phone apps and the desktop app update by themselves when files
-  change anywhere (another device, a share, WebDAV).
+  change anywhere (another device, a share).
 - **Office documents:** Word, Excel, PowerPoint and OpenDocument files can be viewed (read-only) in the browser
   and the apps. The built-in LibreOffice turns them into PDF, inside the same container.
 - **Security:** passkey sign-in, two-factor authentication (authenticator-app codes + recovery codes), an app
@@ -95,7 +93,7 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   server.
 - **People:** invite people by email or link (they choose their own username and password), profile pictures,
   groups.
-- **Administration:** users, invitations, groups, quotas, app passwords, 2FA and passkey reset, and email (SMTP)
+- **Administration:** users, invitations, groups, quotas, 2FA and passkey reset, and email (SMTP)
   settings, in the menu under your picture (administrators only).
 
 ## Install
@@ -169,7 +167,6 @@ headers from any client, so use it only when nothing but the proxy can reach the
 port to the internet. The proxy must:
 - forward `Host`, `X-Forwarded-For` and `X-Forwarded-Proto`;
 - allow unlimited request bodies and long timeouts (uploads arrive in 8 MB chunks; downloads stream);
-- pass all HTTP methods through (WebDAV uses PROPFIND, MKCOL, MOVE, COPY, LOCK, REPORT…).
 
 If the proxy runs on the same host, publish the port only there: `"127.0.0.1:8080:8080"` in `docker-compose.yml`.
 
@@ -269,7 +266,7 @@ Each user can turn it on under *Settings → Security → Two-factor authenticat
 From then on, the web app and the apps ask for a code after the password. A recovery code can be used
 once instead, if the phone is lost.
 
-With 2FA on, WebDAV apps must sign in with an **app password**, because WebDAV can't ask for a code. An administrator can reset 2FA for a user under *Administration → Edit user*.
+An administrator can reset 2FA for a user under *Administration → Edit user*.
 
 ## Office documents
 
@@ -317,16 +314,8 @@ username, password or two-factor code is needed: the passkey itself requires the
 
 - Passkeys need HTTPS (or `http://localhost`) and only work on the address they were created on. If your
   proxy doesn't forward the original `Host`, set `PUBLIC_URL` (e.g. `https://cloud.example.com`).
-- The password still works, and the apps and DAV clients keep using passwords / app passwords.
+- The password still works, and the apps keep signing in with the password.
 - An administrator can remove all of a user's passkeys under *Administration → Edit user*.
-
-## Connecting other apps
-
-Create an app password under *Settings → Apps & devices*, then use:
-
-| Client | Address |
-|---|---|
-| WebDAV (Finder, Explorer, rclone, Cyberduck) | `https://<host>/dav/files/<username>/` |
 
 ## Configuration
 
@@ -366,7 +355,7 @@ ios/                 native iPhone app (Swift, SwiftUI) → App Store
 desktop/             desktop sync app (Electron, TypeScript) → GitHub releases
 deploy/              docker-compose.yml that builds the image from source
 Website/             website (screenshots), privacy policy, architecture notes
-tests/               end-to-end API/WebDAV tests, container smoke test, web app checks
+tests/               end-to-end API tests, container smoke test, web app checks
 scripts/             versions and release helpers
 .github/workflows/   one workflow per product (test and build; a tag such as ios-X.Y.Z publishes)
 ```

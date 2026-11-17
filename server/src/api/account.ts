@@ -5,7 +5,7 @@ import { json, noContent, readJson, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import {
   login, createSession, destroySession, hashPassword, checkPasswordStrength,
-  newToken, sha256, forgetBasicCache, createAppToken, bearerToken, requirePassword, dropOtherSessions,
+  newToken, sha256, createAppToken, bearerToken, requirePassword, dropOtherSessions,
 } from '../auth.ts';
 import type { User } from '../auth.ts';
 import { createUser, deleteUser, setGroups, userJson, quotaValue, USER_ID_RE } from '../users.ts';
@@ -27,7 +27,6 @@ async function replaceRecoveryCodes(userId: string): Promise<string[]> {
 async function resetTwoFactor(userId: string): Promise<void> {
   await q(`UPDATE users SET totp_enabled = false, totp_secret = NULL, totp_pending = NULL, totp_last_step = 0 WHERE id = $1`, [userId]);
   await q(`DELETE FROM recovery_codes WHERE user_id = $1`, [userId]);
-  forgetBasicCache();
 }
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
@@ -45,7 +44,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     json(res, await userJson(user));
   });
 
-  // Native apps: exchange credentials for a long-lived device token (an app password).
+  // Native apps: exchange credentials for a long-lived device token.
   r.post('/api/auth/token', async ({ req, res }) => {
     const body = await readJson(req, 64 * 1024);
     const user = await login(req, String(body.user ?? ''), String(body.password ?? ''), body.code == null ? undefined : String(body.code));
@@ -57,7 +56,6 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
   r.post('/api/auth/revoke', async ({ req, res }) => {
     const token = bearerToken(req);
     if (token) await q(`DELETE FROM app_passwords WHERE token_hash = $1`, [sha256(token)]);
-    forgetBasicCache();
     noContent(res);
   });
 
@@ -104,7 +102,6 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
       if (!others?.n) throw new HttpError(409, 'You are the only administrator. Make another user an administrator first.');
     }
     await deleteUser(user.id);
-    forgetBasicCache();
     await destroySession(req, res);
     noContent(res);
   }));
@@ -131,7 +128,6 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     if (step === null) throw new HttpError(400, 'That code is not valid — check the time on your phone and try again');
     await q(`UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_enabled = true, totp_last_step = $2 WHERE id = $1`,
       [user.id, step]);
-    forgetBasicCache();
     json(res, { recoveryCodes: await replaceRecoveryCodes(user.id) });
   }));
 
@@ -151,13 +147,12 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     const b = await readJson(req);
     await requirePassword(req, user.id, b.current, 'Current password is wrong');
     await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [user.id, await hashPassword(checkPasswordStrength(b.password))]);
-    forgetBasicCache();
     await dropOtherSessions(req, user.id); // a stolen browser session dies with the old password
     await notifyPasswordChanged(req, user.id);
     noContent(res);
   }));
 
-  // App passwords for WebDAV clients.
+  // Signed-in devices (the apps' device tokens), listed and revocable.
   // `current` marks the token this request was made with (the phone asking), so it isn't revoked by mistake.
   r.get('/api/me/app-passwords', authed(async ({ req, res }, user) => {
     const bearer = bearerToken(req);
@@ -165,19 +160,8 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
                          FROM app_passwords WHERE user_id = $1 ORDER BY created_at DESC`, [user.id, bearer ? sha256(bearer) : '']));
   }));
 
-  // Needs the password: an app password outlives the session it was made from (and a password change).
-  r.post('/api/me/app-passwords', authed(async ({ req, res }, user) => {
-    const b = await readJson(req);
-    await requirePassword(req, user.id, b.password);
-    const name = String(b.name ?? '').trim() || 'Device';
-    const token = [newToken(6), newToken(6), newToken(6)].join('-');
-    await q(`INSERT INTO app_passwords (user_id, name, token_hash) VALUES ($1, $2, $3)`, [user.id, name, sha256(token)]);
-    json(res, { name, password: token }, 201);
-  }));
-
   r.delete('/api/me/app-passwords/:id', authed(async ({ res, params }, user) => {
     await q(`DELETE FROM app_passwords WHERE id = $1 AND user_id = $2`, [numId(params.id), user.id]);
-    forgetBasicCache();
     noContent(res);
   }));
 
@@ -204,7 +188,6 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
       id: String(b.id ?? '').trim(), password: b.password, displayName: b.displayName, email: b.email,
       isAdmin: !!b.isAdmin, quotaBytes: b.quotaBytes ?? null, groups: Array.isArray(b.groups) ? b.groups : undefined,
     });
-    forgetBasicCache();
     noContent(res);
   }));
 
@@ -236,7 +219,6 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     if (b.removePasskeys === true) await q(`DELETE FROM passkeys WHERE user_id = $1`, [params.id]);
     // Moderation: a profile picture that should not be shown to everyone.
     if (b.removeAvatar === true) await removeAvatar(params.id);
-    forgetBasicCache();
     noContent(res);
   }));
 

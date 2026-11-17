@@ -19,7 +19,7 @@ A native Android app (Kotlin, Jetpack Compose) for your Cloudy server. Requires 
 
 Enter the server address, username and password, plus a code from your authenticator app if the account
 uses two-factor authentication (the field appears when needed). The password is exchanged for a device token stored in
-app-private storage. Each device appears on the web under *Settings → App passwords*; revoke it there to sign
+app-private storage. Each device appears on the web under *Settings → Devices*; revoke it there to sign
 a lost phone out.
 
 On a local network, use the server's IP and port, e.g. `http://192.168.1.10:8080`. Plain HTTP is allowed so this

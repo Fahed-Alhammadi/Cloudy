@@ -246,7 +246,7 @@ export async function repairNamesAndTypes(): Promise<void> {
     for (const n of await q<{ id: number; parent_id: number; name: string; deleted: boolean }>(
       `SELECT id, parent_id, name, deleted_at IS NOT NULL AS deleted FROM nodes WHERE parent_id IS NOT NULL AND name <> normalize(name, NFC)`)) {
       // The same name in the other form already in the folder: this one gets a free name, "Café (2).txt" (left as it
-      // was, a WebDAV program asking for one of the two by name got the other).
+      // was, a lookup by name could find the other one).
       let name = n.name.normalize('NFC');
       if (!n.deleted && (await childByName(n.parent_id, name))) name = await uniqueName(n.parent_id, name);
       const done = await tx(async (db) => {
@@ -327,7 +327,7 @@ export async function ancestors(id: number, db: Db = pool): Promise<Node[]> {
 }
 
 export async function childByName(parentId: number, name: string, db: Db = pool): Promise<Node | undefined> {
-  // Names are stored in NFC (see checkName); a lookup with the same name in another form (WebDAV from a Mac) finds it.
+  // Names are stored in NFC (see checkName); a lookup with the same name in another form (typed on a Mac) finds it.
   return one<Node>(
     `SELECT ${COLS} FROM nodes WHERE parent_id = $1 AND name = $2 AND deleted_at IS NULL`,
     [parentId, name.normalize('NFC')],
@@ -343,22 +343,8 @@ export async function children(parentId: number, db: Db = pool): Promise<Node[]>
   );
 }
 
-/** Walks a slash path from the owner's root. */
-export async function resolvePath(owner: string, segments: string[]): Promise<Node | undefined> {
-  let node: Node | undefined = await rootOf(owner);
-  for (const seg of segments) {
-    if (!node || !node.is_dir) return undefined;
-    node = await childByName(node.id, seg);
-  }
-  return node;
-}
-
 export function pathFromChain(chain: Node[]): string {
   return '/' + chain.slice(0, -1).reverse().map((n) => n.name).join('/');
-}
-
-export async function nodePath(id: number): Promise<string> {
-  return pathFromChain(await ancestors(id));
 }
 
 // ---------------------------------------------------------------- access
@@ -767,54 +753,6 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
     return out;
   } catch (e) {
     await dropBlobs(created);
-    throw e;
-  }
-}
-
-/**
- * WebDAV MOVE or COPY of a file onto another file. The destination stays the same item (its shares, public links and
- * favorite) and gets the source's content; its old content becomes a version, as with any overwrite. After a MOVE the
- * source is gone (its own versions with it).
- */
-export async function replaceFileContent(src: Node, dest: Node, move: boolean): Promise<Node> {
-  if (src.is_dir || dest.is_dir || !src.blob) throw new HttpError(400, 'Not a file');
-  if (move && dest.owner !== src.owner) throw new HttpError(403, "Items can only be moved within the owner's storage; copy instead");
-  const copied = move ? null : await duplicateBlob(src.blob);
-  let drop: (string | null)[] = [];
-  try {
-    const out = await tx(async (db) => {
-      await lockChain(db, src.id, dest.id);
-      await assertLive(db, src.id, dest.id);
-      const s = await current(db, src.id);
-      const d = await current(db, dest.id);
-      // The copy was made before the lock: if the source changed since, it is not what was asked for.
-      if (copied && s.blob !== src.blob) throw new HttpError(409, 'The source changed meanwhile; try again');
-      // A copy adds the whole file: the content it replaces is kept as a version and still counts. (A move only
-      // swaps the same bytes around.)
-      if (!move) await checkQuota(db, d.owner, s.size);
-      await q(`INSERT INTO versions (node_id, blob, size, mtime) VALUES ($1, $2, $3, $4)`, [d.id, d.blob, d.size, d.mtime], db);
-      const blob = copied ?? s.blob!;
-      if (copied) await q(`INSERT INTO blob_hashes (blob, sha256) SELECT $2, sha256 FROM blob_hashes WHERE blob = $1 ON CONFLICT DO NOTHING`, [s.blob, copied], db);
-      const node = (await one<Node>(
-        `UPDATE nodes SET blob = $2, size = $3, etag = md5(random()::text), mtime = $4, mime = $5 WHERE id = $1 RETURNING ${COLS}`,
-        [d.id, blob, s.size, move ? s.mtime : new Date(), mimeOf(d.name)],
-        db,
-      ))!;
-      await propagate(db, d.parent_id!, s.size - d.size);
-      drop = await pruneVersions(db, d.id);
-      if (move) {
-        // The source's own versions go with it; its content now belongs to the destination.
-        drop.push(...(await q<{ blob: string }>(`SELECT blob FROM versions WHERE node_id = $1`, [s.id], db)).map((v) => v.blob));
-        await q(`DELETE FROM nodes WHERE id = $1`, [s.id], db);
-        await propagate(db, s.parent_id!, -s.size);
-      }
-      return node;
-    });
-    await dropBlobs(drop);
-    if (copied) queueHash(copied); // skipped at once when the source's hash came along
-    return out;
-  } catch (e) {
-    if (copied) await dropBlobs([copied]);
     throw e;
   }
 }

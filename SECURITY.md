@@ -48,8 +48,8 @@ servers and accounts you own.
 
 In scope:
 
-- the server: JSON API, WebDAV, public share links, sign-in (passwords, two-factor codes,
-  passkeys, app passwords), office previews;
+- the server: JSON API, public share links, sign-in (passwords, two-factor codes,
+  passkeys, device tokens), office previews;
 - the web app served by the server;
 - the Android, iPhone and desktop apps;
 - the container image and its start-up script;

@@ -142,7 +142,7 @@ fun ChangePasswordScreen(nav: NavController) {
     }
 }
 
-/** More → Devices & app passwords: every token signed in to the account, revocable (except this phone's). */
+/** More → Devices: every token signed in to the account, revocable (except this phone's). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DevicesScreen(nav: NavController) {

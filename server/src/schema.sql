@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Per-device passwords for WebDAV clients.
+-- Device tokens of the signed-in apps (Android, iPhone, desktop); the table name is historical.
 CREATE TABLE IF NOT EXISTS app_passwords (
   id bigserial PRIMARY KEY,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,

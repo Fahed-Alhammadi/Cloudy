@@ -260,7 +260,7 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
     const titleId = `dlg-title-${++dialogSeq}`;
     const form = h('form', { method: 'dialog', class: 'dialog-form' });
     const dlg = h('dialog', { class: `modal ${wide ? 'wide' : ''}`, 'aria-labelledby': titleId },
-      // Like Escape, the ✕ waits for a running request (closing then lost its answer, e.g. a new app password).
+      // Like Escape, the ✕ waits for a running request (closing then lost its answer).
       h('header', {}, h('h2', { id: titleId }, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': t('Close'), onclick: () => { if (!busy) dlg.close(''); } }, icon('x'))),
     );
     form.append(h('div', { class: 'modal-body' }, body));

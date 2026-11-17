@@ -10,7 +10,6 @@ import { sessionUser, bearerUser } from './auth.ts';
 import type { User } from './auth.ts';
 import { ensureAdmin } from './users.ts';
 import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes, repairNamesAndTypes } from './files.ts';
-import { handleDav } from './dav/server.ts';
 import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
 import { registerAvatars } from './api/avatars.ts';
@@ -139,7 +138,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return void res.end('Bad request\n');
   }
   try {
-    if (await handleDav(req, res, url)) return;
     if (url.pathname.startsWith('/api/')) {
       // CSRF guard: browsers cannot send custom headers cross-site without CORS.
       if (!['GET', 'HEAD'].includes(req.method!) && req.headers['x-cloudy-request'] !== '1') {
@@ -153,7 +151,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     // A mistyped or outdated address opened in the browser (/Recent, /nope): the app, which says the page does not
     // exist and offers the way back, instead of a bare "Not found" text page.
     if ((req.method === 'GET' || req.method === 'HEAD') && String(req.headers.accept ?? '').includes('text/html')
-        && !/^\/(api|dav|s)(\/|$)/.test(url.pathname) && !/\.[\w]+$/.test(url.pathname)
+        && !/^\/(api|s)(\/|$)/.test(url.pathname) && !/\.[\w]+$/.test(url.pathname)
         && (await serveStatic(req, res, new URL('http://localhost/index.html'), 404))) return;
     throw new HttpError(404, 'Not found');
   } catch (e: any) {

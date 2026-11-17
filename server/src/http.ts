@@ -343,12 +343,10 @@ export function checkName(name: unknown): string {
   if (n === '.' || n === '..') throw new HttpError(400, 'The names "." and ".." cannot be used');
   if (n.length > 255) throw new HttpError(400, 'Names can have at most 255 characters');
   if (/[\/\\]/.test(n)) throw new HttpError(400, 'Names cannot contain a slash or a backslash');
-  // Control characters XML 1.0 cannot carry (not even escaped) would break every PROPFIND of the folder for its DAV
-  // clients. Tab, LF and CR are valid XML and stay allowed inside a name (at the ends the trim check below says no).
-  // U+FFFE/U+FFFF and unpaired surrogates are not XML characters either.
+  // Control characters (other than tab, LF and CR, allowed inside a name; at the ends the trim check below says no),
+  // U+FFFE/U+FFFF and unpaired surrogates: invisible, and unsafe in ZIP downloads and the apps' file systems.
   if (/[\0-\x08\x0b\x0c\x0e-\x1f￾￿]/.test(n) || !n.isWellFormed()) throw new HttpError(400, 'Names cannot contain control characters');
-  // Stored under a different name than asked for, a DAV client (Finder, Explorer, rclone) sees its PUT "fail" and
-  // retries for ever, and sync clients make duplicates: say no instead of silently trimming.
+  // Stored under a different name than asked for, sync clients make duplicates: say no instead of silently trimming.
   if (n !== name) throw new HttpError(400, 'Names cannot start or end with a space');
   // One Unicode form for every name (NFC): a Mac sends "é" as "e" + accent, a phone as one character; both were
   // stored as typed, so search missed one of them and two identical-looking files could share a folder.

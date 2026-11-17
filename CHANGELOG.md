@@ -11,6 +11,26 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.1.0 (2026-11-17)
+
+WebDAV is gone: Cloudy's own apps and the web app are the way in. Nothing to do before you update, unless you use a
+WebDAV app.
+
+**Before you update**
+
+- If you open Cloudy in Finder, Windows Explorer, rclone or Cyberduck over WebDAV (`/dav/files/<username>/`), that
+  stops working. Use the desktop sync app or the web app instead.
+
+**Removed**
+
+- WebDAV (`/dav/*`), signing in with a username and password over HTTP Basic, and creating app passwords by hand
+  (`POST /api/me/app-passwords`). The `fast-xml-parser` library is no longer needed.
+
+**Changed**
+
+- *Settings → Apps & devices* is now *Settings → Devices*: the Android, iPhone and desktop apps signed in to your
+  account, each with *Sign out*. Signing out of the apps and resetting a password still sign devices out as before.
+
 ## 2.0.0 (2026-11-17)
 
 Cloudy is now about files: calendars, contacts and the translations are gone.
