@@ -1,26 +1,33 @@
-"""Renders the Google Play graphics in this folder with headless Chrome (macOS path below).
-Usage: python3 -I Website/play/render.py [form ...]   (forms: phone tablet-7-inch tablet-10-inch desktop xr; default all)
-  The feature graphic and web/ are always rendered (they use the phone and 7-inch captures).
-Sources (raw emulator captures, demo account from ios/appstore/seed.py, see ../screenshots/README.md):
-  ../screenshots/android/phone/*.png            phone, 1080x2400 (Pixel 7, API 35)
-  ../screenshots/android/tablet/7-inch/*.png    7-inch tablet, 1200x1920 (Nexus 7 2013, API 35)
-  ../screenshots/android/tablet/10-inch/*.png   10-inch tablet, 2560x1600 (Pixel Tablet, API 35)
-  ../screenshots/android/desktop/*.jpg          Android desktop, 2560x1440 (desktop_medium, android-desktop API 34)
-  ../screenshots/android/xr/*.jpg               Android XR headset view, 2048x2048 (xr_headset_device, google-xr API 34)
-Output (every set: 8 images, the same story):
+"""Renders the Google Play graphics with headless Chrome (macOS path below).
+Usage: python3 -I android/playstore/render.py [form ...]   (forms: phone tablet-7-inch tablet-10-inch desktop xr; default all)
+  The feature graphic and the website copies are always made (they use the phone and 7-inch captures).
+Sources: raw emulator captures in Store/Google Play/raw/ (git-ignored; demo account from ios/appstore/seed.py,
+how to take them: Website/screenshots/README.md):
+  raw/phone/*.png            phone, 1080x2400 (Pixel 7, API 35)
+  raw/tablet-7-inch/*.png    7-inch tablet, 1200x1920 (Nexus 7 2013, API 35)
+  raw/tablet-10-inch/*.png   10-inch tablet, 2560x1600 (Pixel Tablet, API 35)
+  raw/desktop/*.jpg          Android desktop, 2560x1440 (desktop_medium, android-desktop API 34)
+  raw/xr/*.jpg               Android XR headset view, 2048x2048 (xr_headset_device, google-xr API 34)
+Output in Store/Google Play/ (every set: 8 images, the same story):
   phone-screenshots/NN-name.png           1080x1920 (9:16)   Play "Phone screenshots"
   7-inch-tablet-screenshots/NN-name.png   1920x1080 (16:9)   Play "7-inch tablet screenshots"
   10-inch-tablet-screenshots/NN-name.png  1920x1080 (16:9)   Play "10-inch tablet screenshots"
   desktop-screenshots/NN-name.png         1920x1080 (16:9)   Play "Desktop screenshots"
   android-xr-screenshots/NN-name.png      3840x2160 (16:9)   Play "Android XR screenshots"
-  feature-graphic/feature-graphic.png     1024x500           Play "Feature graphic" (also the website's og:image)
-  website/NN-name.jpg  540x960            the phone shots for the website's "Cloudy for Android" section
+  feature-graphic/feature-graphic.png     1024x500           Play "Feature graphic"
+Website copies (committed, Website/screenshots/): android/framed/NN-name.jpg (540x960, site + README),
+  feature-graphic.png (og:image), android/phone/*.png and android/tablet-7-inch/{files,grid,more,dark}.png (raw captures the site shows).
 Design: the website's night-sky palette (site.css) and IBM Plex Sans; device frames drawn in CSS."""
 import os, subprocess, tempfile
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-SITE = os.path.dirname(HERE)
-SHOTS = os.path.join(SITE, 'screenshots', 'android')
+import shutil
+
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SITE = os.path.join(REPO, 'Website')
+STORE = os.path.join(REPO, 'Store', 'Google Play')  # git-ignored
+SHOTS = os.path.join(STORE, 'raw')
+WEB_SHOTS = os.path.join(SITE, 'screenshots')
+WEB_TABLET = ['files', 'grid', 'more', 'dark']  # the 7-inch captures the website shows
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 # (file, kicker, headline, subline); the same story on phone and tablet
@@ -114,7 +121,7 @@ def tablet_shot(i, name, kicker, title, sub):
   <h1 style="font-size:88px;margin-top:26px">{title}</h1>
   <p style="font-size:40px;margin-top:26px;max-width:22ch">{sub}</p>
 </div>
-{tablet(os.path.join(SHOTS, 'tablet', '7-inch', name + '.png'), 1060, 96, 740)}''', glow)
+{tablet(os.path.join(SHOTS, 'tablet-7-inch', name + '.png'), 1060, 96, 740)}''', glow)
 
 
 def wide_device(kind, src, width):
@@ -149,7 +156,7 @@ OUT = {'phone': 'phone-screenshots', 'tablet-7-inch': '7-inch-tablet-screenshots
        'desktop': 'desktop-screenshots', 'xr': 'android-xr-screenshots'}
 
 WIDE = {  # form factor -> (device kind, capture folder, extension, first headline)
-    'tablet-10-inch': ('tablet10', os.path.join('tablet', '10-inch'), 'png', None),
+    'tablet-10-inch': ('tablet10', 'tablet-10-inch', 'png', None),
     'desktop': ('monitor', 'desktop', 'jpg', 'Your own cloud, on the big screen'),
     'xr': ('xr', 'xr', 'jpg', 'Your own cloud, all around you'),
 }
@@ -184,7 +191,7 @@ FEATURE = page(1024, 500, f'''
   <h1 style="font-size:36px;margin-top:28px;line-height:1.2;letter-spacing:-.01em">Your own cloud for your files and photos</h1>
   <p style="font-size:21px;margin-top:16px;color:#9fd0ff;font-weight:600;letter-spacing:.02em">Self-hosted · Private · Open source</p>
 </div>
-{tablet(os.path.join(SHOTS, 'tablet', '7-inch', 'grid.png'), 600, 64, 300, 'transform:rotate(-4deg)')}
+{tablet(os.path.join(SHOTS, 'tablet-7-inch', 'grid.png'), 600, 64, 300, 'transform:rotate(-4deg)')}
 {phone(os.path.join(SHOTS, 'phone', 'files.png'), 830, 120, 170, 'transform:rotate(5deg);z-index:2')}''', '75%')
 
 
@@ -201,20 +208,29 @@ if __name__ == '__main__':
     import sys
     forms = sys.argv[1:] or ['phone', 'tablet-7-inch', *WIDE]
     for d in forms:
-        os.makedirs(os.path.join(HERE, OUT[d]), exist_ok=True)
+        os.makedirs(os.path.join(STORE, OUT[d]), exist_ok=True)
     for i, (name, kicker, title, sub) in enumerate(SCREENS):
         n = f'{i + 1:02d}-{name}.png'
-        if 'phone' in forms: render(phone_shot(i, name, kicker, title, sub), os.path.join(HERE, OUT['phone'], n), 1080, 1920)
-        if 'tablet-7-inch' in forms: render(tablet_shot(i, name, kicker, title, sub), os.path.join(HERE, OUT['tablet-7-inch'], n), 1920, 1080)
+        if 'phone' in forms: render(phone_shot(i, name, kicker, title, sub), os.path.join(STORE, OUT['phone'], n), 1080, 1920)
+        if 'tablet-7-inch' in forms: render(tablet_shot(i, name, kicker, title, sub), os.path.join(STORE, OUT['tablet-7-inch'], n), 1920, 1080)
         for form in (f for f in WIDE if f in forms):
             w, h, scale = CANVAS[form]
-            render(wide_shot(form, i, name, kicker, title, sub), os.path.join(HERE, OUT[form], n), w, h, scale)
-    os.makedirs(os.path.join(HERE, 'feature-graphic'), exist_ok=True)
-    render(FEATURE, os.path.join(HERE, 'feature-graphic', 'feature-graphic.png'), 1024, 500)
-    # Smaller JPEG copies of the phone shots for the website's Android section (website/NN-name.jpg, 540x960).
-    os.makedirs(os.path.join(HERE, 'website'), exist_ok=True)
+            render(wide_shot(form, i, name, kicker, title, sub), os.path.join(STORE, OUT[form], n), w, h, scale)
+    os.makedirs(os.path.join(STORE, 'feature-graphic'), exist_ok=True)
+    render(FEATURE, os.path.join(STORE, 'feature-graphic', 'feature-graphic.png'), 1024, 500)
+    # Website copies: the feature graphic (og:image), smaller JPEGs of the phone set (site's Android band + README),
+    # and the raw captures the site's gallery shows.
+    shutil.copyfile(os.path.join(STORE, 'feature-graphic', 'feature-graphic.png'), os.path.join(WEB_SHOTS, 'feature-graphic.png'))
+    framed = os.path.join(WEB_SHOTS, 'android', 'framed')
+    os.makedirs(framed, exist_ok=True)
     for i, (name, *_rest) in enumerate(SCREENS):
         n = f'{i + 1:02d}-{name}'
-        subprocess.run(['sips', '-Z', '960', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', os.path.join(HERE, OUT['phone'], n + '.png'),
-                        '--out', os.path.join(HERE, 'website', n + '.jpg')], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(['sips', '-Z', '960', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', os.path.join(STORE, OUT['phone'], n + '.png'),
+                        '--out', os.path.join(framed, n + '.jpg')], check=True, stdout=subprocess.DEVNULL)
+    for folder, names in (('phone', None), ('tablet-7-inch', WEB_TABLET)):
+        dst = os.path.join(WEB_SHOTS, 'android', folder)
+        os.makedirs(dst, exist_ok=True)
+        for f in sorted(os.listdir(os.path.join(SHOTS, folder))):
+            if f.endswith('.png') and (names is None or f[:-4] in names):
+                shutil.copyfile(os.path.join(SHOTS, folder, f), os.path.join(dst, f))
     print('rendered')

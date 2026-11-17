@@ -48,10 +48,10 @@
 ### Android app
 
 <p align="center">
-  <img src="Website/play/website/01-files.jpg" alt="Files on your own server" width="190">
-  <img src="Website/play/website/03-photos.jpg" alt="Automatic photo backup" width="190">
-  <img src="Website/play/website/04-sharing.jpg" alt="Sharing with people or a link" width="190">
-  <img src="Website/play/website/07-preview.jpg" alt="Preview and edit files" width="190">
+  <img src="Website/screenshots/android/framed/01-files.jpg" alt="Files on your own server" width="190">
+  <img src="Website/screenshots/android/framed/03-photos.jpg" alt="Automatic photo backup" width="190">
+  <img src="Website/screenshots/android/framed/04-sharing.jpg" alt="Sharing with people or a link" width="190">
+  <img src="Website/screenshots/android/framed/07-preview.jpg" alt="Preview and edit files" width="190">
 </p>
 
 <p align="center"><a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="70"></a></p>

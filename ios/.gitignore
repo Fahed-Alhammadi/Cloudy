@@ -1,6 +1,3 @@
 Cloudy.xcodeproj/
 build/
 dist/
-# App Store images and videos: generated, large (see appstore/README.md)
-appstore/raw/
-appstore/en-US/

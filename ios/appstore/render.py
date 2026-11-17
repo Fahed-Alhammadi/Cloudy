@@ -1,11 +1,16 @@
 """Renders the App Store screenshots (6.9" iPhone, 1320x2868) and the optional creative assets (product page header,
 search results) with headless Chrome (macOS path below).
-Usage: python3 -I ios/appstore/render.py — sources: raw/*.png, simulator captures from a demo account (see README.md).
-Output: en-US/iphone-6.9/ and en-US/iphone-6.3/<n>-<name>.png (screenshots) and en-US/creative-*.png, opaque PNGs ready to
-upload in App Store Connect."""
+Usage: python3 -I ios/appstore/render.py — sources: Store/Apple Store/raw/*.png (git-ignored), simulator captures from a
+demo account (see README.md).
+Output in Store/Apple Store/: iphone-6.9/ and iphone-6.3/<n>-<name>.png (screenshots), creative/creative-*.png, opaque PNGs ready to upload in App Store Connect. Also refreshes the website copies
+(Website/screenshots/ios/*.jpg, 1000 px high, committed)."""
 import os, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+STORE = os.path.join(REPO, 'Store', 'Apple Store')  # git-ignored
+RAW = os.path.join(STORE, 'raw')
+WEB = os.path.join(REPO, 'Website', 'screenshots', 'ios')
 CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 ICON = os.path.join(HERE, '../Cloudy/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png')
 W, H = 1320, 2868  # the screenshot design size (6.9"); other sizes are rendered from it with CSS zoom
@@ -100,11 +105,17 @@ def render(html, out, w=W, h=H):
 
 
 for folder, w, h in SIZES:
-    os.makedirs(os.path.join(HERE, 'en-US', folder), exist_ok=True)
+    os.makedirs(os.path.join(STORE, folder), exist_ok=True)
     z = w / W
     for name, src, title, sub in SHOTS:
-        html = PAGE.format(W=W, H=h / z, Z=z, icon=ICON, shot=os.path.join(HERE, 'raw', src + '.png'), title=title, sub=sub)
-        render(html, os.path.join(HERE, 'en-US', folder, name + '.png'), w, h)
+        html = PAGE.format(W=W, H=h / z, Z=z, icon=ICON, shot=os.path.join(RAW, src + '.png'), title=title, sub=sub)
+        render(html, os.path.join(STORE, folder, name + '.png'), w, h)
+os.makedirs(os.path.join(STORE, 'creative'), exist_ok=True)
 for name, w, h in CREATIVE:
-    render(BANNER.format(w=w, h=h, icon=ICON, raw=os.path.join(HERE, 'raw')), os.path.join(HERE, 'en-US', name + '.png'), w, h)
-print('rendered', len(SHOTS), 'screenshots ×', len(SIZES), 'sizes and', len(CREATIVE), 'creative assets')
+    render(BANNER.format(w=w, h=h, icon=ICON, raw=RAW), os.path.join(STORE, 'creative', name + '.png'), w, h)
+# Website copies: the plain captures, 1000 px high JPEGs (Website/index.html shows them).
+os.makedirs(WEB, exist_ok=True)
+for _name, src, *_rest in SHOTS:
+    subprocess.run(['sips', '-Z', '1000', '-s', 'format', 'jpeg', os.path.join(RAW, src + '.png'), '--out', os.path.join(WEB, src + '.jpg')],
+                   check=True, stdout=subprocess.DEVNULL)
+print('rendered', len(SHOTS), 'screenshots ×', len(SIZES), 'sizes and', len(CREATIVE), 'creative assets; website copies updated')

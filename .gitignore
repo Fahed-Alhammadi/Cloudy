@@ -31,3 +31,6 @@ keys/
 
 # Desktop app build output (desktop/dist is covered by dist/)
 desktop/out/
+
+# Store listing images and videos (App Store, Google Play): large, rendered locally. The website keeps its own copies.
+Store/
