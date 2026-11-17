@@ -42,7 +42,7 @@
 | App | What it does | Get it |
 |---|---|---|
 | Web | Files, sharing, calendar, contacts, administration | Built into every server |
-| Android (phones and tablets) | Files, offline files, photo backup, document scanner, calendar, contacts | <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="54"></a> |
+| Android (phones and tablets) | Files, recent and shared files, offline files, photo backup, document scanner | <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="54"></a> |
 | iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
 | Mac, Windows, Linux | Keeps a folder on your computer in sync with your files | [Releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) |
 | Other apps | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar and Contacts |
@@ -53,7 +53,7 @@
   <img src="Website/play/web/01-files.jpg" alt="Files on your own server" width="190">
   <img src="Website/play/web/03-photos.jpg" alt="Automatic photo backup" width="190">
   <img src="Website/play/web/04-sharing.jpg" alt="Sharing with people or a link" width="190">
-  <img src="Website/play/web/05-calendar.jpg" alt="Calendar" width="190">
+  <img src="Website/play/web/07-preview.jpg" alt="Preview and edit files" width="190">
 </p>
 
 <p align="center"><a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="70"></a></p>
@@ -83,8 +83,8 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   transferred again; edits in two places keep both copies; deletions go to the trash. It runs in the menu bar or
   system tray.
 - **Phone apps:** browse, preview and share files, send them to other apps and receive files from any app's share
-  sheet ("Share to Cloudy"), scan documents to PDF, calendar and
-  contacts, text editing, app lock. On Android you also get offline files and automatic photo backup.
+  sheet ("Share to Cloudy"), scan documents to PDF, text editing, app lock. Calendar and contacts are in the iPhone app; Android
+  focuses on files and adds offline files and automatic photo backup.
 - **Live updates:** file lists in the browser, the phone apps and the desktop app update by themselves when files
   change anywhere (another device, a share, WebDAV).
 - **Office documents:** Word, Excel, PowerPoint and OpenDocument files can be viewed (read-only) in the browser

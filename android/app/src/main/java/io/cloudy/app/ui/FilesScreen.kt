@@ -815,7 +815,8 @@ fun PeopleDialog(node: FileNode, onDismiss: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NodeListScreen(nav: NavController, kind: String) {
+/** A list of files from anywhere (Recent, Shared, Favorites…). As a bottom-bar tab ([isTab]) it has no Back button. */
+fun NodeListScreen(nav: NavController, kind: String, isTab: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf(ListCache.list(kind)) }
@@ -850,7 +851,9 @@ fun NodeListScreen(nav: NavController, kind: String) {
         if (kind != "offline") Live.events.filter { it.folders.isNotEmpty() || it.shares }.collectLatest { delay(400); load() }
     }
     Scaffold(topBar = {
-        TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
+        TopAppBar(title = { Text(title) }, navigationIcon = {
+            if (!isTab) IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
+        })
     }) { pad ->
         Box(Modifier.padding(pad)) {
             val list = items

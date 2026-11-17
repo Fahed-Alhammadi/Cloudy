@@ -10,8 +10,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.add
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -342,30 +340,4 @@ class Api(private val session: Session) {
             }
         }
     }
-
-    // ---------------------------------------------------------------- calendar & contacts
-    suspend fun calendars(): List<DavCollection> = decode(send("GET", "/api/calendars"))
-    suspend fun createCalendar(name: String): DavCollection = decode(sendJson("POST", "/api/calendars", buildJsonObject { put("name", name) }))
-    suspend fun events(calendarId: Long, startIso: String, endIso: String): List<CalEvent> =
-        decode(send("GET", "/api/calendars/$calendarId/events?start=${enc(startIso)}&end=${enc(endIso)}"))
-    suspend fun createEvent(calendarId: Long, e: EventInput) { send("POST", "/api/calendars/$calendarId/events", json.encodeToString(e).toRequestBody(jsonType)) }
-    suspend fun updateEvent(calendarId: Long, uri: String, e: EventInput) { send("PUT", "/api/calendars/$calendarId/events/${enc(uri)}", json.encodeToString(e).toRequestBody(jsonType)) }
-    suspend fun deleteEvent(calendarId: Long, uri: String) { send("DELETE", "/api/calendars/$calendarId/events/${enc(uri)}") }
-
-    suspend fun addressBooks(): List<DavCollection> = decode(send("GET", "/api/addressbooks"))
-    suspend fun contacts(bookId: Long): List<Contact> = decode(send("GET", "/api/addressbooks/$bookId/contacts"))
-    private fun contactBody(c: Contact) = buildJsonObject {
-        put("givenName", c.givenName); put("familyName", c.familyName); put("org", c.org); put("title", c.title)
-        put("address", c.address); put("birthday", c.birthday); put("note", c.note)
-        putJsonArray("emails") { c.emails.forEach { add(it) } }
-        putJsonArray("phones") { c.phones.forEach { add(it) } }
-    }
-    suspend fun saveContact(bookId: Long, c: Contact): Contact =
-        if (c.uri.isEmpty()) decode(sendJson("POST", "/api/addressbooks/$bookId/contacts", contactBody(c)))
-        else decode(sendJson("PUT", "/api/addressbooks/$bookId/contacts/${enc(c.uri)}", contactBody(c)))
-    /** Imports a .vcf or .csv file (raw bytes) into an address book. */
-    suspend fun importContacts(bookId: Long, bytes: ByteArray): ImportResult =
-        decode(send("POST", "/api/addressbooks/$bookId/import", bytes.toRequestBody(binType)))
-    suspend fun exportContacts(bookId: Long): String = send("GET", "/api/addressbooks/$bookId/export")
-    suspend fun deleteContact(bookId: Long, uri: String) { send("DELETE", "/api/addressbooks/$bookId/contacts/${enc(uri)}") }
 }

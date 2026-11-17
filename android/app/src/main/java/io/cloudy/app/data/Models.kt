@@ -107,58 +107,6 @@ data class ChunkResult(val received: Long, val done: Boolean, val node: Uploaded
 data class Version(val id: Long, val size: Long, val mtime: String)
 
 @Serializable
-data class DavCollection(val id: Long, val uri: String, val name: String, val color: String = "")
-
-@Serializable
-data class CalEvent(
-    val calendarId: Long,
-    val uri: String,
-    val uid: String = "",
-    val summary: String = "",
-    val location: String = "",
-    val description: String = "",
-    val start: String,
-    val end: String,
-    val allDay: Boolean = false,
-    val recurring: Boolean = false,
-    val rrule: String = "",
-    val masterStart: String = "",
-    val masterEnd: String = "",
-)
-
-@Serializable
-data class EventInput(
-    val summary: String,
-    val start: String,
-    val end: String,
-    val allDay: Boolean,
-    val location: String,
-    val description: String,
-    val rrule: String,
-    /**
-     * The phone's time zone (IANA name): new timed events are stored in it, so a repeating event keeps its local time
-     * when the clocks change (server 1.19+; without it the account's zone is used, else UTC). Older servers ignore it.
-     */
-    val tz: String? = null,
-)
-
-@Serializable
-data class Contact(
-    val uri: String = "",
-    val uid: String = "",
-    val fn: String = "",
-    val givenName: String = "",
-    val familyName: String = "",
-    val emails: List<String> = emptyList(),
-    val phones: List<String> = emptyList(),
-    val org: String = "",
-    val title: String = "",
-    val address: String = "",
-    val birthday: String = "",
-    val note: String = "",
-)
-
-@Serializable
 data class Sharees(val users: List<Sharee> = emptyList(), val groups: List<ShareeGroup> = emptyList())
 
 @Serializable
@@ -176,12 +124,3 @@ data class ChangeEvent(val folders: List<Long> = emptyList(), val shares: Boolea
 data class OfficeInfo(val enabled: Boolean = false, val extensions: List<String> = emptyList())
 
 /** `POST /api/addressbooks/{id}/import` result. */
-@Serializable
-data class ImportResult(
-    val format: String = "",
-    val imported: Int = 0,
-    val updated: Int = 0,
-    val duplicates: Int = 0,
-    val skipped: Int = 0,
-    val errors: List<String> = emptyList(),
-)

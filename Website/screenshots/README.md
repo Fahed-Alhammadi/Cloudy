@@ -17,8 +17,8 @@ screenshots/
 ```
 
 - **Android** (every folder under `android/` uses the same file names): `files.png`, `grid.png` (Photos folder as a
-  grid), `preview.png` (text editor), `sharing.png`, `photos.png` (Photo backup), `calendar.png`, `contacts.png`,
-  `more.png`, `dark.png` (Files in the dark theme). The website shows all phone shots and six 7-inch tablet shots;
+  grid), `preview.png` (text editor), `sharing.png`, `photos.png` (Photo backup),
+  `more.png`, `dark.png` (Files in the dark theme). The website shows all phone shots and four 7-inch tablet shots;
   `Website/play/render.py` turns them into the Google Play phone and tablet screenshots and the feature graphic.
   How they are taken: demo account from `ios/appstore/seed.py` (for Android set the quota to 53687091200 so the app
   shows 50 GB), the debug build (`io.cloudy.app.debug`), `cloud.local` as the server name via `adb root` + a

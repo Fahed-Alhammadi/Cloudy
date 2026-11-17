@@ -39,8 +39,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.AccessTimeFilled
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
@@ -75,9 +75,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Feedback
 import androidx.compose.material.icons.outlined.StarRate
 import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.Contacts
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Info
@@ -146,7 +144,7 @@ private typealias NavScope = AnimatedContentTransitionScope<NavBackStackEntry>
 
 /** The four tabs' own screens (for Files: the root folder only). */
 private fun NavBackStackEntry.isTab(rootId: Long): Boolean = when (destination.route) {
-    "calendar", "contacts", "more" -> true
+    "recent", "shared", "more" -> true
     "files/{id}" -> arguments?.getLong("id") == rootId
     else -> false
 }
@@ -174,8 +172,8 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     val tabs = listOf(
         // Outlined at rest, filled when selected (Material): the current tab reads at a glance, not by color alone.
         Tab("files/$rootId", R.string.tab_files, Icons.Outlined.Folder, Icons.Filled.Folder),
-        Tab("calendar", R.string.tab_calendar, Icons.Outlined.CalendarMonth, Icons.Filled.CalendarMonth),
-        Tab("contacts", R.string.tab_contacts, Icons.Outlined.Contacts, Icons.Filled.Contacts),
+        Tab("recent", R.string.recent, Icons.Outlined.AccessTime, Icons.Filled.AccessTimeFilled),
+        Tab("shared", R.string.tab_shared, Icons.Outlined.People, Icons.Filled.People),
         Tab("more", R.string.more, Icons.Outlined.Menu, Icons.Outlined.Menu),
     )
     // Live updates while the app is visible; office file types once per session.
@@ -196,7 +194,7 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val currentFolder = entry?.arguments?.getLong("id")
-    val showBar = route == "calendar" || route == "contacts" || route == "more" || (route == "files/{id}" && currentFolder == rootId)
+    val showBar = route == "recent" || route == "shared" || route == "more" || (route == "files/{id}" && currentFolder == rootId)
 
     // Wide windows (tablets, foldables, desktop) and phones in landscape get a navigation rail at the side: a bottom
     // bar would stretch four buttons across the width and take height that landscape doesn't have.
@@ -289,8 +287,8 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
                 composable("list/{kind}") { NodeListScreen(nav, it.arguments!!.getString("kind")!!) }
                 composable("search") { SearchScreen(nav) }
                 composable("trash") { TrashScreen(nav) }
-                composable("calendar") { CalendarScreen() }
-                composable("contacts") { ContactsScreen() }
+                composable("recent") { NodeListScreen(nav, "recent", isTab = true) }
+                composable("shared") { NodeListScreen(nav, "shared-in", isTab = true) }
                 composable("more") { MoreScreen(nav) }
                 composable("backup") { BackupScreen(nav) }
                 composable("devices") { DevicesScreen(nav) }
@@ -356,9 +354,7 @@ fun MoreScreen(nav: NavController) {
                 }
             }
             Group {
-                Entry(R.string.recent, Icons.Outlined.AccessTime, SettingColor.Blue, "list/recent")
                 Entry(R.string.favorites, Icons.Outlined.Star, SettingColor.Orange, "list/favorites")
-                Entry(R.string.shared_with_you, Icons.Outlined.People, SettingColor.Green, "list/shared-in")
                 Entry(R.string.shared_by_you, Icons.Outlined.Share, SettingColor.Teal, "list/shared-out")
                 Entry(R.string.available_offline, Icons.Outlined.CloudDone, SettingColor.Purple, "list/offline")
                 Entry(R.string.deleted_files, Icons.Outlined.Delete, SettingColor.Gray, "trash")
