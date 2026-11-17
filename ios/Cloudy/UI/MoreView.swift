@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MoreView: View {
     @Environment(Session.self) private var session
-    @Environment(\.openURL) private var openURL
     @AppStorage("appLock") private var appLock = false
     @State private var confirmSignOut = false
     @State private var confirmDelete = false
@@ -33,11 +32,9 @@ struct MoreView: View {
                         StorageRow(user: user)
                     }
                 }
-                // Same entries and order as Android's More screen; the Files tab only shows the folders.
+                // Same entries and order as Android's More screen; Recent and Shared with you have their own tabs.
                 Section {
-                    NavigationLink(value: Route.list(.recent)) { SettingsLabel("Recent", icon: "clock.fill", color: .settingsBlue) }
                     NavigationLink(value: Route.list(.favorites)) { SettingsLabel("Favorites", icon: "star.fill", color: .settingsOrange) }
-                    NavigationLink(value: Route.list(.shared)) { SettingsLabel("Shared with you", icon: "person.2.fill", color: .settingsGreen) }
                     NavigationLink(value: Route.links) { SettingsLabel("Shared by you", icon: "link", color: .settingsTeal) }
                     NavigationLink(value: Route.trash) { SettingsLabel("Trash", icon: "trash.fill", color: .settingsGray) }
                 }
@@ -47,18 +44,8 @@ struct MoreView: View {
                     if canUseAppLock {
                         Toggle(isOn: $appLock) { SettingsLabel("App lock", icon: "faceid", color: .settingsGreen) }
                     }
-                    Button {
-                        if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
-                    } label: {
-                        LabeledContent {
-                            Text(Locale.current.localizedString(forLanguageCode: Locale.current.language.languageCode?.identifier ?? "en") ?? "")
-                        } label: {
-                            SettingsLabel("Language", icon: "globe", color: .settingsBlue)
-                        }
-                    }
-                    .foregroundStyle(.primary)
                 } footer: {
-                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy. The language is set in the Settings app.")
+                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy.")
                 }
                 Section {
                     if let web = URL(string: session.server) {
@@ -108,7 +95,7 @@ struct MoreView: View {
                     .disabled(deletePassword.isEmpty)
                 Button("Cancel", role: .cancel) { deletePassword = "" }
             } message: {
-                Text("This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. Files downloaded to this iPhone are removed too. It can’t be undone.")
+                Text("This permanently deletes your account and everything in it: files (including trash and versions), shares and links, and devices. Files downloaded to this iPhone are removed too. It can’t be undone.")
             }
             .alert("Couldn’t delete your account", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
                 Button("OK", role: .cancel) {}

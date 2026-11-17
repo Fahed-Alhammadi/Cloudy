@@ -4,13 +4,13 @@ import UIKit
 
 /// Debug builds only: opens a screen from the launch environment so App Store screenshots can be taken without
 /// tapping (see ios/appstore/README.md). `CLOUDY_OPEN` = `folder:<id>:<name>`, `text:<id>:<name>` or `share:<id>:<name>`
-/// (a folder's share sheet); `CLOUDY_CONTACT` = a contact's display name.
-/// `CLOUDY_TOUR` = `<folder id>:<folder name>:<text file id>:<text file name>:<contact>` plays a scripted ~25 s walk
+/// (a folder's share sheet).
+/// `CLOUDY_TOUR` = `<folder id>:<folder name>:<text file id>:<text file name>` plays a scripted ~20 s walk
 /// through the app for the App Store preview video; screens follow it via `.tour` notifications.
 /// `CLOUDY_SCRIPT` = `<seconds>:<step>;…` plays any steps, to look at states and motion without tapping:
 /// `tab:<n>`, `folder:<id>:<name>`, `text:<id>:<name>`, `route:recent|favorites|shared|links|trash|devices`, `pop`, `grid` (list ↔ grid), `sort:name|date|size|flip`,
-/// `select:<n>` (multi-select with the first n files ticked), `done`, `month:<±n>`, `day:<±n>`, `contact:<name>`,
-/// `landscape`, `portrait`. Example: `2:tab:1;1:month:1;1:month:-1;1:landscape`.
+/// `select:<n>` (multi-select with the first n files ticked), `done`, `landscape`, `portrait`.
+/// Example: `2:tab:1;1:tab:2;1:landscape`.
 /// `CLOUDY_LANDSCAPE=1` starts rotated, `CLOUDY_LOCK=1` shows the app-lock screen (and keeps it), `CLOUDY_ICONS=1` shows
 /// one row per file type, `CLOUDY_LOGIN_ERROR=<text>` shows the sign-in screen with that error.
 enum Screenshots {
@@ -28,7 +28,6 @@ enum Screenshots {
         }
     }
 
-    static var contact: String? { env["CLOUDY_CONTACT"] }
     static var lock: Bool { env["CLOUDY_LOCK"] != nil }
     static var icons: Bool { env["CLOUDY_ICONS"] != nil }
     static var loginError: String? { env["CLOUDY_LOGIN_ERROR"] }
@@ -74,9 +73,6 @@ enum Screenshots {
         case tab(Int)
         case files([Route])
         case share(FileNode?)
-        case month(Int)
-        case day(Int)
-        case contact(String?)
         case type(String)
         case grid
         case sort(String)
@@ -108,9 +104,6 @@ enum Screenshots {
             case "sort": step = .sort(arg)
             case "select": step = .select(Int(arg) ?? 1)
             case "done": step = .done
-            case "month": step = .month(Int(arg) ?? 1)
-            case "day": step = .day(Int(arg) ?? 0)
-            case "contact": step = .contact(arg.isEmpty ? nil : arg)
             case "landscape", "portrait": await rotate(landscape: p[1] == "landscape")
             default: break
             }
@@ -122,7 +115,8 @@ enum Screenshots {
     static func runTour() async {
         guard let tour = env["CLOUDY_TOUR"] else { return }
         let p = tour.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-        guard p.count == 5, let folderId = Int64(p[0]), let textId = Int64(p[2]) else { return }
+        // A fifth part (a contact name, from older seed output) is ignored.
+        guard p.count >= 4, let folderId = Int64(p[0]), let textId = Int64(p[2]) else { return }
         let folder = FileNode(id: folderId, name: p[1], isDir: true)
         let text = FileNode(id: textId, name: p[3], isDir: false)
         let script: [(Double, Step)] = [
@@ -131,14 +125,8 @@ enum Screenshots {
             (3.5, .share(nil)),
             (1.0, .files([])),
             (1.0, .tab(1)),
-            (2.0, .day(2)),
-            (1.5, .month(1)),
-            (1.8, .month(-1)),
-            (0.3, .day(0)),
-            (0.9, .tab(2)),
-            (1.5, .contact(p[4])),
-            (2.5, .contact(nil)),
-            (0.8, .tab(0)),
+            (2.5, .tab(2)),
+            (2.5, .tab(0)),
             (0.7, .files([.text(text)])),
             (1.5, .type("\n## Call\n- Amira about the launch")),
         ]

@@ -53,7 +53,7 @@ export async function checkGroups(groups: string[]): Promise<void> {
 const NAME_LOCK = 72_416;
 
 /**
- * The account row with its root folder, calendar and address book, inside the caller's transaction (an invitation is
+ * The account row with its root folder, inside the caller's transaction (an invitation is
  * used up in the same one). A name that differs only in case counts as taken (409). The lock on the lower-case name
  * makes check and insert one step: two requests for "Anna" and "anna" at the same moment both passed the check.
  */
@@ -75,8 +75,6 @@ export async function insertUser(db: pg.PoolClient, u: {
     db,
   );
   await rootOf(u.id, db);
-  await q(`INSERT INTO calendars (owner, uri, name) VALUES ($1, 'personal', 'Personal')`, [u.id], db);
-  await q(`INSERT INTO addressbooks (owner, uri, name) VALUES ($1, 'contacts', 'Contacts')`, [u.id], db);
 }
 
 export async function createUser(u: NewUser): Promise<void> {
@@ -124,7 +122,6 @@ export async function userJson(u: User) {
     twoFactor: !!u.totp_enabled,
     passkeys: extra?.passkeys ?? 0,
     notifyShares: u.notify_shares !== false,
-    language: u.language ?? null,
     timezone: u.timezone ?? null,
     disabled: u.disabled,
     quotaBytes: u.quota_bytes,

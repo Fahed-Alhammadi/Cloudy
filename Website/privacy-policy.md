@@ -6,7 +6,7 @@ description: How the Cloudy apps for Android, iPhone and desktop handle your inf
 
 # Privacy Policy
 
-Last updated: November 3, 2026
+Last updated: November 17, 2026
 
 This privacy policy explains how the **Cloudy** apps for Android (package `io.cloudy.app`), iPhone (bundle ID `io.cloudy.app`) and
 desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`) handle your information.
@@ -24,7 +24,7 @@ Cloudy is developed by Fahed Alhammadi ("we", "us"). The source code is public a
 
 ## Who is responsible for your data
 
-Your files, photos, calendars, contacts and account live on the Cloudy server you sign in to. The person or organization that operates that server (the "server operator") decides how that data is stored, backed up and deleted, and is responsible for it. If you have questions about the data on a server, contact its operator. If you run your own server, that is you.
+Your files, photos and account live on the Cloudy server you sign in to. The person or organization that operates that server (the "server operator") decides how that data is stored, backed up and deleted, and is responsible for it. If you have questions about the data on a server, contact its operator. If you run your own server, that is you.
 
 ## What the app accesses and why
 
@@ -35,11 +35,8 @@ Your files, photos, calendars, contacts and account live on the Cloudy server yo
 | **Device name** (manufacturer and model, e.g. "Samsung SM-S911B") | Sent at sign-in to label the device token, so you can recognize it in the list of signed-in devices. | Your server only |
 | **Files and folders** | When you browse, open, upload, download, share, rename, move or delete files, edit text files, or mark files "available offline". Office documents are converted for preview by your server. | Your server; offline copies and temporary previews are stored in the app's private storage. When you use **Send to…**, the file goes to the app you pick (for example WhatsApp or email) |
 | **Photos and videos** (permission: *Photos and videos*) | Only if you turn on **Photo backup**. The app then reads photos and videos from your gallery and uploads new ones to your server in the background. You can also pick individual photos or videos to upload. | Your server only |
-| **Calendar events** | Events you view, create, edit or delete in the app. | Your server only |
-| **Contacts** | Contacts you view, create, edit or delete in the app, and contacts in a file (.vcf or .csv) that **you** choose to import. The app does **not** read your phone's address book and does not request the Contacts permission. Exported contacts go only where you choose in the share sheet. | Your server only |
 | **Document scans** | Only when you tap **Scan document**. The scanner is Google's ML Kit document scanner, which runs inside Google Play services: it opens the camera in its own screen and processes the pages on your phone. The app itself has no camera permission and receives only the finished PDF, which it uploads to the folder you chose. Google Play services may send diagnostic and usage information about the scanner to Google ([Google's privacy policy](https://policies.google.com/privacy)). | The PDF goes to your server only |
 | **App lock** | Only if you turn on **App lock**. Android asks for your fingerprint, face or screen lock; the app only learns whether it succeeded and never sees biometric data. | Stays on your phone |
-| **Language** | The language you choose in the app. It is also saved in your account on your server, so the web interface and emails use it. | Stored on your phone and your server |
 | **Network state** | To run photo backup and offline sync only on the network you allow (for example Wi-Fi only). | Stays on your phone |
 
 The app does **not** request access to your location, camera, microphone, phone calls, SMS or phone contacts (the document scanner uses the camera through Google Play services, as described above), and it does not collect advertising IDs or device identifiers.
@@ -58,7 +55,6 @@ The iPhone app works like the Android app above, with these differences:
 - **Document scans** use Apple's built-in document camera (VisionKit). The camera is used only while you scan; pages are processed on the
   iPhone and only the finished PDF is uploaded to your server. No Google services are used.
 - **App lock** uses Face ID, Touch ID or your passcode through iOS. The app only learns whether it succeeded.
-- **Language** is chosen in the iOS Settings app (Settings → Cloudy → Language) and stays on the phone.
 - **Share to Cloudy:** the app's share extension appears in other apps' share sheets. The files you choose there are uploaded to your
   server with the same device token as the app, into the folder you pick; the extension reads nothing else and keeps no copy.
 - **Local network:** iOS may ask to allow access to devices on your local network. This is only used to reach a Cloudy server at a local address.
@@ -71,7 +67,7 @@ The iPhone app works like the Android app above, with these differences:
 
 ## Desktop app
 
-The desktop app (macOS, Windows, Linux) only syncs files; it has no calendar, contacts, photo backup or scanner. Where it differs:
+The desktop app (macOS, Windows, Linux) only syncs files; it has no photo backup or scanner. Where it differs:
 
 - **Files:** it keeps a folder you choose on your computer in sync with your files on your server: new and changed files are uploaded,
   changes on the server are downloaded, and deletions on either side are repeated on the other (to the server's trash or your
@@ -79,7 +75,6 @@ The desktop app (macOS, Windows, Linux) only syncs files; it has no calendar, co
 - **Device name:** your computer's name (for example "Desktop (my-laptop)") labels the device token on your server.
 - **Device token:** encrypted with your operating system's keychain (Keychain on macOS, the Windows data protection API, the Secret
   Service on Linux) and stored with the app's settings on this computer. Signing out revokes it on the server.
-- **Language** follows your account's language on your server, else your computer's.
 - **Updates:** see below. There is no advertising, analytics or tracking.
 
 ## App updates
@@ -98,7 +93,7 @@ We do not sell, rent or share your information with anyone, and we do not have a
 - Google Play services, only when you use the document scanner (see above);
 - GitHub, only for the desktop app's update check and downloads (see [App updates](#app-updates)).
 
-When you share a file or a link, or export contacts, the information goes only to the people or apps you choose.
+When you share a file or a link, the information goes only to the people or apps you choose.
 
 Your server operator may set up email so the server can send messages such as password reset links or "a file was shared with you" notices. Those emails are sent by your server, using the email address in your Cloudy profile, through the mail service the operator chooses.
 
@@ -111,7 +106,7 @@ Your server operator may set up email so the server can send messages such as pa
 ## Keeping and deleting your information
 
 - **On your phone:** signing out removes the device token and revokes it on the server. Uninstalling the app (or, on Android, *Settings → Apps → Cloudy → Clear storage*) deletes everything the app stored on the phone, including offline copies.
-- **On your server:** you can delete your own files, calendars and contacts in the app or the web interface. Deleted files go to the trash first, and the server deletes them permanently after a retention period that the operator sets (30 days by default).
+- **On your server:** you can delete your own files in the app or the web interface. Deleted files go to the trash first, and the server deletes them permanently after a retention period that the operator sets (30 days by default).
 
 ### Deleting your account
 
@@ -122,7 +117,7 @@ You can delete your Cloudy account and all its data yourself, at any time:
 - **Web:** sign in to your server in a browser, open *Settings → Delete account* and confirm with your password.
 
 This permanently deletes, on your server, your account and everything in it: your files (including the trash and
-older versions), shares and public links, calendars, contacts, app passwords and signed-in devices. Nothing is kept,
+older versions), shares and public links, app passwords and signed-in devices. Nothing is kept,
 and it can't be undone. Files and links that others shared with you stay with their owners. The app also removes what it
 kept on your phone (offline copies, cached previews) and signs you out.
 

@@ -49,14 +49,13 @@ python3 -I ios/appstore/render.py     # raw/*.png → en-US/iphone-6.9|6.3/*.png
    | Capture | Environment (`SIMCTL_CHILD_` + …) |
    |---|---|
    | sign-in skipped | `CLOUDY_SERVER=<url>`, `CLOUDY_TOKEN=<token>` |
-   | a tab | `CLOUDY_TAB=0…3` (Files, Calendar, Contacts, More) |
+   | a tab | `CLOUDY_TAB=0…3` (Files, Recent, Shared, More) |
    | a folder / text file / share sheet | `CLOUDY_OPEN=folder:<id>:<name>`, `text:<id>:<name>`, `share:<id>:<name>` |
-   | a contact | `CLOUDY_TAB=2`, `CLOUDY_CONTACT=<display name>` |
 
    ```sh
    SIMCTL_CHILD_CLOUDY_SERVER=… SIMCTL_CHILD_CLOUDY_TOKEN=… SIMCTL_CHILD_CLOUDY_TAB=1 \
      xcrun simctl launch --terminate-running-process booted io.cloudy.app
-   xcrun simctl io booted screenshot ios/appstore/raw/calendar.png
+   xcrun simctl io booted screenshot ios/appstore/raw/recent.png
    ```
 
 Public links show the server address, so use a real-looking one rather than `localhost:8080`: e.g. publish
@@ -66,18 +65,18 @@ to 8080. Plain http to `.local` names is allowed by the app.
 ## Recording the preview video
 
 Debug builds play a scripted tour when launched with
-`CLOUDY_TOUR=<folder id>:<folder name>:<text file id>:<text file name>:<contact name>` (`Screenshots.runTour()`):
-folder → share sheet → calendar (other day, next month, back) → contact → typing in the note. Record it and convert
+`CLOUDY_TOUR=<folder id>:<folder name>:<text file id>:<text file name>` (`Screenshots.runTour()`; a fifth part is
+ignored): folder → share sheet → Recent tab → Shared tab → typing in the note. Record it and convert
 (needs `brew install ffmpeg`):
 
 ```sh
 xcrun simctl io booted recordVideo --codec h264 --mask=ignored --force ios/appstore/raw/tour.mov &   # wait for "Recording started"
-env SIMCTL_CHILD_CLOUDY_SERVER=… SIMCTL_CHILD_CLOUDY_TOKEN=… "SIMCTL_CHILD_CLOUDY_TOUR=366:Projects:369:Weekly planning.md:Amira Haddad" \
+env SIMCTL_CHILD_CLOUDY_SERVER=… SIMCTL_CHILD_CLOUDY_TOKEN=… "SIMCTL_CHILD_CLOUDY_TOUR=366:Projects:369:Weekly planning.md" \
   xcrun simctl launch booted io.cloudy.app
-# after ~35 s: kill -INT the recorder. The capture ends at the last screen change (~29 s).
+# after ~30 s: kill -INT the recorder. The capture ends at the last screen change (~23 s).
 ffmpeg -y -ss 2.0 -i ios/appstore/raw/tour.mov -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 \
   -filter_complex "[0:v]scale=886:1926:flags=lanczos,crop=886:1920,tpad=stop_mode=clone:stop_duration=2,fps=30,format=yuv420p[v]" \
-  -map "[v]" -map 1:a -t 29 -c:v libx264 -profile:v high -level:v 4.0 -preset slow -b:v 11M -minrate 11M -maxrate 11M \
+  -map "[v]" -map 1:a -t 23 -c:v libx264 -profile:v high -level:v 4.0 -preset slow -b:v 11M -minrate 11M -maxrate 11M \
   -bufsize 11M -x264-params nal-hrd=cbr:force-cfr=1 -c:a aac -b:a 256k -ar 48000 -ac 2 -movflags +faststart \
   ios/appstore/en-US/preview-886x1920.mp4
 ```

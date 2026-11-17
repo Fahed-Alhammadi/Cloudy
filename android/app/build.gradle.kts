@@ -21,8 +21,8 @@ android {
         applicationId = "io.cloudy.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "1.19.0"
+        versionCode = 31
+        versionName = "1.20.0"
     }
 
     signingConfigs {
@@ -56,13 +56,9 @@ android {
         compose = true
         buildConfig = true
     }
-    // Only the languages the app is translated into (keeps library translations for others out of the APK).
+    // English only (keeps library translations out of the APK).
     androidResources {
-        localeFilters += listOf("en", "ar", "de", "fr", "es")
-    }
-    // Every language ships in the bundle: the in-app language switch needs them even when the phone's language differs.
-    bundle {
-        language { enableSplit = false }
+        localeFilters += listOf("en")
     }
 }
 

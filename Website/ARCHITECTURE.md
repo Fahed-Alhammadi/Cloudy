@@ -1,6 +1,6 @@
 # Cloudy architecture
 
-Cloudy is a self-hosted cloud for files, sharing, calendars and contacts. It has these parts:
+Cloudy is a self-hosted cloud for files and sharing. It has these parts:
 - one container running the Node.js server and its own PostgreSQL database;
 - a browser app written in plain HTML5, served by the server (its fonts too: no third-party requests);
 - native apps for Android (Kotlin, Jetpack Compose) and iPhone (Swift, SwiftUI);
@@ -16,13 +16,13 @@ browser ───────▶ │  /            static HTML5 app (public/)   
 Android, iPhone, │  /api/*       JSON API (session cookie or device token)                    │
 desktop apps ──▶ │  /api/events  live updates (Server-Sent Events)                            │
                  │  /api/public  public share links (token + optional password)               │
-WebDAV / CalDAV  │                                                                            │
-/ CardDAV apps ─▶│  /dav/*       WebDAV files, CalDAV calendars, CardDAV address books         │
+                 │                                                                            │
+WebDAV apps ───▶ │  /dav/*       WebDAV files                                                 │
                  └─────────────┬──────────────────────────────────┬──────────────────────────┘
                                │                                  │
                          PostgreSQL 17                       /data volume
-                   (metadata, shares, users,          blobs/  file contents (immutable)
-                    calendars, contacts)              uploads/ resumable uploads in progress
+                   (metadata, shares, users)          blobs/  file contents (immutable)
+                                                      uploads/ resumable uploads in progress
 ```
 
 **Container layout.**
@@ -88,15 +88,8 @@ Access rules:
 | Path | Purpose |
 |---|---|
 | `/dav/files/<user>/…` | WebDAV: PROPFIND, PROPPATCH, GET, PUT, MKCOL, DELETE, MOVE, COPY, LOCK/UNLOCK. Locks are accepted but not enforced, which macOS Finder and Windows need to mount read-write. |
-| `/dav/calendars/<user>/…` | CalDAV: MKCALENDAR, calendar-query (time ranges), calendar-multiget, sync-collection |
-| `/dav/addressbooks/<user>/…` | CardDAV: extended MKCOL, addressbook-query, addressbook-multiget, sync-collection |
-| `/.well-known/caldav`, `/.well-known/carddav` | Auto-discovery redirects |
 
-Calendars and contacts are stored as raw iCalendar/vCard text and parsed with `ical.js`. The browser and the
-phone apps use a JSON API that converts to and from these formats, and expands repeating events.
-
-Change tracking for sync: a change log (`dav_changes`) plus a counter per collection lets clients fetch only
-what changed since their last sync.
+Calendars and contacts (CalDAV / CardDAV) were removed in server 2.0: Cloudy is about files.
 
 ## 5. Authentication
 
@@ -104,7 +97,7 @@ what changed since their last sync.
 |---|---|
 | Browser | Password or passkey → session cookie (HttpOnly, SameSite=Lax, Secure behind HTTPS) |
 | Android, iPhone and desktop apps | `POST /api/auth/token` → device token, sent as `Authorization: Bearer …` (kept in app-private storage, the iOS Keychain, or encrypted with the OS keychain on desktop) |
-| WebDAV / CalDAV / CardDAV apps | HTTP Basic with the account password or an app password |
+| WebDAV apps | HTTP Basic with the account password or an app password |
 
 - **Two-factor authentication** uses TOTP (RFC 6238: SHA-1, 6 digits, 30 s, ±1 step), implemented in `totp.ts`.
   - Setup keeps the secret pending until a valid code confirms it. Then 10 single-use recovery codes are issued,
@@ -163,8 +156,7 @@ products were split (1.1.0–1.10.0, server and Android together) carry both a `
 
 - ZIP downloads (a folder, or several selected items via `POST /api/zip` → `GET /api/zip/<key>`) have no ZIP64
   support, so they must stay under 4 GB and 65,535 entries.
-- Repeating events are edited as a whole series.
-- No server-side encryption, external storage, full-text search, or calendar sharing yet. Passkeys are web-only.
+- No server-side encryption, external storage or full-text search yet. Passkeys are web-only.
 - The desktop app syncs the user's own files (not "shared with me") and downloads every selected file; there are no
   online-only placeholders (macOS File Provider / Windows Cloud Files) yet.
 
@@ -206,7 +198,7 @@ and are sent in the background — failures are logged, never shown to the user 
 - **Notifications**: new user/group shares (recipients with an email and `notify_shares`, not the sharer) and
   password changes. Links use `PUBLIC_URL` or the origin of the request that caused the email.
 - **Invitations** are sent at once (not in the background), so the admin sees a failure; the link is also shown
-  to copy. The email is in the inviting admin's language.
+  to copy. Emails are in English.
 
 ## 12. Profile pictures
 
@@ -218,7 +210,7 @@ and are sent in the background — failures are logged, never shown to the user 
   text and EXIF chunks in PNG, EXIF and XMP in WebP. The web app also crops and shrinks on a canvas first.
 - The version (a hash of the bytes) is part of the address, so browsers keep a picture for good; responses carry
   `nosniff`, a sandboxing CSP and `Cross-Origin-Resource-Policy: same-origin`. Without a picture, the web app shows
-  initials on a colour derived from the name, the same colour the phone apps give that name in contacts.
+  initials on a colour derived from the name, the same colour the phone apps give that name.
 
 ## 13. Limits
 
@@ -226,20 +218,7 @@ The limits (days in the trash, versions per file, sign-in length) live in `limit
 kept in memory and replaced when an admin saves them, so they apply without a restart. The first start stores the
 values of the old `TRASH_RETENTION_DAYS` / `MAX_VERSIONS` / `SESSION_DAYS` variables (or the defaults).
 
-## 14. Contacts import and export
-
-`POST /api/addressbooks/:id/import` takes the raw file (20 MB, 20,000 contacts at most); `contacts-import.ts`
-detects the format and encoding (UTF-8, UTF-16 with BOM, else Windows-1252).
-- **vCard**: cards are split, unfolded and normalized to 3.0 (4.0 stays 4.0): vCard 2.1 quoted-printable values
-  are decoded with their CHARSET, bare parameters become `TYPE=`, `item1.` groups are dropped, 2.1 text is escaped
-  for 3.0, cards without FN get one from N/ORG/EMAIL/TEL, and every card gets a UID. ical.js validates the result.
-- **CSV**: RFC 4180 with the delimiter guessed from the header (`,` `;` tab); columns are mapped by name (Google's
-  `E-mail 1 - Value`, `::: `-separated multi-values, Outlook's `Home Street`… parts, plain `Name/Email/Phone`).
-- **Duplicates**: a card whose UID exists replaces that contact; otherwise a contact with the same name and a shared
-  email or phone (last 9 digits) is skipped. The response counts `imported`, `updated`, `duplicates`, `skipped`.
-- `GET /api/addressbooks/:id/export` returns every card as one `text/vcard` file.
-
-## 15. Desktop sync
+## 14. Desktop sync
 
 The desktop app (`desktop/src/main/sync.ts`) keeps one local folder in sync with the user's files. Each pass compares
 three trees by relative path: the **local folder**, the **server** (`GET /api/nodes/:id`, with each folder's listing

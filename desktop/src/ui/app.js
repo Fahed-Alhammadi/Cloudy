@@ -1,5 +1,5 @@
 // Settings window: sign in → choose folder and what to sync → status, folders, activity, account.
-// All texts go through t() with English keys (desktop/i18n/<lang>.json, sent by the main process).
+// English only: t() fills in {name} placeholders.
 const cloudy = window.cloudy;
 const app = document.getElementById('app');
 const live = document.getElementById('live'); // screen readers: status changes are announced here
@@ -14,12 +14,8 @@ let setupFolder = null;
 let setupExcluded = [];
 
 function t(text, vars) {
-  let out = state?.strings?.[text] ?? text;
-  if (vars) out = out.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
-  return out;
+  return vars ? text.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m)) : text;
 }
-
-const locale = () => (state?.lang === 'ar' ? 'ar-u-nu-latn' : state?.lang ?? 'en');
 
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
@@ -43,8 +39,6 @@ const cleanError = (e) => String(e?.message ?? e).replace(/^Error invoking remot
 // ---------------------------------------------------------------- views
 
 function render() {
-  document.documentElement.lang = state.lang;
-  document.documentElement.dir = state.rtl ? 'rtl' : 'ltr';
   const next = !state.signedIn ? 'login' : !state.configured ? 'setup' : 'main';
   if (next === view && next !== 'main') return; // keep what the user is typing
   // The main view follows every status change (a few times a second while syncing). Only the parts whose data
@@ -190,7 +184,7 @@ function part(name, deps, build) {
   return el;
 }
 
-const time = (ms) => new Date(ms).toLocaleString(locale(), { dateStyle: 'short', timeStyle: 'short' });
+const time = (ms) => new Date(ms).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' });
 
 function mainView() {
   // The status card stays the same element: its dot keeps pulsing instead of restarting with every update.
@@ -212,7 +206,7 @@ function mainParts() {
   const st = parts.status;
   const cls = `card status ${tone}`;
   if (st.el.className !== cls) st.el.className = cls;
-  if (!same(st.textDeps ?? [], st.textDeps = [state.strings, state.lang, state.statusText, state.statusDetail, syncing && s.current, !syncing && s?.lastSync])) {
+  if (!same(st.textDeps ?? [], st.textDeps = [state.statusText, state.statusDetail, syncing && s.current, !syncing && s?.lastSync])) {
     st.text.replaceChildren(...[
       h('strong', {}, state.statusText),
       state.statusDetail && h('div', { class: 'muted small', dir: 'auto' }, state.statusDetail),
@@ -227,7 +221,7 @@ function mainParts() {
     st.progress.value = s.done;
     st.progress.setAttribute('aria-label', state.statusText);
   }
-  if (!same(st.extraDeps ?? [], st.extraDeps = [state.strings, paused, s?.phase === 'auth'])) {
+  if (!same(st.extraDeps ?? [], st.extraDeps = [paused, s?.phase === 'auth'])) {
     st.el.setAttribute('aria-label', t('Status'));
     st.extra.replaceChildren(...[
       s?.phase === 'auth' && h('button', { class: 'primary', 'data-key': 'reauth', onclick: () => cloudy.call('signInAgain') }, t('Sign in again')),
@@ -239,13 +233,13 @@ function mainParts() {
     ].filter(Boolean));
   }
 
-  const problems = part('problems', [state.strings, state.problems], () => state.problems.length > 0 && h('section', { class: 'card' },
+  const problems = part('problems', [state.problems], () => state.problems.length > 0 && h('section', { class: 'card' },
     h('h2', {}, t('Not synced')),
     state.problems.length > 50 && h('p', { class: 'muted small' }, t('Showing 50 of {count}.', { count: state.problems.length })),
     h('ul', { class: 'list', 'data-key': 'problems' }, state.problems.slice(0, 50).map((p) =>
       h('li', {}, h('div', { class: 'ellipsis', dir: 'auto' }, p.path), h('div', { class: 'muted small' }, p.message))))));
 
-  const folderCard = part('folders', [state.strings, folders, foldersError, state.excluded.join('\0')], () => h('section', { class: 'card' },
+  const folderCard = part('folders', [folders, foldersError, state.excluded.join('\0')], () => h('section', { class: 'card' },
     h('h2', {}, t('Folders to sync')),
     folderList(state.excluded, async (name, on) => {
       if (!on && !confirm(t('Stop syncing "{name}"? Its files are removed from this computer (to the trash) but stay on the server.', { name }))) {
@@ -255,7 +249,7 @@ function mainParts() {
       await cloudy.call('setExcluded', on ? state.excluded.filter((n) => n !== name) : [...state.excluded, name]);
     })));
 
-  const activity = part('activity', [state.strings, state.lang, state.activity], () => h('section', { class: 'card' },
+  const activity = part('activity', [state.activity], () => h('section', { class: 'card' },
     h('h2', {}, t('Recent activity')),
     state.activity.length
       ? h('ul', { class: 'list', 'data-key': 'activity' }, state.activity.slice(0, 30).map((a) =>
@@ -264,11 +258,11 @@ function mainParts() {
       : h('p', { class: 'muted' }, t('Nothing yet.'))));
 
   const u = state.update ?? { state: 'idle' };
-  const general = part('general', [state.strings, state.lang, JSON.stringify(u), state.folder, state.excluded.join('\0'), state.openAtLogin,
+  const general = part('general', [JSON.stringify(u), state.folder, state.excluded.join('\0'), state.openAtLogin,
     state.version, state.displayName, state.user, state.server], () => {
     const updateText = {
       checking: t('Checking for updates…'),
-      none: t('Cloudy is up to date. Checked at {time}.', { time: new Date(u.checkedAt).toLocaleTimeString(locale(), { timeStyle: 'short' }) }),
+      none: t('Cloudy is up to date. Checked at {time}.', { time: new Date(u.checkedAt).toLocaleTimeString('en', { timeStyle: 'short' }) }),
       downloading: t('Downloading Cloudy {version}… {percent}%', { version: u.version, percent: u.percent ?? 0 }),
       ready: t('Cloudy {version} is ready to install.', { version: u.version }),
       available: t('Cloudy {version} is available.', { version: u.version }),

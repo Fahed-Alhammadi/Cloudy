@@ -100,8 +100,6 @@ class Api(private val session: Session) {
         runCatching { send("POST", "/api/auth/revoke", headers = mapOf("Authorization" to "Bearer $token"), server = server) }
     }
     suspend fun me(): User = decode(send("GET", "/api/me"))
-    /** Saves the account's language (null = automatic), so the web app and emails follow it. */
-    suspend fun setLanguage(code: String?) { sendJson("PATCH", "/api/me", buildJsonObject { put("language", code) }) }
     suspend fun appPasswords(): List<AppPassword> = decode(send("GET", "/api/me/app-passwords"))
     suspend fun revokeAppPassword(id: Long) { send("DELETE", "/api/me/app-passwords/$id") }
     /** Changes the account password. The device token stays valid; the server signs out the account's browser sessions. */

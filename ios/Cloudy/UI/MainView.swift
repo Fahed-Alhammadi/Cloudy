@@ -14,10 +14,11 @@ struct MainView: View {
         TabView(selection: $tab) {
             FilesTab()
                 .tabItem { Label("Files", systemImage: "folder") }.tag(0)
-            CalendarView()
-                .tabItem { Label("Calendar", systemImage: "calendar") }.tag(1)
-            ContactsView()
-                .tabItem { Label("Contacts", systemImage: "person.crop.circle") }.tag(2)
+            // Same tabs as Android's bottom bar; Recent and Shared are not listed again under More.
+            ListTab(kind: .recent)
+                .tabItem { Label("Recent", systemImage: "clock") }.tag(1)
+            ListTab(kind: .shared)
+                .tabItem { Label("Shared", systemImage: "person.2") }.tag(2)
             MoreView()
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }.tag(3)
         }
@@ -34,5 +35,16 @@ struct MainView: View {
             if case .tab(let t) = note.object as? Screenshots.Step { withAnimation { tab = t } }
         }
         #endif
+    }
+}
+
+/// Recent or Shared with you as a tab: the list is the root of its own stack (no back button).
+private struct ListTab: View {
+    let kind: ListKind
+
+    var body: some View {
+        NavigationStack {
+            NodeListView(kind: kind).withRoutes()
+        }
     }
 }

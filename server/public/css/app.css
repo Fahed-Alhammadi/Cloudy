@@ -181,7 +181,7 @@ code, pre, kbd { font-family: var(--mono); font-size: 0.9em; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Only motion that answers an action, and none when the system asks for less. */
-.btn, .icon-btn, .sidebar a, .file-row, .menu button, .contact-item, .picker-list li button, .crumb, .day, .event, .tab, .tile, .seg button {
+.btn, .icon-btn, .sidebar a, .file-row, .menu button, .picker-list li button, .crumb, .tab, .tile, .seg button {
   transition: background-color var(--ease), border-color var(--ease), color var(--ease), box-shadow var(--ease), opacity var(--ease);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -415,13 +415,11 @@ progress { accent-color: var(--accent); }
 .notice .icon { color: var(--muted); }
 
 .files-view { position: relative; border-radius: var(--radius); min-height: 60vh; }
-.contacts-view { position: relative; }
-.files-view.dragging::after, .contacts-view.dragging::after {
+.files-view.dragging::after {
   content: attr(data-drop-label); /* translated text, set by the view */ position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   border: 2px dashed var(--accent); border-radius: var(--radius); background: color-mix(in srgb, var(--accent-soft) 85%, transparent);
   color: var(--accent-strong); font-size: var(--fs-lg); font-weight: 600; pointer-events: none;
 }
-.contacts-view.dragging::after { z-index: 2; }
 .breadcrumb .crumb.drop-target { background: var(--accent-soft); outline: 2px solid var(--accent); color: var(--accent-strong); }
 
 /* The selection bar: a strip of night sky with the actions for everything ticked. */
@@ -674,55 +672,7 @@ dialog.viewer .muted { color: #a6b2c6; font-weight: 400; }
 .no-preview > .icon { width: 64px; height: 64px; opacity: 0.6; }
 .viewer-note { color: #f0d48a; margin: 0 0 8px; text-align: center; }
 
-/* ---------------------------------------------------------------- calendar */
-.calendar-view { display: grid; grid-template-columns: 232px 1fr; gap: 28px; }
-.cal-side h3 { margin-top: 22px; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
-.cal-side .btn.block { margin-bottom: 4px; }
-.cal-list { list-style: none; margin: 0 0 10px; padding: 0; }
-.cal-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px 0; min-height: 36px; }
 .dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex: none; }
-.cal-toolbar { flex-wrap: nowrap; }
-.week { display: contents; }
-.month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
-.weekday { padding: 8px 10px; font-size: var(--fs-sm); color: var(--muted); border-bottom: 1px solid var(--border); background: var(--bg); }
-.day { min-height: 112px; padding: 6px; border-inline-start: 1px solid var(--border-soft); border-top: 1px solid var(--border-soft); cursor: pointer; display: flex; flex-direction: column; gap: 3px; min-width: 0; background: var(--bg); }
-.month-grid > .weekday + .day, .month-grid .week > .day:first-child { border-inline-start: none; }
-.day:nth-child(7n + 1) { border-inline-start: none; }
-.day:hover { background: var(--bg-hover); }
-.day.other { background: var(--bg-soft); }
-.day.other .day-num { color: var(--muted); }
-.day-num { font-size: var(--fs-sm); font-weight: 600; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; flex: none; }
-.day.today .day-num { background: var(--accent); color: var(--accent-text); }
-.event {
-  display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: start; border: none; border-radius: 6px; padding: 2px 7px; font: inherit; font-size: var(--fs-sm);
-  cursor: pointer; overflow: hidden; white-space: nowrap; color: var(--text); line-height: 1.45;
-  background: color-mix(in srgb, var(--cal, var(--accent)) 14%, transparent); border-inline-start: 3px solid var(--cal, var(--accent));
-}
-.event:hover { background: color-mix(in srgb, var(--cal, var(--accent)) 24%, transparent); }
-.event .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: start; }
-.event .time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-.event.all-day { color: #fff; border-inline-start: none; font-weight: 600; }
-.more-events { font: inherit; font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--accent-strong); font-weight: 600; background: none; border: none; padding: 2px 7px; border-radius: 6px; cursor: pointer; text-align: start; min-height: 24px; }
-.more-events:hover { background: var(--bg-active); }
-.day-events { display: flex; flex-direction: column; gap: 6px; }
-.day-events .event { font-size: 0.95rem; padding: 8px 12px; border-radius: 8px; }
-
-/* ---------------------------------------------------------------- contacts */
-.contacts-view { display: grid; grid-template-columns: 320px 1fr; gap: 28px; align-items: start; }
-.contacts-side { display: flex; flex-direction: column; gap: 10px; position: sticky; top: calc(var(--topbar) + 20px); }
-.contacts-side select { flex: 1; width: auto; }
-.contact-list { list-style: none; margin: 0; padding: 0; max-height: calc(100vh - 270px); overflow-y: auto; }
-.contact-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 8px 10px; border: none; background: none; color: var(--text); font: inherit; text-align: start; border-radius: var(--r-md); cursor: pointer; }
-.contact-item:hover { background: var(--bg-hover); }
-.contact-item.active { background: var(--bg-active); }
-.contact-item strong, .contact-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.contact-item strong { font-weight: 600; }
-.contact-item small { color: var(--muted); }
-.contact-head { display: flex; align-items: center; gap: 16px; }
-.contact-head h2 { margin: 0; font-size: var(--fs-xl); letter-spacing: -0.018em; }
-.contact-detail { min-width: 0; }
-.pad { padding: 12px; }
-.back-to-list { display: none; justify-self: start; }
 
 /* ---------------------------------------------------------------- settings & administration */
 /* Settings read as one column of titled sections (not a stack of boxes); each tab holds a few. */
@@ -836,7 +786,6 @@ details.more-options .form-grid { margin-top: 14px; }
 .forgot-link { align-self: flex-end; font-size: var(--fs-sm); margin-top: -8px; }
 .login-or { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: var(--fs-sm); }
 .login-or::before, .login-or::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
-.lang-picker { align-self: center; width: auto; min-height: 34px; font-size: var(--fs-sm); padding-block: 4px; padding-inline: 10px 32px; border-color: var(--border); }
 .login-foot { color: var(--on-night-2); font-size: var(--fs-sm); margin: 0; text-align: center; }
 .invite-from { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); background: var(--bg-soft); border: 1px solid var(--border-soft); }
 .invite-from p { margin: 0; color: var(--text-2); }
@@ -890,8 +839,6 @@ details.more-options .form-grid { margin-top: 14px; }
   .file-table.selecting .col-check { display: table-cell; } /* phones: checkboxes only while selecting */
   .file-table td { padding: 8px 8px; }
   .name-cell { gap: 12px; }
-  .day { min-height: 72px; padding: 4px; }
-  .event .time { display: none; }
   .upload-panel { left: 12px; right: 12px; width: auto; bottom: 12px; }
   .viewer-stage { padding: 0 8px 12px; }
   .url-row .muted { width: 100%; }
@@ -909,25 +856,19 @@ details.more-options .form-grid { margin-top: 14px; }
   .breadcrumb > :not(:nth-last-child(-n+3)) { display: none; } /* only the last two folders of the path */
   dialog.viewer:has(.text-editor) .viewer-nav { display: none; }
   /* Month name and its three buttons on one line. */
-  .cal-toolbar .view-title { font-size: 1.15rem; }
   /* Folder tiles in two columns: room for the name, which may take two lines. */
   .tile.folder { gap: 8px; padding-inline: 8px 4px; }
   .tile.folder > .icon:first-child { width: 30px; height: 30px; padding: 6px; }
   .tile.folder .tile-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.25; }
   .tile.folder .tile-more .icon-btn { width: 30px; }
-  .back-to-list { display: inline-flex; }
-  .contact-list { max-height: none; }
   .login-card { padding: 24px 20px 20px; }
   .tabs { margin-top: 12px; }
   .data-table td, .data-table th { padding-inline: 8px; }
   .invites .acts { width: 100%; justify-content: flex-end; }
 }
-/* Tablets in portrait keep the rail (from 761 px), but calendar, contacts and forms are one column up to 860 px:
-   beside the rail their two columns did not fit. */
+/* Tablets in portrait keep the rail (from 761 px), but forms are one column up to 860 px: beside the rail their two
+   columns did not fit. */
 @media (max-width: 860px) {
-  .cal-main { order: -1; } /* the month first, the calendar list below */
-  .calendar-view, .contacts-view { grid-template-columns: 1fr; }
-  .contacts-side { position: static; }
   .form-grid { grid-template-columns: 1fr; }
 }
 /* Touch screens: controls at least 40 px. */

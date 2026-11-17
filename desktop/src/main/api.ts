@@ -17,7 +17,7 @@ export interface RemoteNode {
 }
 
 /** `id` is the username. */
-export interface Me { id: string; displayName?: string; language?: string | null; rootId: number }
+export interface Me { id: string; displayName?: string; rootId: number }
 
 export class ApiError extends Error {
   status: number;

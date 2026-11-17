@@ -9,9 +9,9 @@ A native iPhone app (Swift, SwiftUI) for your Cloudy server. It needs iOS 17 or 
 - Share by public link (password, expiry date, uploads for folders) or with people and groups. Manage what you shared.
 - Scan documents to PDF (VisionKit, real iPhone only, not the simulator); you name the scan before it uploads.
 - Send files to other apps or Save to Files with the share sheet.
-- **Calendar** (month view, repeating events) and **contacts** (import .vcf/.csv, export .vcf).
+- Tabs: Files, Recent, Shared (files shared with you) and More.
 - Live updates: changes from other devices show up immediately.
-- App lock (Face ID / Touch ID / passcode), Devices (revoke sign-ins), English, Arabic (RTL), German, French, Spanish.
+- App lock (Face ID / Touch ID / passcode), Devices (revoke sign-ins). The app is in English.
 
 Sign-in works like on Android: the password (plus a two-factor code if needed) is exchanged for a device token stored in
 the Keychain. Each iPhone appears on the web under *Settings → App passwords*.
@@ -46,8 +46,8 @@ Password change without typing: `SIMCTL_CHILD_CLOUDY_SCRIPT='1:route:password'` 
 Login screen without typing: `SIMCTL_CHILD_CLOUDY_LOGIN_TEST=<user>:<password>` fills in the form;
 `SIMCTL_CHILD_CLOUDY_PASSWORD_VISIBLE=1` starts password fields shown (eye toggled on).
 Looking at states and motion without tapping (all in `Cloudy/UI/Screenshots.swift`): `SIMCTL_CHILD_CLOUDY_SCRIPT=<seconds>:<step>;…`
-plays steps such as `tab:1`, `folder:<id>:<name>`, `route:trash` (or `devices`, `password`, `links`), `pop`, `grid`, `sort:date`, `select:3`, `done`, `month:1`,
-`day:3`, `landscape`; `CLOUDY_LANDSCAPE=1` starts rotated (the simulator can't be rotated from the command line),
+plays steps such as `tab:1`, `folder:<id>:<name>`, `route:trash` (or `devices`, `password`, `links`), `pop`, `grid`, `sort:date`, `select:3`, `done`,
+`landscape`; `CLOUDY_LANDSCAPE=1` starts rotated (the simulator can't be rotated from the command line),
 `CLOUDY_LOCK=1` shows the app-lock screen, `CLOUDY_ICONS=1` one row per file type, `CLOUDY_LOGIN_ERROR=<text>` the sign-in
 screen with an error, and `CLOUDY_SERVER` without a token fills in the sign-in screen's address.
 
@@ -59,11 +59,11 @@ throwaway server with the demo account, `appstore/render.py` frames the captures
 | Path | What it does |
 |---|---|
 | `project.yml` | XcodeGen spec (targets, versions, build settings) |
-| `Cloudy/Info.plist` | Permissions texts, ATS (local networking only), export compliance, languages |
+| `Cloudy/Info.plist` | Permissions texts, ATS (local networking only), export compliance |
 | `Cloudy/Data/API.swift` | JSON API client (URLSession, bearer token, chunked uploads, SSE) |
 | `Cloudy/Data/Session.swift` | Server address (App Group), user; `Keychain.swift` = device token (shared keychain group) |
 | `CloudyShare/` | Share extension "Share to Cloudy" (`io.cloudy.app.share`): files from other apps' share sheets → folder picker → chunked upload with the app's token |
 | `Cloudy/Data/Live.swift` | Live updates (SSE → `.cloudyChange` notifications), download cache |
 | `Cloudy/Data/Uploads.swift` | Uploads in progress (with background time) |
-| `Cloudy/UI/*.swift` | SwiftUI screens: Files, FileActions (menus, Quick Look), ShareSheet, Lists (favorites, recent, shared, trash), Calendar, Contacts, More |
-| `Cloudy/Resources/` | Assets (icon), `Localizable.xcstrings` / `InfoPlist.xcstrings` (translations), `PrivacyInfo.xcprivacy` |
+| `Cloudy/UI/*.swift` | SwiftUI screens: Files, FileActions (menus, Quick Look), ShareSheet, Lists (favorites, recent, shared, trash), More |
+| `Cloudy/Resources/` | Assets (icon), `Localizable.xcstrings` / `InfoPlist.xcstrings` (English texts), `PrivacyInfo.xcprivacy` |

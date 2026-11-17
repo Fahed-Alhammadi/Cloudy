@@ -15,7 +15,6 @@ import QRCode from 'qrcode';
 import { notifyPasswordChanged, notifyEmailChanged, validEmail } from '../mail.ts';
 import { thumbnailsAvailable } from '../thumbs.ts';
 import { canonicalTimeZone } from '../timezones.ts';
-import { isLanguage } from '../i18n.ts';
 import { removeAvatar } from './avatars.ts';
 
 async function replaceRecoveryCodes(userId: string): Promise<string[]> {
@@ -76,31 +75,26 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     if (typeof b.email === 'string' && b.email.trim() && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
     if (typeof b.displayName === 'string' && b.displayName.trim().length > 100) throw new HttpError(400, 'Display name is too long (max 100)');
     // The email receives password reset links: changing it needs the password (a stolen session must not be able to
-    // take the account over). Saving the profile with the same address, or only the language (Android), does not.
+    // take the account over). Saving the profile with the same address does not.
     const emailChanged = typeof b.email === 'string' && b.email.trim() !== user.email;
     if (emailChanged) await requirePassword(req, user.id, b.password);
     await q(`UPDATE users SET display_name = COALESCE($2, display_name), email = COALESCE($3, email),
                               notify_shares = COALESCE($4, notify_shares) WHERE id = $1`,
       [user.id, typeof b.displayName === 'string' ? b.displayName.trim() || user.id : null,
        typeof b.email === 'string' ? b.email.trim() : null, typeof b.notifyShares === 'boolean' ? b.notifyShares : null]);
-    // language: a supported code, or null / '' for "same as the browser or phone".
-    // The account's time zone (the web app sets it from the browser): used for events and link expiry dates from
-    // clients that do not send one.
+    // The account's time zone (the web app sets it from the browser): used for link expiry dates from clients that do
+    // not send one.
     if ('timezone' in b) {
       const tz = b.timezone ? canonicalTimeZone(b.timezone) : null;
       if (b.timezone && !tz) throw new HttpError(400, 'Unknown time zone');
       await q(`UPDATE users SET timezone = $2 WHERE id = $1`, [user.id, tz]);
-    }
-    if ('language' in b) {
-      if (b.language && !isLanguage(b.language)) throw new HttpError(400, 'Unsupported language');
-      await q(`UPDATE users SET language = $2 WHERE id = $1`, [user.id, b.language || null]);
     }
     if (emailChanged) notifyEmailChanged(req, user, user.email, b.email.trim());
     noContent(res);
   }));
 
   // Users delete their own account from the apps and the web (App Store 5.1.1(v), Google Play account deletion):
-  // everything goes (files incl. trash and versions, shares, calendars, contacts, devices, sessions), confirmed with
+  // everything goes (files incl. trash and versions, shares, devices, sessions), confirmed with
   // the password. POST, not DELETE with a body, which some proxies drop. The last administrator can't leave the server
   // without one.
   r.post('/api/me/delete', authed(async ({ req, res }, user) => {
@@ -163,7 +157,7 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     noContent(res);
   }));
 
-  // App passwords for WebDAV / CalDAV / CardDAV clients.
+  // App passwords for WebDAV clients.
   // `current` marks the token this request was made with (the phone asking), so it isn't revoked by mistake.
   r.get('/api/me/app-passwords', authed(async ({ req, res }, user) => {
     const bearer = bearerToken(req);

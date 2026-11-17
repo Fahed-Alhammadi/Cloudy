@@ -18,7 +18,6 @@ import { registerInvitations, expireInvitations } from './api/invitations.ts';
 import { registerPasskeys } from './api/passkeys.ts';
 import { registerFiles, registerUploadChunks, expireUploads } from './api/files.ts';
 import { registerShares } from './api/shares.ts';
-import { registerGroupware } from './api/groupware.ts';
 import { openStream, startLiveUpdates, closeStreams } from './events.ts';
 import { registerOffice, pruneOfficeCache } from './office.ts';
 import { pruneThumbnails } from './thumbs.ts';
@@ -46,7 +45,6 @@ registerPasskeys(router, authed);
 registerFiles(router, authed);
 registerUploadChunks(router);
 registerShares(router, authed);
-registerGroupware(router, authed);
 registerOffice(router, authed);
 registerMail(router, authed, admin);
 registerLimits(router, admin);
@@ -79,7 +77,7 @@ const CSP = [
 // The web app's pages have plain addresses (/files/12, /settings…; "#/…" before 1.18): each one is the app, which
 // reads the path itself. /app is an older address of the app. Public links: /s/<token> and its folders /s/<token>/<id>.
 // /invite#<token> is where an invited person creates their account.
-const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin|forgot|reset|invite)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
+const APP_PAGES = /^\/(?:(?:files|recent|favorites|shared-in|shared-out|search|trash|settings|admin|forgot|reset|invite)(?:\/[^/]*)?|app(?:\/.*)?)?$/;
 const PUBLIC_PAGES = /^\/s\/[\w-]+(?:\/\d+)?$/;
 
 const compressedStatic = new Map<string, Buffer>();

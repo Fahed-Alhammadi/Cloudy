@@ -1,8 +1,7 @@
 # Cloudy desktop
 
 Sync client for macOS, Windows and Linux (Electron + TypeScript). It keeps one folder on the computer in two-way sync
-with the user's Cloudy files. It is a menu bar / system tray app with a small settings window. Files only: no calendar
-or contacts.
+with the user's Cloudy files. It is a menu bar / system tray app with a small settings window. Files only.
 
 ## How sync works
 
@@ -72,7 +71,7 @@ src/main/sync.ts      sync engine
 src/main/api.ts       Cloudy API client (chunked upload, download, SSE)
 src/main/store.ts     settings.json / sync-state.json (userData), token encryption
 src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z) (electron-updater, generic feed)
-src/main/i18n.ts      t() + LANGUAGES; translations in i18n/<lang>.json (English keys, as on the web)
+src/main/i18n.ts      t(): English texts with {name} placeholders (the app is English only)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
 src/ui/               settings window (plain HTML/JS/CSS, no framework)
 assets/               app icon: icon.png 1024 px (Windows/Linux); macOS Cloudy.icon (Icon Composer, blue in light+dark) → scripts/mac-icon.sh → Assets.car + icon.icns (committed); tray icons (cloud only: white tray.png for Windows/Linux, trayMacTemplate = 18 pt macOS template image)
@@ -89,8 +88,6 @@ npm run typecheck
 CLOUDY_TEST_URL=http://localhost:8080 CLOUDY_TEST_USER=admin CLOUDY_TEST_PASSWORD=… npm test
 npm run dist:mac | dist:win | dist:linux    # packages in dist/ (unsigned locally: CSC_IDENTITY_AUTO_DISCOVERY=false)
 ```
-
-New texts: wrap them in `t('…')` and add them to all four `i18n/*.json` files (`python3 tests/i18n_check.py`).
 
 ## Updates
 

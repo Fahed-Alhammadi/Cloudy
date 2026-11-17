@@ -13,11 +13,11 @@ W, H = 1320, 2868  # the screenshot design size (6.9"); other sizes are rendered
 SIZES = [('iphone-6.9', 1320, 2868), ('iphone-6.3', 1206, 2622)]
 
 SHOTS = [  # (output, source, title, subtitle)
-    ('1-files', 'files', 'Your own cloud,<br>in your pocket', 'Files, calendars and contacts on your own server'),
+    ('1-files', 'files', 'Your own cloud,<br>in your pocket', 'Your files and photos on your own server'),
     ('2-photos', 'photos', 'All your files,<br>at a glance', 'Browse, search, upload and preview anything'),
     ('3-sharing', 'share', 'Share in seconds', 'Links with a password and expiry date, or share with people'),
-    ('4-calendar', 'calendar', 'Plan your days', 'Your calendars, synced with your own server'),
-    ('5-contacts', 'contacts', 'Contacts that<br>stay yours', 'Import from .vcf or .csv, export any time'),
+    ('4-recent', 'recent', 'Pick up where<br>you left off', 'The files you opened or changed lately'),
+    ('5-shared', 'shared', 'Everything<br>shared with you', 'Folders and files from family and colleagues'),
     ('6-editor', 'editor', 'Edit on the go', 'Open and edit notes and text files anywhere'),
     ('7-more', 'more', 'Everything<br>in one place', 'Favorites, shared files, trash and settings'),
 ]
@@ -76,9 +76,9 @@ p {{ font-size: calc(var(--u) * 4.4); opacity: .88; margin-top: calc(var(--u) * 
 <div class="text">
   <div class="brand"><img src="file://{icon}"><span>Cloudy</span></div>
   <h1>Your own cloud,<br>in your pocket</h1>
-  <p>Files, sharing, calendars and contacts on the server you choose. No ads, no tracking.</p>
+  <p>Your files, photos and sharing on the server you choose. No ads, no tracking.</p>
 </div>
-<div class="phone back l"><img src="file://{raw}/calendar.png"></div>
+<div class="phone back l"><img src="file://{raw}/recent.png"></div>
 <div class="phone back r"><img src="file://{raw}/share.png"></div>
 <div class="phone c"><img src="file://{raw}/files.png"></div>'''
 

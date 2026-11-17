@@ -11,8 +11,8 @@ A native Android app (Kotlin, Jetpack Compose) for your Cloudy server. Requires 
 - Keep files and folders **available offline**. They're downloaded and refreshed when they change.
 - **Photo backup:** new camera-roll photos and videos upload to a folder (default `Camera Uploads`), Wi-Fi only
   if you choose.
-- **Calendar** (month view, repeating events) and **contacts**, synced with the server.
-- **Document scanner** to PDF, grid view, search filters, app lock, a list of signed-in devices, 5 languages.
+- **Recent** and **Shared** tabs: the files you opened lately, and everything shared with you.
+- **Document scanner** to PDF, grid view, search filters, app lock, a list of signed-in devices.
 - Installed and updated through Google Play.
 
 ## Sign-in

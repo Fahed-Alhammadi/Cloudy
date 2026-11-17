@@ -1,7 +1,6 @@
 package io.cloudy.app
 
 import android.content.ContentResolver
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -18,7 +17,6 @@ import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.cloudy.app.data.AppLock
-import io.cloudy.app.data.Lang
 import io.cloudy.app.ui.CloudyTheme
 import io.cloudy.app.ui.LockScreen
 import io.cloudy.app.ui.LoginScreen
@@ -29,8 +27,6 @@ import io.cloudy.app.ui.WelcomeScreen
 class MainActivity : FragmentActivity() {
     /** Files handed to us via "Share to Cloudy"; the Files screen offers to upload them. */
     val sharedUris = mutableStateOf<List<Uri>>(emptyList())
-
-    override fun attachBaseContext(base: Context) = super.attachBaseContext(Lang.wrap(base))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

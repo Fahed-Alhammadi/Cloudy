@@ -1,4 +1,4 @@
-// Bundles the main process and preload with esbuild into out/ and copies the window (src/ui), translations and icons.
+// Bundles the main process and preload with esbuild into out/ and copies the window (src/ui) and icons.
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { build } from 'esbuild';
 
@@ -22,7 +22,6 @@ const common = {
 await build({ ...common, entryPoints: ['src/main/main.ts'], outfile: 'out/main.cjs' });
 await build({ ...common, entryPoints: ['src/preload/preload.ts'], outfile: 'out/preload.cjs' });
 cpSync('src/ui', 'out/ui', { recursive: true });
-cpSync('i18n', 'out/i18n', { recursive: true });
 cpSync('assets/icons', 'out/icons', { recursive: true });
 cpSync('../Website/logo.svg', 'out/ui/logo.svg');
 console.log('Built to out/');

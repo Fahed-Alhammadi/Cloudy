@@ -2,15 +2,13 @@
 import { get, post, patch } from './api.js';
 import { h, icon, avatar, isolate, showError, showMenu, closeMenu, formatSize, navigate, currentView, modal, toast, confirmDialog, setLeaveGuard, mayLeave } from './ui.js';
 import { renderFolder, renderRecent, renderFavorites, renderSharedIn, renderSharedOut, renderSearch, renderTrash, placeOf, restorePlace } from './files.js';
-import { renderCalendar } from './calendar.js';
-import { renderContacts } from './contacts.js';
 import { renderSettings, renderAdmin } from './settings.js';
 import { passkeysSupported, passkeyAutofillAvailable, getPasskey, isPasskeyCancel } from './passkey.js';
 import { loadOfficeInfo } from './office.js';
 import { setDropTarget } from './drop.js';
 import { uploadsRunning, stopAllUploads } from './upload.js';
 import { consumeViewerBack } from './viewer.js';
-import { t, LANGUAGES, currentLanguage, setLanguage, storedLanguage } from './i18n.js';
+import { t } from './i18n.js';
 
 const app = document.getElementById('app');
 const ctx = { me: null, rerender: () => route({ refresh: true }), refreshMe, markNav: (view) => markNav(view),
@@ -27,8 +25,6 @@ async function refreshMe() {
 async function startSession() {
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (!ctx.me.timezone && zone) patch('/api/me', { timezone: zone }).then(() => { ctx.me.timezone = zone; }, () => {});
-  // The account's language wins over the one picked on the login page (null = keep that / the browser's).
-  if (ctx.me.language && ctx.me.language !== currentLanguage()) await setLanguage(ctx.me.language);
   await loadOfficeInfo();
   renderShell();
   route();
@@ -57,8 +53,8 @@ function startLiveUpdates() {
   });
   source.addEventListener('open', () => {
     reconnectDelay = 5000;
-    // Back after a gap: file lists may have missed changes and are reloaded once. Never other pages: the contact
-    // editor and the settings forms are not dialogs, and reloading them would throw away what is being typed.
+    // Back after a gap: file lists may have missed changes and are reloaded once. Never other pages: the settings
+    // forms are not dialogs, and reloading them would throw away what is being typed.
     if (missedUpdates) {
       missedUpdates = false;
       if (['files', 'recent', 'favorites', 'shared-in', 'shared-out', 'search', 'trash'].includes(currentView().view)) scheduleRefresh(0);
@@ -172,12 +168,6 @@ function refreshUsageSoon() {
 // Only one WebAuthn request may be pending; the autofill one is aborted before any other login.
 let passkeyAbort = null;
 
-/** Language menu for the login pages; `rerender` draws the page again in the new language. */
-function languagePicker(rerender) {
-  return h('select', { class: 'lang-picker', 'aria-label': t('Language'), onchange: async (e) => { await setLanguage(e.target.value); rerender(); } },
-    LANGUAGES.map(([code, name]) => h('option', { value: code, selected: code === currentLanguage() }, name)));
-}
-
 /** Passkeys are bound to the server's name: on an address like 192.168.1.10 the browser refuses them. */
 const ipAddressHost = () => /^\d+(\.\d+){3}$/.test(location.hostname) || location.hostname.includes(':');
 
@@ -250,8 +240,7 @@ function renderLogin(message, notice = false, keep = {}) {
       codeField,
       error, btn,
       passkeyBtn && h('div', { class: 'login-or', 'aria-hidden': 'true' }, t('or')),
-      passkeyBtn,
-      languagePicker(() => renderLogin(message, notice, { user: user.value, pass: pass.value })))));
+      passkeyBtn)));
   get('/api/auth/options').then((o) => { forgot.hidden = !o.passwordReset; }, () => {});
   (user.value ? pass : user).focus();
   if (!ipAddressHost()) passkeyAutofillAvailable().then((ok) => ok && !passkeyAbort && app.contains(user) && passkeyLogin(true));
@@ -270,7 +259,7 @@ function loginHero() {
   return h('div', { class: 'login-hero' },
     h('img', { class: 'mark', src: '/favicon.svg', alt: '', width: 60, height: 60 }),
     h('h1', {}, 'Cloudy'),
-    h('p', { class: 'tagline' }, t('Your files, calendars and contacts, on your own server.')));
+    h('p', { class: 'tagline' }, t('Your files, on your own server.')));
 }
 
 // ---------------------------------------------------------------- invitations
@@ -296,8 +285,7 @@ function inviteProblem(token, err) {
     h('h2', { class: 'card-title' }, unreachable ? t('This page could not be loaded.') : t('This invitation can’t be used')),
     h('p', { class: 'card-lead' }, t(err?.message || String(err))),
     unreachable && h('button', { class: 'btn primary block', type: 'button', onclick: () => renderInvite(token) }, icon('restore'), t('Try again')),
-    h('a', { class: `btn block${unreachable ? '' : ' primary'}`, href: '/', onclick: toLoginFromInvite }, t('Go to sign in')),
-    languagePicker(() => inviteProblem(token, err)));
+    h('a', { class: `btn block${unreachable ? '' : ' primary'}`, href: '/', onclick: toLoginFromInvite }, t('Go to sign in')));
 }
 
 async function renderInvite(token, keep = {}, known = null) {
@@ -331,8 +319,7 @@ async function renderInvite(token, keep = {}, known = null) {
       : h('p', { class: 'muted small' }, t('Password reset links go to {email}.', { email: isolate(info.email) })),
     h('label', { class: 'field' }, h('span', {}, t('Password (8+ characters)')), pw1),
     h('label', { class: 'field' }, h('span', {}, t('Repeat password')), pw2),
-    msg, btn,
-    languagePicker(() => renderInvite(token, { name: name.value, user: user.value, email: email?.value, pw1: pw1.value, pw2: pw2.value }, { info, signedIn })));
+    msg, btn);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.textContent = '';
@@ -370,8 +357,7 @@ function renderForgot(initial = '') {
     h('p', {}, t('Enter your username or email. If your account has an email address, we will send you a link to choose a new password.')),
     h('label', { class: 'field' }, h('span', {}, t('Username or email')), login),
     msg, btn,
-    h('a', { href: '/', onclick: (e) => { e.preventDefault(); renderLogin(); } }, t('Back to login')),
-    languagePicker(() => renderForgot(login.value)));
+    h('a', { href: '/', onclick: (e) => { e.preventDefault(); renderLogin(); } }, t('Back to login')));
   get('/api/auth/options').then((o) => {
     if (o.passwordReset) return;
     msg.className = 'notice';
@@ -403,8 +389,7 @@ function renderReset(token) {
   const form = authCard(
     h('label', { class: 'field' }, h('span', {}, t('New password (8+ characters)')), pw1),
     h('label', { class: 'field' }, h('span', {}, t('Repeat new password')), pw2),
-    msg, btn,
-    languagePicker(() => renderReset(token)));
+    msg, btn);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (pw1.value !== pw2.value) { msg.textContent = t('The passwords do not match.'); return; }
@@ -427,9 +412,6 @@ const NAV = [
   ['shared-in', 'Shared with you', 'users'],
   ['shared-out', 'Shared by you', 'share'],
   ['trash', 'Deleted files', 'trash'],
-  '-',
-  ['calendar', 'Calendar', 'calendar'],
-  ['contacts', 'Contacts', 'contacts'],
 ];
 
 let main;
@@ -561,8 +543,6 @@ async function route({ refresh = false, scrollTo = null } = {}) {
         break;
       }
       case 'trash': await renderTrash(slot, ctx); break;
-      case 'calendar': await renderCalendar(slot, ctx); break;
-      case 'contacts': await renderContacts(slot, ctx); break;
       case 'settings': await renderSettings(slot, ctx, arg); break;
       case 'admin': await renderAdmin(slot, ctx, arg); break;
       default:
@@ -604,7 +584,7 @@ async function route({ refresh = false, scrollTo = null } = {}) {
 
 // Back/Forward, and moves made by the views (navigate() in ui.js).
 // (Back while the viewer is open closes the viewer: that history entry is the viewer's, not a page.)
-// Unsaved work (the contact form) asks first; staying puts the page's address back. Back pressed again while the
+// Unsaved work asks first; staying puts the page's address back. Back pressed again while the
 // question is open changes nothing more.
 let shownAt = location.pathname + location.search;
 let asking = false;
@@ -619,7 +599,7 @@ window.addEventListener('popstate', async () => {
 window.addEventListener('cloudy:navigate', () => route());
 // Links to the app's own pages open in place; a Ctrl/⌘/Shift/middle click still opens a new tab or window
 // (the server answers those addresses with the app too).
-const APP_LINK = /^\/(files|recent|favorites|shared-in|shared-out|search|trash|calendar|contacts|settings|admin)?(\/|$)/;
+const APP_LINK = /^\/(files|recent|favorites|shared-in|shared-out|search|trash|settings|admin)?(\/|$)/;
 document.addEventListener('click', (e) => {
   if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !ctx.me) return;
   const a = e.target.closest?.('a[href]');
@@ -681,7 +661,6 @@ window.addEventListener('cloudy:unauthorized', () => {
   renderLogin(t('Your session has expired. Please log in again.'));
 });
 
-await setLanguage(storedLanguage());
 fromOldAddress();
 // Reset links are /reset#<token>: browsers don't send the part after "#", so the token stays out of the access logs
 // of the server and any proxy in front of it. Once read, the address bar shows just /reset. (/reset/<token> = an old link.)

@@ -4,7 +4,7 @@ import { h, icon, fileIcon, formatSize, formatDate, fullDate, showError, promptD
 import { viewPrefs, chooseSort, setView, sortItems, tileArt } from './listprefs.js';
 import { openViewer, kindOf, consumeViewerBack } from './viewer.js';
 import { uploadAll, filesFromInput, filesFromDrop } from './upload.js';
-import { t, locale, setLanguage, storedLanguage } from './i18n.js';
+import { t, locale } from './i18n.js';
 
 // Only a real token goes into API paths (a crafted "/s/%2e%2e" would otherwise point them elsewhere).
 const rawToken = location.pathname.split('/')[2] ?? '';
@@ -214,5 +214,4 @@ async function start() {
   }
 }
 
-await setLanguage(storedLanguage());
 start();

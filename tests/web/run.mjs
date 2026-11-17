@@ -409,50 +409,14 @@ console.log('== findings of the 1.19 review');
   await scrollAll();
   check('and the rest of it can still be scrolled to', (await page.locator('.file-row').count()) === 650, await page.locator('.file-row').count());
 
-  // Contacts take .vcf drops themselves: no "Open a folder" strip there.
-  await page.goto(`${BASE}/contacts`); await page.waitForSelector('.contacts-view');
-  const cv = await page.locator('.contacts-view').boundingBox();
-  await drag('dragEnter', cv.x + 200, cv.y + 100, [path.join(dir, 'receipt.txt')]);
-  await drag('dragOver', cv.x + 200, cv.y + 100, [path.join(dir, 'receipt.txt')]);
-  await drag('dragOver', cv.x + 201, cv.y + 100, [path.join(dir, 'receipt.txt')]);
-  await sleep(200);
-  check('dragging onto Contacts shows its own drop area, not the files strip', !(await page.locator('#drop-strip').isVisible()) && (await page.locator('.contacts-view.dragging').count()) === 1);
-  await drag('dragCancel', cv.x + 201, cv.y + 100, [path.join(dir, 'receipt.txt')]);
-
-  // Tablets in portrait: calendar, contacts and settings fit beside the sidebar.
+  // Tablets in portrait: settings fit beside the sidebar.
   await page.setViewportSize({ width: 800, height: 1000 });
-  for (const where of ['/calendar', '/contacts', '/settings']) {
+  for (const where of ['/settings']) {
     await page.goto(BASE + where); await sleep(900);
     const w = await page.evaluate(() => document.documentElement.scrollWidth);
     check(`${where} fits an 800 px tablet`, w <= 800, w);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-}
-
-console.log('== contacts: unsaved changes');
-{
-  await page.goto(`${BASE}/`); await page.waitForSelector('.file-row');
-  await page.locator('.sidebar a[data-view="contacts"]').click(); await page.waitForSelector('.contacts-view');
-  await page.getByRole('button', { name: 'New contact' }).click();
-  const field = page.locator('.contacts-view form input[type=text], .contacts-view form input:not([type])').first();
-  await field.fill('Half typed');
-  // The same page again (its sidebar link): asks; Cancel keeps the text.
-  await page.locator('.sidebar a[data-view="contacts"]').click();
-  const asked1 = await page.waitForSelector('dialog.modal[open]', { timeout: 3000 }).then(() => true, () => false);
-  if (asked1) await page.locator('dialog.modal[open]').getByRole('button', { name: 'Cancel' }).click();
-  await sleep(300);
-  check('clicking Contacts again with a half-typed contact asks first; Cancel keeps it', asked1 && (await field.inputValue()) === 'Half typed');
-  // Back: asks too; staying keeps the text and the address.
-  await page.evaluate(() => history.back());
-  const asked2 = await page.waitForSelector('dialog.modal[open]', { timeout: 3000 }).then(() => true, () => false);
-  if (asked2) await page.locator('dialog.modal[open]').getByRole('button', { name: 'Cancel' }).click();
-  await sleep(400);
-  check('Back with a half-typed contact asks first; Cancel keeps it and the address',
-    asked2 && (await field.inputValue().catch(() => '')) === 'Half typed' && new URL(page.url()).pathname === '/contacts', page.url());
-  // Leaving for real.
-  await page.locator('.sidebar a[data-view="files"]').click();
-  await page.locator('dialog.modal[open]').getByRole('button', { name: 'Discard' }).click();
-  await page.waitForSelector('.files-view');
 }
 
 console.log('== phone');
@@ -549,15 +513,6 @@ console.log('== invitations');
   check('a used invitation leaves the list', (await ap.locator('.invites li', { hasText: address }).count()) === 0);
   await Promise.all([guest.close(), again.close(), adminCtx.close()]);
   await admin('DELETE', `/api/admin/users/${invited}`);
-}
-
-console.log('== right to left');
-{
-  await api('PATCH', '/api/me', { language: 'ar' });
-  await page.goto(`${BASE}/settings/apps`); await page.waitForSelector('code');
-  const dir = await page.locator('.url-row code').first().getAttribute('dir');
-  check('addresses read left to right in Arabic', dir === 'ltr', dir);
-  await api('PATCH', '/api/me', { language: null });
 }
 
 check('no errors in the page', errors.length === 0, errors);

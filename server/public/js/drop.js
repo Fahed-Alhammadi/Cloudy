@@ -1,7 +1,7 @@
 // Files dragged in from the computer. One handler for the whole window, so a drop never falls through to the browser
 // (which opens the file in the tab and leaves the app). While dragging, a strip under the top bar says where the files
 // will go: the folder on screen, or the folder under the pointer, which lights up. The strip itself is the sure target
-// for "this folder". Views that take no files (Recent, Calendar…) say so and ignore the drop.
+// for "this folder". Views that take no files (Recent…) say so and ignore the drop.
 import { h, icon, showError, topDialog } from './ui.js';
 import { filesFromDrop } from './upload.js';
 import { t } from './i18n.js';
@@ -38,7 +38,7 @@ function end() {
 
 function onDrag(e) {
   if (!draggingFiles(e)) return;
-  // The contacts page takes its own .vcf drops (it cancels the event first): no strip then.
+  // A page that takes the drop itself cancels the event first: no strip then.
   if (e.defaultPrevented) return void end();
   e.preventDefault();
   clearTimeout(watch);

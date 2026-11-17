@@ -2,7 +2,6 @@ package io.cloudy.app.ui
 
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,7 +21,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.PhoneAndroid
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,10 +54,9 @@ import io.cloudy.app.Services
 import io.cloudy.app.data.ApiException
 import io.cloudy.app.data.AppLock
 import io.cloudy.app.data.AppPassword
-import io.cloudy.app.data.Lang
 import kotlinx.coroutines.launch
 
-/** The activity behind a Compose context (needed for the biometric prompt and the language switch). */
+/** The activity behind a Compose context (needed for the biometric prompt). */
 tailrec fun Context.findActivity(): FragmentActivity? = when (this) {
     is FragmentActivity -> this
     is ContextWrapper -> baseContext.findActivity()
@@ -84,46 +80,6 @@ fun LockScreen() {
             }
         }
     }
-}
-
-/**
- * Picks the app language (or the phone's). The choice is also saved to the account so Cloudy on the web
- * and its emails use it; the screen restarts in the new language.
- */
-@Composable
-fun LanguageDialog(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val activity = context.findActivity()
-    val current = remember { Lang.current(context) }
-    fun choose(code: String?) {
-        onDismiss()
-        if (code == current || activity == null) return
-        val userId = Services.session.user.value?.id
-        if (userId != null) {
-            Lang.savedToAccount(context, userId, code)
-            // App scope: the activity is about to restart.
-            Services.appScope.launch { runCatching { Services.api.setLanguage(code) } }
-        }
-        Lang.apply(activity, code)
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.language)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                @Composable
-                fun Option(code: String?, label: String) =
-                    ListItem(modifier = Modifier.clickable { choose(code) },
-                        leadingContent = { RadioButton(selected = current == code, onClick = { choose(code) }) },
-                        headlineContent = { Text(label) })
-                Option(null, stringResource(R.string.language_system))
-                Lang.CODES.forEach { Option(it, Lang.NAMES.getValue(it)) }
-                Text(stringResource(R.string.language_note), Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
 }
 
 /**

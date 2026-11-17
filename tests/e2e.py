@@ -97,18 +97,11 @@ if len(admins) == 1:
     s, err = admin.req('POST', '/api/me/delete', {'password': ADMIN_PW})
     check('only administrator cannot delete own account', s == 409 and admin.req('GET', '/api/me')[0] == 200, err)
 
-print('== language')
-check('language defaults to automatic', me.get('language') is None, me.get('language'))
-s, _ = admin.req('PATCH', '/api/me', {'language': 'ar'})
+print('== language (removed in 2.0)')
+check('/api/me has no language field', 'language' not in me, me.get('language'))
+s, _ = admin.req('PATCH', '/api/me', {'language': 'de'})
 s2, me_l = admin.req('GET', '/api/me')
-check('language saved', s == 204 and me_l.get('language') == 'ar', me_l.get('language'))
-s, _ = admin.req('PATCH', '/api/me', {'language': 'xx'})
-check('unsupported language rejected', s == 400)
-s, _ = admin.req('PATCH', '/api/me', {'language': None})
-s2, me_l = admin.req('GET', '/api/me')
-check('language back to automatic', me_l.get('language') is None)
-s, body = admin.req('GET', '/i18n/ar.json')
-check('web translations served', s == 200 and body.get('Log in') == 'تسجيل الدخول')
+check('PATCH /api/me {language} is ignored (no language field)', s == 204 and s2 == 200 and 'language' not in me_l, (s, me_l.get('language')))
 
 print('== users & groups')
 bob = 'bob' + uuid.uuid4().hex[:6]
@@ -544,114 +537,20 @@ s, _ = dav.req('DELETE', f'/dav/files/{ADMIN}/{top}/moved.txt')
 check('DELETE', s == 204)
 s, _ = dav.req('PROPFIND', f'/dav/files/{bob}/', headers={'Depth': '0'})
 check('cannot access other user DAV', s == 403)
-s, _, hd = dav.req('OPTIONS', '/dav/', raw=True)
-check('OPTIONS advertises DAV classes', 'calendar-access' in (hd['DAV'] or ''))
+s, _, hd = dav.req('OPTIONS', f'/dav/files/{ADMIN}/', raw=True)
+dav_h, allow = hd.get('DAV') or '', hd.get('Allow') or ''
+check('OPTIONS on files: DAV class 1, PROPFIND and MOVE, no MKCALENDAR', s == 200 and '1' in dav_h and 'calendar-access' not in dav_h
+      and 'addressbook' not in dav_h and 'PROPFIND' in allow and 'MOVE' in allow and 'MKCALENDAR' not in allow, (s, dav_h, allow))
 
-print('== CalDAV')
-s, xml = dav.req('PROPFIND', '/dav/', '<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>', headers={'Depth': '0'})
-check('current-user-principal', f'/dav/principals/{ADMIN}/' in xml, xml)
-s, xml = dav.req('PROPFIND', f'/dav/principals/{ADMIN}/', '<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="urn:ietf:params:xml:ns:carddav"><d:prop><c:calendar-home-set/><a:addressbook-home-set/></d:prop></d:propfind>', headers={'Depth': '0'})
-check('home sets', f'/dav/calendars/{ADMIN}/' in xml and f'/dav/addressbooks/{ADMIN}/' in xml, xml)
-s, xml = dav.req('PROPFIND', f'/dav/calendars/{ADMIN}/', headers={'Depth': '1'})
-check('calendar home lists personal', s == 207 and '/personal/' in xml and 'cal:calendar' in xml, xml[:400])
-s, _ = dav.req('MKCALENDAR', f'/dav/calendars/{ADMIN}/work-{top}/', '<c:mkcalendar xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:set><d:prop><d:displayname>Work</d:displayname></d:prop></d:set></c:mkcalendar>')
-check('MKCALENDAR', s == 201)
-s, xml = dav.req('PROPFIND', f'/dav/calendars/{ADMIN}/personal/', '<d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>', headers={'Depth': '0'})
-tok0 = re.search(r'<d:sync-token>([^<]+)</d:sync-token>', xml).group(1)
-uid = str(uuid.uuid4())
-ics = f"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20261001T000000Z\r\nDTSTART:20261020T100000Z\r\nDTEND:20261020T110000Z\r\nSUMMARY:Weekly sync\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-s, _, hd = dav.req('PUT', f'/dav/calendars/{ADMIN}/personal/{uid}.ics', ics, headers={'Content-Type': 'text/calendar', 'If-None-Match': '*'}, raw=True)
-check('PUT event', s == 201 and hd['ETag'])
-s, _ = dav.req('PUT', f'/dav/calendars/{ADMIN}/personal/{uid}.ics', ics, headers={'If-None-Match': '*'})
-check('If-None-Match:* on existing -> 412', s == 412)
-s, _ = dav.req('PUT', f'/dav/calendars/{ADMIN}/personal/bad.ics', 'not ical')
-check('invalid iCalendar rejected', s == 400)
-q = '<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="20261101T000000Z" end="20261201T000000Z"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>'
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', q, headers={'Depth': '1'})
-check('calendar-query time-range hits recurring event', s == 207 and 'Weekly sync' in xml, xml[:300])
-q2 = q.replace('20261101', '20270101').replace('20261201', '20270201')
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', q2, headers={'Depth': '1'})
-check('calendar-query excludes out-of-range', s == 207 and 'Weekly sync' not in xml)
-mg = f'<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><d:href>/dav/calendars/{ADMIN}/personal/{uid}.ics</d:href><d:href>/dav/calendars/{ADMIN}/personal/missing.ics</d:href></c:calendar-multiget>'
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', mg)
-check('calendar-multiget', 'BEGIN:VCALENDAR' in xml and '404' in xml)
-sc = f'<d:sync-collection xmlns:d="DAV:"><d:sync-token>{tok0}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>'
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', sc)
-check('sync-collection reports new item', s == 207 and f'{uid}.ics' in xml, xml)
-tok1 = re.search(r'<d:sync-token>([^<]+)</d:sync-token>', xml).group(1)
-s, events = admin.req('GET', '/api/calendars')
-personal = next(c for c in events if c['uri'] == 'personal')
-s, evs = admin.req('GET', f"/api/calendars/{personal['id']}/events?start=2026-10-01T00:00:00Z&end=2026-12-01T00:00:00Z")
-check('JSON API expands 4 occurrences', s == 200 and len([e for e in evs if e['uid'] == uid]) == 4, len(evs))
-s, r = admin.req('POST', f"/api/calendars/{personal['id']}/events", {'summary': 'All day thing', 'allDay': True, 'start': '2026-10-22', 'end': '2026-10-23'})
-check('create event via JSON', s == 201, r)
-s, evs = admin.req('GET', f"/api/calendars/{personal['id']}/events?start=2026-10-01T00:00:00Z&end=2026-11-01T00:00:00Z")
-ad = next((e for e in evs if e['summary'] == 'All day thing'), None)
-check('all-day event round-trip', ad and ad['allDay'] and ad['start'] == '2026-10-22', ad)
-s, _ = admin.req('PUT', f"/api/calendars/{personal['id']}/events/{ad['uri']}", {'summary': 'Renamed', 'allDay': False, 'start': '2026-10-22T09:00:00Z', 'end': '2026-10-22T10:00:00Z', 'rrule': 'DAILY'})
-s, body, _h = dav.req('GET', f"/dav/calendars/{ADMIN}/personal/{ad['uri']}", raw=True)
-check('JSON edit visible over CalDAV', b'SUMMARY:Renamed' in body and b'RRULE:FREQ=DAILY' in body, body)
-dav.req('DELETE', f'/dav/calendars/{ADMIN}/personal/{uid}.ics')
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', sc.replace(tok0, tok1))
-check('sync-collection reports deletion', f'{uid}.ics' in xml and '404' in xml, xml)
-s, xml = dav.req('REPORT', f'/dav/calendars/{ADMIN}/personal/', sc.replace(tok0, 'http://cloudy.local/sync/999999'))
-check('invalid sync token -> 403', s == 403 and 'valid-sync-token' in xml)
-
-print('== CardDAV')
-cuid = str(uuid.uuid4())
-vcf = f'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{cuid}\r\nFN:Ada Lovelace\r\nN:Lovelace;Ada;;;\r\nEMAIL:ada@example.com\r\nTEL:+44 20 1234\r\nEND:VCARD\r\n'
-s, _ = dav.req('PUT', f'/dav/addressbooks/{ADMIN}/contacts/{cuid}.vcf', vcf, headers={'Content-Type': 'text/vcard'})
-check('PUT vCard', s == 201)
-s, xml = dav.req('REPORT', f'/dav/addressbooks/{ADMIN}/contacts/', '<a:addressbook-query xmlns:d="DAV:" xmlns:a="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><a:address-data/></d:prop></a:addressbook-query>', headers={'Depth': '1'})
-check('addressbook-query', 'Ada Lovelace' in xml)
-s, books = admin.req('GET', '/api/addressbooks')
-bk = next(b for b in books if b['uri'] == 'contacts')
-s, cts = admin.req('GET', f"/api/addressbooks/{bk['id']}/contacts")
-ada = next((c for c in cts if c['uid'] == cuid), None)
-check('JSON contact parsed', ada and ada['givenName'] == 'Ada' and ada['emails'] == ['ada@example.com'], ada)
-s, c2 = admin.req('POST', f"/api/addressbooks/{bk['id']}/contacts", {'givenName': 'Grace', 'familyName': 'Hopper', 'emails': ['grace@navy.mil'], 'phones': ['555'], 'org': 'US Navy', 'birthday': '1906-12-09', 'address': '1 Main St'})
-check('create contact via JSON', s == 201 and c2['fn'] == 'Grace Hopper' and c2['org'] == 'US Navy', c2)
-s, body, _h = dav.req('GET', f"/dav/addressbooks/{ADMIN}/contacts/{c2['uri']}", raw=True)
-check('JSON contact is valid vCard 3.0', b'VERSION:3.0' in body and b'N:Hopper;Grace' in body and b'EMAIL' in body, body)
-s, c3 = admin.req('PUT', f"/api/addressbooks/{bk['id']}/contacts/{c2['uri']}", {**c2, 'title': 'Rear Admiral'})
-check('update contact', s == 200 and c3['title'] == 'Rear Admiral', c3)
-
-print('== contacts import / export')
-s, books = admin.req('GET', '/api/addressbooks')
-book = next((b for b in books), None) or admin.req('POST', '/api/addressbooks', {'name': 'Contacts'})[1]
-s, ib = admin.req('POST', '/api/addressbooks', {'name': 'Import test'})
-bid = ib['id']
-v21 = ('BEGIN:VCARD\r\nVERSION:2.1\r\nN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:=D8=B9=D9=84=D9=8A;;;;\r\n'
-       'FN;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:=D8=B9=D9=84=D9=8A\r\nTEL;CELL:+971 50 000 0001\r\nEND:VCARD\r\n'
-       'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:e2e-uid-1\r\nFN:Jane Doe\r\nN:Doe;Jane;;;\r\nEMAIL:jane@example.com\r\nEND:VCARD\r\n'
-       'BEGIN:VCARD\r\nVERSION:2.1\r\nEND:VCARD\r\n').encode()
-oct_h = {'Content-Type': 'application/octet-stream'}
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', v21, headers=oct_h)
-check('import vCard 2.1 + 3.0', s == 200 and r['imported'] == 2 and r['skipped'] == 1, r)
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', v21, headers=oct_h)
-check('re-import adds no duplicates', s == 200 and r['imported'] == 0 and r['updated'] == 1 and r['duplicates'] == 1, r)
-upd = v21.replace(b'EMAIL:jane@example.com', b'EMAIL:jane@new.example')
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', upd, headers=oct_h)
-s, cs = admin.req('GET', f'/api/addressbooks/{bid}/contacts')
-names = sorted(c['fn'] for c in cs)
-check('imported contacts readable (Arabic name, updated by UID)', names == sorted(['علي', 'Jane Doe']) and any(c['emails'] == ['jane@new.example'] for c in cs), cs)
-csv = ('﻿First Name,Last Name,E-mail 1 - Value,Phone 1 - Value,Organization Name\n'
-       'Omar,Saleh,omar@example.com ::: o.saleh@example.com,+971500000002,ACME\n'
-       'Jane,Doe,jane@new.example,,\n').encode()
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', csv, headers=oct_h)
-check('import Google CSV (existing person skipped)', s == 200 and r['format'] == 'csv' and r['imported'] == 1 and r['duplicates'] == 1, r)
-s, cs = admin.req('GET', f'/api/addressbooks/{bid}/contacts')
-omar = next((c for c in cs if c['fn'] == 'Omar Saleh'), {})
-check('CSV fields mapped', len(omar.get('emails', [])) == 2 and omar.get('org') == 'ACME' and omar.get('phones') == ['+971500000002'], omar)
-s, body, hd = admin.req('GET', f'/api/addressbooks/{bid}/export', raw=True)
-check('export all as .vcf', s == 200 and body.count(b'BEGIN:VCARD') == 3 and 'vcard' in hd.get('Content-Type', ''), body[:200])
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', b'foo,bar\n1,2\n', headers=oct_h)
-check('unrecognized file rejected with a message', s == 400 and 'columns' in r.get('error', ''), r)
-s, r = admin.req('POST', f'/api/addressbooks/{bid}/import', body, headers=oct_h)
-check('importing own export changes nothing new', s == 200 and r['imported'] == 0, r)
-s, _ = bobc.req('POST', f'/api/addressbooks/{bid}/import', v21, headers=oct_h)
-check("cannot import into someone else's address book", s == 404)
-admin.req('DELETE', f'/api/addressbooks/{bid}')
+print('== calendars and contacts removed (2.0)')
+s, _ = admin.req('GET', '/api/calendars')
+check('GET /api/calendars is 404', s == 404, s)
+s, _ = admin.req('GET', '/api/addressbooks')
+check('GET /api/addressbooks is 404', s == 404, s)
+s, _ = dav.req('PROPFIND', f'/dav/calendars/{ADMIN}/', headers={'Depth': '0'})
+check('no CalDAV: PROPFIND /dav/calendars/<user>/ is 4xx', 400 <= s < 500, s)
+s, _ = dav.req('PROPFIND', f'/dav/addressbooks/{ADMIN}/', headers={'Depth': '0'})
+check('no CardDAV: PROPFIND /dav/addressbooks/<user>/ is 4xx', 400 <= s < 500, s)
 
 print('== mobile token auth')
 mob = Client()
@@ -681,13 +580,6 @@ check('server-side APK publishing removed', s == 404)
 
 s, _ = admin.req('GET', '/api/diagnostics')
 check('connection diagnostics endpoint removed', s == 404)
-noredir2 = urllib.request.build_opener(type('NoRedirect2', (urllib.request.HTTPRedirectHandler,), {'redirect_request': lambda *a: None}))
-for kind in ('caldav', 'carddav'):
-    try:
-        r = noredir2.open(BASE + f'/.well-known/{kind}'); s, loc = r.status, r.headers.get('Location')
-    except urllib.error.HTTPError as e:
-        s, loc = e.code, e.headers.get('Location')
-    check(f'/.well-known/{kind} redirects to /dav/', s in (301, 302) and loc.rstrip('/').endswith('/dav'), (s, loc))
 
 print('== email (SMTP)')
 mails = []
@@ -768,13 +660,6 @@ else:
     s, _ = Client().req('POST', '/api/login', {'user': dave, 'password': 'dave-new-pass-1'})
     check('login with new password', s == 200)
     check('password-changed notice emailed', got(lambda m: m['to'] == [f'{dave}@example.com'] and 'password was changed' in m['subject']), mails)
-    # Emails use the recipient's language.
-    dave2 = Client(); dave2.req('POST', '/api/login', {'user': dave, 'password': 'dave-new-pass-1'})
-    dave2.req('PATCH', '/api/me', {'language': 'de', 'notifyShares': True})
-    s, f4 = admin.req('POST', f'/api/nodes/{root}/folders', {'name': 'de-' + uuid.uuid4().hex[:6]})
-    admin.req('POST', f"/api/nodes/{f4['id']}/shares", {'type': 'user', 'shareWith': dave})
-    check('share email in the recipient\'s language', got(lambda m: f4['name'] in m['subject'] and 'mit dir geteilt' in m['subject']), mails)
-    admin.req('DELETE', f"/api/nodes/{f4['id']}")
     # invitations: emailed at once, so the administrator learns about a failure
     ina = f'ina-{uuid.uuid4().hex[:6]}@example.com'
     s, iv = admin.req('POST', '/api/admin/invitations', {'email': ina, 'displayName': 'Ina', 'send': True})
@@ -803,7 +688,7 @@ check('without email set up, an invitation is a link to pass on', s == 201 and i
 admin.req('DELETE', f"/api/admin/invitations/{iv.get('id')}")
 
 # (before the 2FA section: its deliberate failures use up the per-address login limit, and DAV checks it again)
-print('== review 2026-11-04 (races, DAV, recurrence guard, account safety)')
+print('== review 2026-11-04 (races, DAV, account safety)')
 import threading
 def par(*fns):
     out = [None] * len(fns)
@@ -852,28 +737,7 @@ s, _ = dav.req('MOVE', f'/dav/files/{ADMIN}/{rvname}/m')
 check('DAV MOVE without Destination is 400', s == 400)
 s, _ = dav.req('PUT', f'/dav/files/{ADMIN}/{rvname}/trailing%20', 'x')
 check('DAV PUT with a bad name is 400', s == 400)
-# recurrence that never produces a second date (used to freeze the server)
-s, cals = admin.req('GET', '/api/calendars')
-cal_uri = cals[0]['uri']
-bad_ics = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//t//EN\r\nBEGIN:VEVENT\r\nUID:loop-' + uuid.uuid4().hex + '\r\nDTSTAMP:20260101T000000Z\r\n'
-           'DTSTART:20260101T100000Z\r\nDTEND:20260101T110000Z\r\nRRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30;COUNT=2\r\nSUMMARY:loop\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
-t0 = time.time()
-s, _ = dav.req('PUT', f'/dav/calendars/{ADMIN}/{cal_uri}/loop-{uuid.uuid4().hex[:6]}.ics', bad_ics, headers={'Content-Type': 'text/calendar'})
-check('endless RRULE rejected quickly', s == 400 and time.time() - t0 < 10, (s, time.time() - t0))
-s, _ = admin.req('GET', '/status')
-check('server still answers after it', s == 200)
-# a year-less birthday (as phones store it) survives a save from the apps
-s, books = admin.req('GET', '/api/addressbooks')
-bkid = books[0]['id']; buid = 'bday-' + uuid.uuid4().hex[:8]
-dav.req('PUT', f"/dav/addressbooks/{ADMIN}/{books[0]['uri']}/{buid}.vcf", f'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{buid}\r\nFN:Bday Test\r\nN:Test;Bday;;;\r\nBDAY:--04-15\r\nEND:VCARD\r\n', headers={'Content-Type': 'text/vcard'})
-s, cts = admin.req('GET', f'/api/addressbooks/{bkid}/contacts')
-bc = next(c for c in cts if c['uid'] == buid)
-s, saved = admin.req('PUT', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}", {**bc, 'note': 'edited'})
-check('unchanged year-less birthday kept on save', s == 200 and saved['birthday'] == '--04-15' and saved['note'] == 'edited', saved)
-s, saved = admin.req('PUT', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}", {**bc, 'birthday': ''})
-check('empty birthday still clears it', s == 200 and saved['birthday'] == '', saved)
-admin.req('DELETE', f"/api/addressbooks/{bkid}/contacts/{bc['uri']}")
-# email change needs the password; same email / language only do not
+# email change needs the password; the same email does not
 s, me0 = admin.req('GET', '/api/me')
 s, _ = admin.req('PATCH', '/api/me', {'email': me0['email'], 'displayName': me0['displayName']})
 check('profile save with unchanged email needs no password', s == 204)
@@ -1132,45 +996,12 @@ s, _ = d19.req('PUT', f'{fpath}/doc.txt', b'x', headers={'If-Match': '"stale"'})
 check('If-Match with an old version is 412', s == 412, s)
 s, _ = d19.req('PROPFIND', f'/dav/files/{ADMIN}/', headers={'Depth': 'infinity'})
 check('PROPFIND Depth: infinity is refused (403)', s == 403, s)
-# time zones: a weekly 09:00 meeting in Berlin stays at 09:00 across the clock change
-s, cals = admin.req('GET', '/api/calendars')
-cal = cals[0]['id']
-s, ev = admin.req('POST', f'/api/calendars/{cal}/events', {'summary': 'Weekly sync', 'start': '2027-03-15T08:00:00.000Z', 'end': '2027-03-15T09:00:00.000Z', 'rrule': 'WEEKLY', 'tz': 'Europe/Berlin'})
-s, occ = admin.req('GET', f'/api/calendars/{cal}/events?start=2027-03-14T00:00:00Z&end=2027-04-12T00:00:00Z')
-starts = [o['start'] for o in occ if o['uri'] == ev['uri']]
-check('weekly event keeps 09:00 Berlin after the clock change', starts[:2] == ['2027-03-15T08:00:00.000Z', '2027-03-22T08:00:00.000Z'] and starts[2] == '2027-03-29T07:00:00.000Z', starts)
-s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev['uri']}")
-check('the event is stored with its time zone', 'DTSTART;TZID=Europe/Berlin:20270315T090000' in raw and 'BEGIN:VTIMEZONE' in raw, raw[:400])
-s, _ = admin.req('PUT', f"/api/calendars/{cal}/events/{ev['uri']}", {'summary': 'Weekly sync (renamed)', 'start': '2027-03-15T08:00:00.000Z', 'end': '2027-03-15T09:00:00.000Z', 'rrule': 'WEEKLY'})
-s, raw2 = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev['uri']}")
-check('an edit of the title leaves the times as they were', 'DTSTART;TZID=Europe/Berlin:20270315T090000' in raw2 and 'renamed' in raw2, raw2[:400])
-check('timestamps are UTC', re.search(r'DTSTAMP:\d{8}T\d{6}Z', raw2) is not None, raw2[:400])
-admin.req('PATCH', '/api/me', {'timezone': 'America/New_York'})
-s, ev2 = admin.req('POST', f'/api/calendars/{cal}/events', {'summary': 'Standup', 'start': '2027-03-01T14:00:00.000Z', 'end': '2027-03-01T14:15:00.000Z', 'rrule': 'DAILY'})
-s, raw3 = d19.req('GET', f"/dav/calendars/{ADMIN}/{cals[0]['uri']}/{ev2['uri']}")
-check('without a zone from the client, the account zone is used', 'TZID=America/New_York' in raw3, raw3[:300])
+# the account time zone (link expiry uses it); an unknown zone is refused
+s, _ = admin.req('PATCH', '/api/me', {'timezone': 'America/New_York'})
+check('the account time zone is saved', s == 204 and admin.req('GET', '/api/me')[1].get('timezone') == 'America/New_York', s)
 s, _ = admin.req('PATCH', '/api/me', {'timezone': 'Not/AZone'})
 check('an unknown time zone is refused', s == 400, s)
 admin.req('PATCH', '/api/me', {'timezone': None})
-admin.req('DELETE', f"/api/calendars/{cal}/events/{ev['uri']}"); admin.req('DELETE', f"/api/calendars/{cal}/events/{ev2['uri']}")
-# contacts keep what the form does not show
-s, books = admin.req('GET', '/api/addressbooks')
-book = books[0]
-vc = ('BEGIN:VCARD\r\nVERSION:3.0\r\nUID:e2e-keep\r\nFN:Anna Meier\r\nN:Meier;Anna;Maria;Dr.;PhD\r\nTEL;TYPE=CELL:+49 170 1\r\n'
-      'TEL;TYPE=WORK:+49 30 2\r\nitem1.TEL:+49 40 3\r\nitem1.X-ABLABEL:Studio\r\nEMAIL;TYPE=WORK:anna@example.de\r\nORG:Acme;Engineering\r\n'
-      'ADR;TYPE=HOME:;;Hauptstr. 1;Berlin;;10115;Germany\r\nADR;TYPE=WORK:;;Werkstr. 2;Berlin;;10117;Germany\r\nNOTE:old\r\nEND:VCARD\r\n')
-d19.req('PUT', f"/dav/addressbooks/{ADMIN}/{book['uri']}/e2e-keep.vcf", vc, headers={'Content-Type': 'text/vcard'})
-s, cs = admin.req('GET', f"/api/addressbooks/{book['id']}/contacts")
-anna = next(c for c in cs if c['fn'] == 'Anna Meier')
-s, _ = admin.req('PUT', f"/api/addressbooks/{book['id']}/contacts/{anna['uri']}", {**anna, 'note': 'new note'})
-s, after = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{book['uri']}/e2e-keep.vcf")
-keep = ['N:Meier;Anna;Maria;Dr.;PhD', 'TEL;TYPE=CELL:+49 170 1', 'ITEM1.X-ABLABEL:Studio', 'ORG:Acme;Engineering', 'ADR;TYPE=WORK:;;Werkstr. 2', 'NOTE:new note']
-# (vCard group names ignore case: ical.js writes item1 as ITEM1)
-check('saving a contact keeps names, labels, department and other addresses', all(k.upper() in after.upper() for k in keep), [k for k in keep if k.upper() not in after.upper()])
-s, ph = admin.req('POST', f"/api/addressbooks/{book['id']}/contacts", {'phones': ['+971 4 555 0100']})
-check('a contact with only a phone number can be saved', s == 201, (s, ph))
-admin.req('DELETE', f"/api/addressbooks/{book['id']}/contacts/{anna['uri']}")
-if s == 201: admin.req('DELETE', f"/api/addressbooks/{book['id']}/contacts/{ph['uri']}")
 # links
 s, l2 = admin.req('POST', f"/api/nodes/{F19}/shares", {'type': 'link', 'password': 'abc'})
 check('a link password of 3 characters is refused', s == 400, s)
@@ -1230,79 +1061,12 @@ if me19.get('thumbnails'):
     check('a PDF gets a thumbnail of its first page, at most 480 px', bool(dims) and max(dims) <= 480 and min(dims) > 100, (s, hdp.get('Content-Type'), dims))
 else:
     check('no image tool: thumbnails answer 404', s == 404, s)
-# events near a clock change keep their local time (they were stored an hour off), the VTIMEZONE comes first
-s, cals2 = admin.req('GET', '/api/calendars')
-c19 = cals2[0]
-for label, tz, st, en, want in [
-    ('Los Angeles, Saturday evening before the spring change', 'America/Los_Angeles', '2027-03-14T03:00:00.000Z', '2027-03-14T05:00:00.000Z', '20270313T190000'),
-    ('New York, Saturday evening before the autumn change', 'America/New_York', '2027-11-07T01:00:00.000Z', '2027-11-07T03:00:00.000Z', '20271106T210000'),
-    ('Sydney, Sunday morning of the change', 'Australia/Sydney', '2027-04-03T23:00:00.000Z', '2027-04-04T00:00:00.000Z', '20270404T090000'),
-]:
-    s, ev = admin.req('POST', f"/api/calendars/{c19['id']}/events", {'summary': label, 'start': st, 'end': en, 'rrule': 'WEEKLY', 'tz': tz})
-    s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{ev['uri']}")
-    s, occ = admin.req('GET', f"/api/calendars/{c19['id']}/events?start={st[:10]}T00:00:00Z&end={st[:8]}28T00:00:00Z")
-    first = next((o['start'] for o in occ if o['uri'] == ev['uri']), None)
-    check(f'{label}: stored at its local time', f'DTSTART;TZID={tz}:{want}' in raw and raw.index('BEGIN:VTIMEZONE') < raw.index('BEGIN:VEVENT')
-          and bool(first) and first.startswith(st[:16]), ([l for l in raw.split('\r\n') if l.startswith('DTSTART')], first))
-    admin.req('DELETE', f"/api/calendars/{c19['id']}/events/{ev['uri']}")
-# the same for a zone known only from the event's own VTIMEZONE (Outlook's names), edited near its clock changes
-for tzid, rules, cases in [
-    ('Pacific Standard Time', ('-0700', '-0800', '1SU', '11', '-0800', '-0700', '2SU', '3'),
-     [('2027-03-14T09:30:00.000Z', '20270314T013000'), ('2027-03-14T11:30:00.000Z', '20270314T043000'), ('2027-07-01T16:00:00.000Z', '20270701T090000')]),
-    ('AUS Eastern Standard Time', ('+1100', '+1000', '1SU', '4', '+1000', '+1100', '1SU', '10'),
-     [('2027-04-03T15:30:00.000Z', '20270404T023000'), ('2027-10-02T16:30:00.000Z', '20271003T033000')]),
-]:
-    sf, st_, sday, smon, df, dt_, dday, dmon = rules
-    vtz = (f'BEGIN:VTIMEZONE\r\nTZID:{tzid}\r\nBEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:{sf}\r\nTZOFFSETTO:{st_}\r\n'
-           f'RRULE:FREQ=YEARLY;BYDAY={sday};BYMONTH={smon}\r\nEND:STANDARD\r\nBEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\n'
-           f'TZOFFSETFROM:{df}\r\nTZOFFSETTO:{dt_}\r\nRRULE:FREQ=YEARLY;BYDAY={dday};BYMONTH={dmon}\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n')
-    for i, (start, want) in enumerate(cases):
-        uid = f'e2e-outlook-{tzid[:3]}-{i}'
-        ics = (f'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//e2e//EN\r\n{vtz}BEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20270101T000000Z\r\n'
-               f'DTSTART;TZID={tzid}:20270105T100000\r\nDTEND;TZID={tzid}:20270105T110000\r\nSUMMARY:t\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
-        d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics", ics, headers={'Content-Type': 'text/calendar'})
-        admin.req('PUT', f"/api/calendars/{c19['id']}/events/{uid}.ics", {'summary': 't', 'start': start, 'end': start[:11] + '23:59:00.000Z'})
-        s, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
-        got = next((l for l in raw.split('\r\n') if l.startswith('DTSTART;TZID=')), '')
-        check(f'{tzid} (its own VTIMEZONE), {start}: stored at its local time', got == f'DTSTART;TZID={tzid}:{want}', got)
-        d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
 # time zone names in their own spelling; a bare offset is no time zone
 admin.req('PATCH', '/api/me', {'timezone': 'europe/berlin'})
 check('a time zone is stored in its own spelling', admin.req('GET', '/api/me')[1].get('timezone') == 'Europe/Berlin')
 s, _ = admin.req('PATCH', '/api/me', {'timezone': '+05:30'})
 check('a bare offset is refused', s == 400, s)
 admin.req('PATCH', '/api/me', {'timezone': me19.get('timezone')})
-# contacts: a chosen display name stays, one number as home and as work stays twice, several given names stay
-s, cbook = admin.req('POST', '/api/addressbooks', {'name': 'e2e 1.19 contacts'})
-vc = ('BEGIN:VCARD\r\nVERSION:3.0\r\nUID:e2e-fn-119\r\nFN:Dr. Anna Maria Meier\r\nN:Meier;Anna,Maria;;Dr.;\r\n'
-      'TEL;TYPE=HOME:+1 555 0100\r\nTEL;TYPE=WORK:+1 555 0100\r\nEMAIL;TYPE=HOME:anna@example.com\r\nEMAIL;TYPE=WORK:anna@example.com\r\nEND:VCARD\r\n')
-s, _ = d19.req('PUT', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/e2e-fn-119.vcf", vc, headers={'Content-Type': 'text/vcard'})
-s, cts = admin.req('GET', f"/api/addressbooks/{cbook['id']}/contacts")
-anna2 = next((c for c in cts if c.get('uid') == 'e2e-fn-119'), None)
-if anna2:
-    body = {k: anna2.get(k) for k in ('givenName', 'familyName', 'emails', 'phones', 'org', 'title', 'address')}
-    s, _ = admin.req('PUT', f"/api/addressbooks/{cbook['id']}/contacts/{anna2['uri']}", {**body, 'note': 'only the note changed'})
-    s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{anna2['uri']}")
-    check('a chosen display name stays when the app sends none', 'FN:Dr. Anna Maria Meier' in raw, raw)
-    check('one number as home and as work stays twice', raw.count('+1 555 0100') == 2 and raw.count('anna@example.com') == 2, raw)
-    check('several given names stay as they were', 'Anna,Maria' in raw, raw)
-    s, _ = admin.req('PUT', f"/api/addressbooks/{cbook['id']}/contacts/{anna2['uri']}", {**body, 'familyName': 'Muster'})
-    s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{anna2['uri']}")
-    check('a new family name keeps the given names and rebuilds the display name', 'N:Muster;Anna,Maria;' in raw and 'FN:Anna Maria Muster\r\n' in raw, raw)
-else:
-    check('contact stored over CardDAV is listed', False, cts)
-# vCard 2.1 import: a folded photo keeps its data (the folding spaces went into it)
-photo = base64.b64encode(bytes(range(256)) * 3).decode()
-folded = '\r\n '.join(photo[i:i + 60] for i in range(0, len(photo), 60))
-v21p = f'BEGIN:VCARD\r\nVERSION:2.1\r\nN:Photo;Paula\r\nFN:Paula Photo\r\nPHOTO;ENCODING=BASE64;TYPE=JPEG:{folded}\r\n\r\nEND:VCARD\r\n'
-s, r = admin.req('POST', f"/api/addressbooks/{cbook['id']}/import", v21p.encode(), headers=oct_h)
-s, cts = admin.req('GET', f"/api/addressbooks/{cbook['id']}/contacts")
-paula = next((c for c in cts if 'Paula' in (c.get('fn') or '')), None)
-s, raw = d19.req('GET', f"/dav/addressbooks/{ADMIN}/{cbook['uri']}/{paula['uri']}") if paula else (0, '')
-unfolded = re.sub(r'\r\n[ \t]', '', raw)
-m = re.search(r'PHOTO[^:]*:([^\r\n]*)', unfolded)
-check('a vCard 2.1 photo is stored without the folding spaces', bool(m) and ' ' not in m.group(1) and base64.b64decode(m.group(1)) == bytes(range(256)) * 3, (s, unfolded[:300]))
-admin.req('DELETE', f"/api/addressbooks/{cbook['id']}")
 # saving text over a file renamed since it was opened: 412, no second file under the old name (here the etag check
 # answers; the same rule under the folder lock covers a rename while the text is on its way)
 s, ef = admin.req('POST', f'/api/nodes/{F19}/files', {'name': 'edit-me.txt', 'content': 'v1'})
@@ -1344,86 +1108,9 @@ s, lst = admin.req('GET', f'/api/nodes/{F19}/shares')
 check('a share names the person (display name)', any(x.get('shareWithName') == 'Bob' and x['shareWith'] == bob for x in lst), lst)
 s, out = admin.req('GET', '/api/shares/outgoing')
 check('so does "Shared by you"', any(x.get('shareWithName') == 'Bob' for x in out if x['nodeId'] == F19), [x.get('shareWithName') for x in out])
-# calendars and address books do not offer COPY or MOVE (they refuse them)
-s, _, hd = d19.req('OPTIONS', f'/dav/calendars/{ADMIN}/', raw=True)
-check('calendars do not advertise MOVE or COPY', s == 200 and 'MOVE' not in hd.get('Allow', '') and 'PROPFIND' in hd.get('Allow', ''), hd.get('Allow'))
 s, _, hd = d19.req('OPTIONS', f'/dav/files/{ADMIN}/', raw=True)
 check('files still do', 'MOVE' in hd.get('Allow', ''), hd.get('Allow'))
 admin.req('DELETE', f'/api/nodes/{F19}')
-
-print('== 1.19.1')
-import urllib.parse
-# Invitations to single meetings of a series kept elsewhere: an object holding changed occurrences only (one UID, no
-# series of its own). Each is listed under its own address, and an edit or delete reaches that meeting only (saving
-# one answered "Not an event").
-uid = 'e2e-invited-' + uuid.uuid4().hex[:8]
-occ = lambda u, day, title: (f'BEGIN:VEVENT\r\nUID:{u}\r\nRECURRENCE-ID:2027{day}T150000Z\r\nDTSTAMP:20270101T000000Z\r\n'
-                             f'DTSTART:2027{day}T150000Z\r\nDTEND:2027{day}T160000Z\r\nSUMMARY:{title}\r\nEND:VEVENT\r\n')
-cal = lambda body: f'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//e2e//EN\r\n{body}END:VCALENDAR\r\n'
-d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics", cal(occ(uid, '1104', 'Board (Nov)') + occ(uid, '1202', 'Board (Dec)')),
-        headers={'Content-Type': 'text/calendar'})
-evs = lambda: [e for e in admin.req('GET', f"/api/calendars/{c19['id']}/events?start=2027-11-01T00:00:00Z&end=2028-01-01T00:00:00Z")[1] if e['uid'] == uid]
-at = lambda u: f"/api/calendars/{c19['id']}/events/{urllib.parse.quote(u, safe='')}"
-listed = evs()
-check('each invited meeting has its own address', sorted(e['uri'] for e in listed) == [f'{uid}.ics#20271104T150000Z', f'{uid}.ics#20271202T150000Z'],
-      [e['uri'] for e in listed])
-nov = next((e for e in listed if e['summary'] == 'Board (Nov)'), {})
-dec = next((e for e in listed if e['summary'] == 'Board (Dec)'), {})
-s, _ = admin.req('PUT', at(dec.get('uri', '')), {'summary': 'Board (Dec) moved', 'start': '2027-12-02T16:00:00.000Z', 'end': '2027-12-02T17:00:00.000Z',
-                                                  'allDay': False, 'location': '', 'description': '', 'rrule': ''})
-moved = next((e for e in evs() if e['uri'] == dec.get('uri')), {})
-_, raw = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
-blocks = [b.split('END:VEVENT')[0] for b in raw.split('BEGIN:VEVENT')[1:]]
-nov_b = next((b for b in blocks if 'RECURRENCE-ID:20271104T150000Z' in b), '')
-check('editing one invited meeting changes that one only', s == 204 and moved.get('summary') == 'Board (Dec) moved'
-      and moved.get('start') == '2027-12-02T16:00:00.000Z' and len(blocks) == 2 and 'SUMMARY:Board (Nov)' in nov_b
-      and 'DTSTART:20271104T150000Z' in nov_b and not any('RRULE' in b for b in blocks), (s, moved, raw))
-s, e = admin.req('PUT', at(nov.get('uri', '')), {'summary': 'Board (Nov)', 'start': nov.get('start'), 'end': nov.get('end'), 'allDay': False, 'rrule': 'WEEKLY'})
-check('an invited meeting cannot repeat on its own', s == 400 and 'repeat' in (e or {}).get('error', ''), (s, e))
-s, _ = admin.req('PUT', at(f'{uid}.ics'), {'summary': 'x', 'start': nov.get('start'), 'end': nov.get('end')})
-check('the plain object address of two meetings names neither', s == 404, s)
-s, _ = admin.req('DELETE', at(nov.get('uri', '')))
-left = evs()
-check('deleting one invited meeting keeps the other', s == 204 and [x['summary'] for x in left] == ['Board (Dec) moved'], (s, [x['summary'] for x in left]))
-s, _ = admin.req('DELETE', at(left[0]['uri'] if left else f'{uid}.ics#none'))
-s2, _ = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid}.ics")
-check('deleting the last one removes the calendar object', s == 204 and s2 == 404, (s, s2))
-s, _ = admin.req('DELETE', at(f'{uid}.ics#20271104T150000Z'))
-check('a meeting that is gone is 404', s == 404, s)
-# 1.19.0 listed such a meeting under the object's own address: a meeting alone there is still found by it
-uid1 = 'e2e-invited1-' + uuid.uuid4().hex[:8]
-d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics", cal(occ(uid1, '1104', 'Alone')), headers={'Content-Type': 'text/calendar'})
-s, _ = admin.req('PUT', at(f'{uid1}.ics'), {'summary': 'Alone renamed', 'start': '2027-11-04T15:00:00.000Z', 'end': '2027-11-04T16:00:00.000Z'})
-_, raw1 = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics")
-check('a meeting alone is still found by the plain address', s == 204 and 'SUMMARY:Alone renamed' in raw1 and 'RECURRENCE-ID:20271104T150000Z' in raw1, (s, raw1))
-d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid1}.ics")
-# ...but a plain address of two meetings deletes neither (it deleted both)
-uid2 = 'e2e-invited2-' + uuid.uuid4().hex[:8]
-d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics", cal(occ(uid2, '1104', 'One') + occ(uid2, '1202', 'Two')), headers={'Content-Type': 'text/calendar'})
-s, _ = admin.req('DELETE', at(f'{uid2}.ics'))
-s2, raw2 = d19.req('GET', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics")
-check('a plain address of two meetings deletes neither', s == 404 and s2 == 200 and raw2.count('BEGIN:VEVENT') == 2, (s, s2))
-d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid2}.ics")
-# Addresses come from the stored RECURRENCE-ID: meetings in a zone the object has no VTIMEZONE for keep theirs when
-# another one is edited (adding the zone shifted them), and one that cannot be read hides none of the others.
-uid3 = 'e2e-invited3-' + uuid.uuid4().hex[:8]
-zoned = lambda day, title: (f'BEGIN:VEVENT\r\nUID:{uid3}\r\nRECURRENCE-ID;TZID=Europe/Berlin:2027{day}T160000\r\nDTSTAMP:20270101T000000Z\r\n'
-                            f'DTSTART;TZID=Europe/Berlin:2027{day}T160000\r\nDTEND;TZID=Europe/Berlin:2027{day}T170000\r\nSUMMARY:{title}\r\nEND:VEVENT\r\n')
-unreadable = (f'BEGIN:VEVENT\r\nUID:{uid3}\r\nRECURRENCE-ID:notadate\r\nDTSTAMP:20270101T000000Z\r\n'
-              f'DTSTART:20271215T150000Z\r\nDTEND:20271215T160000Z\r\nSUMMARY:Unreadable\r\nEND:VEVENT\r\n')
-d19.req('PUT', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid3}.ics", cal(unreadable + zoned('1104', 'Zoned Nov') + zoned('1202', 'Zoned Dec')),
-        headers={'Content-Type': 'text/calendar'})
-mine3 = lambda: {e['summary']: e['uri'] for e in admin.req('GET', f"/api/calendars/{c19['id']}/events?start=2027-11-01T00:00:00Z&end=2028-01-01T00:00:00Z")[1] if e['uid'] == uid3}
-before3 = mine3()
-check('a meeting that cannot be read hides none of the others', {'Zoned Nov', 'Zoned Dec'} <= set(before3), before3)
-s, _ = admin.req('PUT', at(before3.get('Zoned Nov', '')), {'summary': 'Zoned Nov', 'start': '2027-11-04T16:00:00.000Z', 'end': '2027-11-04T17:00:00.000Z',
-                                                           'allDay': False, 'location': '', 'description': '', 'rrule': ''})
-after3 = mine3()
-check("editing one meeting keeps the others' addresses", s == 204 and after3.get('Zoned Dec') == before3.get('Zoned Dec') == f'{uid3}.ics#20271202T160000',
-      (s, before3, after3))
-s, _ = admin.req('DELETE', at(before3.get('Zoned Dec', '')))
-check('...so it still deletes by its address', s == 204 and 'Zoned Dec' not in mine3() and 'Zoned Nov' in mine3(), s)
-d19.req('DELETE', f"/dav/calendars/{ADMIN}/{c19['uri']}/{uid3}.ics")
 
 print('== cleanup')
 s, _ = admin.req('DELETE', f'/api/admin/users/{bob}')

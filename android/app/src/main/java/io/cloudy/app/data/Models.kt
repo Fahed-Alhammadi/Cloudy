@@ -11,8 +11,6 @@ data class User(
     val quotaBytes: Long? = null,
     val used: Long = 0,
     val rootId: Long = 0,
-    /** Preferred language code (en, ar, de, fr, es); null = follow the phone. Shared with the web app. */
-    val language: String? = null,
     /** Days deleted files stay in the trash (`/api/me` only). */
     val trashDays: Int? = null,
     /** The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only). */
@@ -122,5 +120,3 @@ data class ChangeEvent(val folders: List<Long> = emptyList(), val shares: Boolea
 /** `GET /api/office`: extensions the server can show as PDF previews (`/api/nodes/{id}/preview`). */
 @Serializable
 data class OfficeInfo(val enabled: Boolean = false, val extensions: List<String> = emptyList())
-
-/** `POST /api/addressbooks/{id}/import` result. */

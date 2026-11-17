@@ -4,10 +4,6 @@ import { HttpError } from '../http.ts';
 
 export const NS = {
   d: 'DAV:',
-  cal: 'urn:ietf:params:xml:ns:caldav',
-  card: 'urn:ietf:params:xml:ns:carddav',
-  cs: 'http://calendarserver.org/ns/',
-  ic: 'http://apple.com/ns/ical/',
 } as const;
 
 const PREFIX: Record<string, string> = Object.fromEntries(Object.entries(NS).map(([p, ns]) => [ns, p]));
@@ -127,7 +123,6 @@ const STATUS: Record<number, string> = { 200: 'OK', 403: 'Forbidden', 404: 'Not 
 
 export class Multistatus {
   parts: string[] = [];
-  extra = '';
 
   async add(path: string, props: Props, req: PropRequest, hiddenFromAll: string[] = []): Promise<void> {
     const found: string[] = [];
@@ -163,7 +158,7 @@ export class Multistatus {
 
   send(res: ServerResponse): void {
     const ns = Object.entries(NS).map(([p, n]) => `xmlns:${p}="${n}"`).join(' ');
-    const body = `<?xml version="1.0" encoding="utf-8"?>\n<d:multistatus ${ns}>${this.parts.join('')}${this.extra}</d:multistatus>`;
+    const body = `<?xml version="1.0" encoding="utf-8"?>\n<d:multistatus ${ns}>${this.parts.join('')}</d:multistatus>`;
     sendXml(res, 207, body);
   }
 }
@@ -182,7 +177,7 @@ export function sendXml(res: ServerResponse, status: number, body: string, heade
 }
 
 export function davError(res: ServerResponse, status: number, condition: string): void {
-  sendXml(res, status, `<?xml version="1.0" encoding="utf-8"?>\n<d:error xmlns:d="DAV:" xmlns:cal="${NS.cal}" xmlns:card="${NS.card}">${condition}</d:error>`);
+  sendXml(res, status, `<?xml version="1.0" encoding="utf-8"?>\n<d:error xmlns:d="DAV:">${condition}</d:error>`);
 }
 
 /** Encodes each path segment for use in an href. */
@@ -190,6 +185,3 @@ export const encodePath = (segments: string[], trailingSlash = false) =>
   '/' + segments.map(encodeURIComponent).join('/') + (trailingSlash && segments.length ? '/' : '');
 
 export const httpDate = (d: Date | string) => new Date(d).toUTCString();
-
-export const PRIVILEGES = ['all', 'read', 'write', 'write-properties', 'write-content', 'bind', 'unbind']
-  .map((p) => `<d:privilege><d:${p}/></d:privilege>`).join('');

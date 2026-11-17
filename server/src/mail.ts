@@ -10,8 +10,7 @@ import { config } from './config.ts';
 import { q, one } from './db.ts';
 import type { User } from './auth.ts';
 import { hashPassword, checkPasswordStrength, newToken, sha256, forgetBasicCache } from './auth.ts';
-import { pickLanguage, mailText, isRtl } from './i18n.ts';
-import type { Lang } from './i18n.ts';
+import { mailText } from './mailtext.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
 type Wrap = (h: Authed) => (ctx: Ctx) => Promise<void>;
@@ -89,7 +88,7 @@ function transporter(c: MailConfig): Transporter {
 
 // ---------------------------------------------------------------- sending
 
-interface Message { to: string; subject: string; text: string; action?: { label: string; url: string }; lang?: Lang }
+interface Message { to: string; subject: string; text: string; action?: { label: string; url: string } }
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -99,8 +98,7 @@ function html(m: Message): string {
   const button = m.action
     ? `<p style="margin:24px 0 8px"><a href="${escapeHtml(m.action.url)}" style="background:#0a55c4;color:#ffffff;padding:12px 20px;border-radius:10px;text-decoration:none;display:inline-block;font-weight:600">${escapeHtml(m.action.label)}</a></p>`
     : '';
-  const lang = m.lang ?? 'en';
-  return `<!doctype html><html lang="${lang}" dir="${isRtl(lang) ? 'rtl' : 'ltr'}"><body style="margin:0;background:#f5f8fd;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0b1b36">
+  return `<!doctype html><html lang="en" dir="ltr"><body style="margin:0;background:#f5f8fd;font-family:'IBM Plex Sans',-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#0b1b36">
 <div style="max-width:520px;margin:24px auto;background:#ffffff;border:1px solid #d7e1ef;border-radius:16px;overflow:hidden">
 <div style="background:#062b66;color:#ffffff;padding:18px 28px;font-weight:600;font-size:18px">Cloudy</div>
 <div style="padding:26px 28px 18px;font-size:15px">${paras}${button}</div></div></body></html>`;
@@ -135,49 +133,46 @@ export async function notifyShare(req: IncomingMessage, sharer: User, nodeId: nu
   if (!(await mailEnabled())) return;
   const node = await one<{ name: string; is_dir: boolean }>(`SELECT name, is_dir FROM nodes WHERE id = $1`, [nodeId]);
   if (!node) return;
-  const recipients = await q<{ email: string; display_name: string; language: string | null }>(
+  const recipients = await q<{ email: string; display_name: string }>(
     type === 'group'
-      ? `SELECT u.email, u.display_name, u.language FROM group_members m JOIN users u ON u.id = m.user_id
+      ? `SELECT u.email, u.display_name FROM group_members m JOIN users u ON u.id = m.user_id
           WHERE m.group_id = $1 AND u.id <> $2 AND NOT u.disabled AND u.notify_shares AND u.email <> ''`
-      : `SELECT email, display_name, language FROM users WHERE id = $1 AND id <> $2 AND NOT disabled AND notify_shares AND email <> ''`,
+      : `SELECT email, display_name FROM users WHERE id = $1 AND id <> $2 AND NOT disabled AND notify_shares AND email <> ''`,
     [shareWith, sharer.id],
   );
   const who = sharer.display_name || sharer.id;
   for (const r of recipients) {
-    const lang = pickLanguage(r.language);
-    const vars = { who, name: node.name, user: r.display_name || '', group: type === 'group' ? mailText(lang, 'shareGroup', { group: shareWith }) : '' };
+    const vars = { who, name: node.name, user: r.display_name || '', group: type === 'group' ? mailText('shareGroup', { group: shareWith }) : '' };
     sendMail({
-      to: r.email, lang,
-      subject: mailText(lang, 'shareSubject', vars),
-      text: mailText(lang, node.is_dir ? 'shareFolder' : 'shareFile', vars),
-      action: { label: mailText(lang, 'open'), url: `${(await mailOrigin()) ?? publicOrigin(req)}/shared-in` },
+      to: r.email,
+      subject: mailText('shareSubject', vars),
+      text: mailText(node.is_dir ? 'shareFolder' : 'shareFile', vars),
+      action: { label: mailText('open'), url: `${(await mailOrigin()) ?? publicOrigin(req)}/shared-in` },
     });
   }
 }
 
 /** Security notice after a password change or reset. */
 export async function notifyPasswordChanged(req: IncomingMessage, userId: string): Promise<void> {
-  const u = await one<{ email: string; display_name: string; language: string | null }>(
-    `SELECT email, display_name, language FROM users WHERE id = $1`, [userId]);
+  const u = await one<{ email: string; display_name: string }>(
+    `SELECT email, display_name FROM users WHERE id = $1`, [userId]);
   if (!u?.email) return;
-  const lang = pickLanguage(u.language, req);
   sendMail({
-    to: u.email, lang,
-    subject: mailText(lang, 'pwSubject'),
-    text: mailText(lang, 'pwText', { user: u.display_name || userId, id: userId, ip: clientIp(req) }),
-    action: { label: mailText(lang, 'open'), url: (await mailOrigin()) ?? publicOrigin(req) },
+    to: u.email,
+    subject: mailText('pwSubject'),
+    text: mailText('pwText', { user: u.display_name || userId, id: userId, ip: clientIp(req) }),
+    action: { label: mailText('open'), url: (await mailOrigin()) ?? publicOrigin(req) },
   });
 }
 
 /** Security notice to the OLD address after the account's email changed (a stolen session can't redirect resets quietly). */
 export function notifyEmailChanged(req: IncomingMessage, user: User, oldEmail: string, newEmail: string): void {
   if (!oldEmail) return;
-  const lang = pickLanguage(user.language, req);
   void (async () => sendMail({
-    to: oldEmail, lang,
-    subject: mailText(lang, 'emailSubject'),
-    text: mailText(lang, 'emailText', { user: user.display_name || user.id, id: user.id, email: newEmail || '—', ip: clientIp(req) }),
-    action: { label: mailText(lang, 'open'), url: (await mailOrigin()) ?? publicOrigin(req) },
+    to: oldEmail,
+    subject: mailText('emailSubject'),
+    text: mailText('emailText', { user: user.display_name || user.id, id: user.id, email: newEmail || '—', ip: clientIp(req) }),
+    action: { label: mailText('open'), url: (await mailOrigin()) ?? publicOrigin(req) },
   }))().catch((e) => console.error('email change notice failed:', e.message));
 }
 
@@ -216,24 +211,23 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
       return noContent(res);
     }
     // The username first; otherwise every account using that address (a family may share one) gets its own link.
-    const byId = await q<{ id: string; email: string; display_name: string; language: string | null }>(
-      `SELECT id, email, display_name, language FROM users WHERE id = $1 AND NOT disabled AND email <> ''`, [login]);
-    const matches = byId.length ? byId : await q<{ id: string; email: string; display_name: string; language: string | null }>(
-      `SELECT id, email, display_name, language FROM users WHERE lower(email) = lower($1) AND NOT disabled ORDER BY id LIMIT 5`, [login]);
+    const byId = await q<{ id: string; email: string; display_name: string }>(
+      `SELECT id, email, display_name FROM users WHERE id = $1 AND NOT disabled AND email <> ''`, [login]);
+    const matches = byId.length ? byId : await q<{ id: string; email: string; display_name: string }>(
+      `SELECT id, email, display_name FROM users WHERE lower(email) = lower($1) AND NOT disabled ORDER BY id LIMIT 5`, [login]);
     for (const u of matches) {
       if (!allowReset(`user:${u.id}`, 3, 3600_000)) continue;
       const token = newToken(32);
       await q(`DELETE FROM password_resets WHERE user_id = $1`, [u.id]);
       await q(`INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES ($1, $2, now() + make_interval(mins => $3))`,
         [sha256(token), u.id, RESET_MINUTES]);
-      const lang = pickLanguage(u.language, req);
       sendMail({
-        to: u.email, lang,
-        subject: mailText(lang, 'resetSubject'),
-        text: mailText(lang, 'resetText', { user: u.display_name || u.id, id: u.id, minutes: RESET_MINUTES }),
+        to: u.email,
+        subject: mailText('resetSubject'),
+        text: mailText('resetText', { user: u.display_name || u.id, id: u.id, minutes: RESET_MINUTES }),
         // The token rides in the fragment: browsers never send it, so it stays out of reverse proxies' access logs.
         // The page reads it and shows a plain /reset address.
-        action: { label: mailText(lang, 'resetAction'), url: `${origin}/reset#${token}` },
+        action: { label: mailText('resetAction'), url: `${origin}/reset#${token}` },
       });
     }
     noContent(res);
@@ -292,12 +286,11 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     const to = String((await readJson(req)).to ?? '').trim() || me.email;
     if (!validEmail(to)) throw new HttpError(400, 'Enter an address to send the test to (or add an email to your profile)');
     try {
-      const lang = pickLanguage(me.language, req);
       await sendMailNow({
-        to, lang,
-        subject: mailText(lang, 'testSubject'),
-        text: mailText(lang, 'testText'),
-        action: { label: mailText(lang, 'open'), url: publicOrigin(req) },
+        to,
+        subject: mailText('testSubject'),
+        text: mailText('testText'),
+        action: { label: mailText('open'), url: publicOrigin(req) },
       });
     } catch (e: any) {
       if (e instanceof HttpError) throw e;

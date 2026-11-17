@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- English source strings. Translations: values-ar, values-de, values-fr, values-es (same keys). -->
+<!-- English source strings (the app is English-only). -->
 <resources>
     <string name="app_name" translatable="false">Cloudy</string>
     <string name="back">Back</string>
@@ -41,9 +41,6 @@
     <string name="version">Version %1$s</string>
     <string name="offline_storage">Offline storage: %1$s</string>
     <string name="section_security">Security &amp; app</string>
-    <string name="language">Language</string>
-    <string name="language_system">Phone language (automatic)</string>
-    <string name="language_note">Also used by Cloudy on the web and in emails.</string>
     <string name="app_lock">App lock</string>
     <string name="app_lock_summary">Fingerprint, face or screen lock to open Cloudy</string>
     <string name="app_lock_unavailable">Set up a screen lock on this phone first</string>
@@ -205,7 +202,7 @@
     <string name="welcome_continue">Continue</string>
     <string name="delete_account">Delete account</string>
     <string name="delete_account_title">Delete account?</string>
-    <string name="delete_account_text">This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. Files kept offline on this phone are removed too. It can\'t be undone.</string>
+    <string name="delete_account_text">This permanently deletes your account and everything in it: files (including trash and versions), shares and links, and devices. Files kept offline on this phone are removed too. It can\'t be undone.</string>
     <string name="delete_account_password">Confirm with your password</string>
     <string name="delete_account_unsupported">This server can\'t delete accounts yet. Ask its operator to update Cloudy or to delete your account.</string>
     <string name="delete_account_done">Your account was deleted</string>

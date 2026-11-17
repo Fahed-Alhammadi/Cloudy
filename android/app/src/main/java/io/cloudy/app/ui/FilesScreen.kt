@@ -669,7 +669,7 @@ fun LinkDialog(node: FileNode, onDismiss: () -> Unit) {
     var expires by rememberSaveable { mutableStateOf<LocalDate?>(null) } // last day the link works
     var allowUpload by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    // The server refuses link passwords under 4 characters (1.19+); said here, in the phone's language. A blank one
+    // The server refuses link passwords under 4 characters (1.19+); said here, before sending. A blank one
     // means no password (it is not sent).
     val passwordTooShort = password.isNotBlank() && password.length < 4
     AlertDialog(

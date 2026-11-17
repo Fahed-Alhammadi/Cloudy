@@ -2,7 +2,7 @@
 
 <h1 align="center">Cloudy</h1>
 
-<p align="center">A cloud you host yourself.<br>Files, sharing, calendars and contacts on your own server, with apps for your phone and your computer.</p>
+<p align="center">A cloud you host yourself.<br>Your files and photos on your own server, with apps for your phone and your computer.</p>
 
 <p align="center">
   <a href="CHANGELOG.md"><img src="https://img.shields.io/github/package-json/v/Fahed-Alhammadi/Cloudy?filename=server%2Fpackage.json&label=server&color=0A55C4" alt="Server version"></a>
@@ -32,20 +32,20 @@
   never pass through anyone else's servers.
 - **Every device.** Web app, Android, iPhone, and a sync app for Mac, Windows and Linux. Changes show up everywhere
   within seconds.
-- **More than files.** Calendars, contacts, photo backup, document scanning and sharing links, in one place.
-- **Works with the apps you have.** WebDAV, CalDAV and CardDAV for Finder, Windows Explorer, rclone, Thunderbird,
-  DAVx⁵ and Apple Calendar and Contacts.
+- **Everything for your files.** Photo backup, offline files, document scanning, previews and sharing links, in one
+  place.
+- **Works with the apps you have.** WebDAV for Finder, Windows Explorer, rclone and Cyberduck.
 - **No ads, no analytics, no tracking.** Free and open source under the MIT License.
 
 ## Apps
 
 | App | What it does | Get it |
 |---|---|---|
-| Web | Files, sharing, calendar, contacts, administration | Built into every server |
+| Web | Files, sharing, administration | Built into every server |
 | Android (phones and tablets) | Files, recent and shared files, offline files, photo backup, document scanner | <a href="https://play.google.com/store/apps/details?id=io.cloudy.app&hl=en"><img src="Website/assets/google-play-badge.png" alt="Get it on Google Play" height="54"></a> |
-| iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, calendar, contacts, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
+| iPhone | Files with Quick Look, "Share to Cloudy" from any app, document scanner, sharing, recent and shared files, Face ID lock | Beta: [join on TestFlight](https://testflight.apple.com/join/X1M6sYZm) (App Store soon) |
 | Mac, Windows, Linux | Keeps a folder on your computer in sync with your files | [Releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases/latest) |
-| Other apps | WebDAV, CalDAV, CardDAV | Finder, Windows Explorer, rclone, Thunderbird, DAVx⁵, Apple Calendar and Contacts |
+| Other apps | WebDAV | Finder, Windows Explorer, rclone, Cyberduck |
 
 ### Android app
 
@@ -83,14 +83,12 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   transferred again; edits in two places keep both copies; deletions go to the trash. It runs in the menu bar or
   system tray.
 - **Phone apps:** browse, preview and share files, send them to other apps and receive files from any app's share
-  sheet ("Share to Cloudy"), scan documents to PDF, text editing, app lock. Calendar and contacts are in the iPhone app; Android
-  focuses on files and adds offline files and automatic photo backup.
+  sheet ("Share to Cloudy"), scan documents to PDF, text editing, app lock, Recent and Shared tabs. Android also has
+  offline files and automatic photo backup.
 - **Live updates:** file lists in the browser, the phone apps and the desktop app update by themselves when files
   change anywhere (another device, a share, WebDAV).
 - **Office documents:** Word, Excel, PowerPoint and OpenDocument files can be viewed (read-only) in the browser
   and the apps. The built-in LibreOffice turns them into PDF, inside the same container.
-- **Calendar and contacts:** web apps plus CalDAV/CardDAV sync. Import contacts from `.vcf` (vCard 2.1–4.0) or
-  `.csv` (Google, Outlook), skipping duplicates, and export an address book as one `.vcf`.
 - **Security:** passkey sign-in, two-factor authentication (authenticator-app codes + recovery codes), an app
   password per device that you can revoke, and brute-force protection.
 - **Email:** password reset by email, invitations, share notifications and security notices through your SMTP
@@ -99,7 +97,6 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   groups.
 - **Administration:** users, invitations, groups, quotas, app passwords, 2FA and passkey reset, and email (SMTP)
   settings, in the menu under your picture (administrators only).
-- **Languages:** English, العربية, Deutsch, Français, Español on the web, the apps and in emails.
 
 ## Install
 
@@ -272,8 +269,7 @@ Each user can turn it on under *Settings → Security → Two-factor authenticat
 From then on, the web app and the apps ask for a code after the password. A recovery code can be used
 once instead, if the phone is lost.
 
-With 2FA on, WebDAV, CalDAV and CardDAV apps must sign in with an **app password**, because those protocols
-can't ask for a code. An administrator can reset 2FA for a user under *Administration → Edit user*.
+With 2FA on, WebDAV apps must sign in with an **app password**, because WebDAV can't ask for a code. An administrator can reset 2FA for a user under *Administration → Edit user*.
 
 ## Office documents
 
@@ -331,7 +327,6 @@ Create an app password under *Settings → Apps & devices*, then use:
 | Client | Address |
 |---|---|
 | WebDAV (Finder, Explorer, rclone, Cyberduck) | `https://<host>/dav/files/<username>/` |
-| CalDAV / CardDAV (Thunderbird, DAVx⁵, Apple) | `https://<host>/dav/` (auto-discovered via `/.well-known/caldav` and `/.well-known/carddav`) |
 
 ## Configuration
 
@@ -359,7 +354,6 @@ Names from older `.env` files still work; see [Moving to the short compose and .
 | Android debug build | `cd android && ./gradlew assembleDebug` (JDK 17+, Android SDK 36) |
 | iOS simulator build | `ios/build.sh` (Xcode 16+, `brew install xcodegen`) |
 | Desktop app | `cd desktop && npm install && npm start` (tests and packages: [desktop/README.md](desktop/README.md)) |
-| Translations complete | `python3 tests/i18n_check.py` |
 
 See [Website/ARCHITECTURE.md](Website/ARCHITECTURE.md) for how Cloudy works inside.
 
@@ -372,9 +366,9 @@ ios/                 native iPhone app (Swift, SwiftUI) → App Store
 desktop/             desktop sync app (Electron, TypeScript) → GitHub releases
 deploy/              docker-compose.yml that builds the image from source
 Website/             website (screenshots), privacy policy, architecture notes
-tests/               end-to-end API/WebDAV/CalDAV/CardDAV tests, translation check
+tests/               end-to-end API/WebDAV tests, container smoke test, web app checks
 scripts/             versions and release helpers
-.github/workflows/   one workflow per product (test and build; a tag such as ios-X.Y.Z publishes), translations.yml
+.github/workflows/   one workflow per product (test and build; a tag such as ios-X.Y.Z publishes)
 ```
 
 ## Support

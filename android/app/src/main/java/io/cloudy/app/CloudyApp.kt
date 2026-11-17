@@ -1,13 +1,11 @@
 package io.cloudy.app
 
 import android.app.Application
-import android.content.Context
 import android.os.StrictMode
 import kotlinx.coroutines.launch
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import io.cloudy.app.data.Api
-import io.cloudy.app.data.Lang
 import io.cloudy.app.data.Offline
 import io.cloudy.app.data.Session
 import io.cloudy.app.work.Jobs
@@ -20,14 +18,11 @@ object Services {
     lateinit var session: Session
     lateinit var api: Api
     lateinit var offline: Offline
-    /** For work that must outlive a screen (e.g. saving the language while the activity restarts). */
+    /** For work that must outlive a screen (e.g. a request that must finish after the screen closes). */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 }
 
 class CloudyApp : Application(), ImageLoaderFactory {
-    // Below Android 13 the in-app language is applied by wrapping contexts (workers' texts use this one).
-    override fun attachBaseContext(base: Context) = super.attachBaseContext(Lang.wrap(base))
-
     override fun onCreate() {
         super.onCreate()
         // Debug builds log any disk or network access on the UI thread (the cause of ANRs in Play's Android vitals).
@@ -41,7 +36,7 @@ class CloudyApp : Application(), ImageLoaderFactory {
         Services.api.onUnauthorized = { main.post { if (Services.session.token != null) Services.session.signOut() } }
         if (Services.session.isLoggedIn) Jobs.schedule(this) // runs in the background
         // Load the small settings files now, off the UI thread, so screens never wait for the disk on first use.
-        Services.appScope.launch(Dispatchers.IO) { listOf("view", "lang", "backup", "applock").forEach { getSharedPreferences(it, MODE_PRIVATE).all } }
+        Services.appScope.launch(Dispatchers.IO) { listOf("view", "backup", "applock").forEach { getSharedPreferences(it, MODE_PRIVATE).all } }
     }
 
     // Coil uses our authenticated HTTP client so image previews work.

@@ -7,10 +7,10 @@ import path from 'node:path';
 import { Api, ApiError, normalizeServer } from './api.ts';
 import { SyncEngine, stateFitsServer, type Status, type Activity, type Problem } from './sync.ts';
 import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveState, clearState, type Settings } from './store.ts';
-import { t, setLanguage, language, isRtl, strings } from './i18n.ts';
+import { t } from './i18n.ts';
 import { Updater, type UpdateState } from './updater.ts';
 
-const OUT = __dirname; // out/ (bundled main.cjs, preload.cjs, ui/, i18n/, icons/)
+const OUT = __dirname; // out/ (bundled main.cjs, preload.cjs, ui/, icons/)
 const userAgent = `Cloudy Desktop/${app.getVersion()} (${process.platform})`;
 
 let settings: Settings;
@@ -42,9 +42,6 @@ function uncaught(kind: string, e: unknown): void {
 }
 process.on('uncaughtException', (e) => uncaught('uncaught exception', e));
 process.on('unhandledRejection', (e) => uncaught('unhandled rejection', e));
-
-/** Account language, else the system's (preferred languages work even when Electron's own locale files were left out). */
-const applyLanguage = () => setLanguage(path.join(OUT, 'i18n'), settings.language, app.getLocale(), ...app.getPreferredSystemLanguages());
 
 // Electron's fetch goes through Chromium: the system proxy and the OS certificate store (company CAs) work like in a browser.
 const api = () => new Api(settings.server!, decodeToken(settings) ?? '', userAgent, net.fetch);
@@ -202,7 +199,7 @@ function buildMenu(): void {
   if (text !== tooltip) tray.setToolTip(`Cloudy: ${(tooltip = text)}`);
   const u = updater?.state;
   // Rebuilding a native menu is not free: only when something it shows changed.
-  const key = JSON.stringify([text, language(), !!settings.folder, !!settings.server, !!engine, engine?.isPaused,
+  const key = JSON.stringify([text, !!settings.folder, !!settings.server, !!engine, engine?.isPaused,
     u?.state, u && 'version' in u ? u.version : null, u && 'url' in u ? u.url : null]);
   if (key === menuKey) return;
   menuKey = key;
@@ -284,14 +281,13 @@ function scheduleSend(): void {
 
 // What the window already has: the large parts are sent again only when they changed (the window merges updates
 // into its state). Reset when the window asks for the whole state.
-let sent: { strings?: object; problems?: Problem[]; engine?: SyncEngine | null } = {};
+let sent: { problems?: Problem[]; engine?: SyncEngine | null } = {};
 let activityChanged = false;
 
-/** The window's state; the translations, problems and activity only when they changed since the last message. */
+/** The window's state; the problems and activity only when they changed since the last message. */
 function update() {
-  const { strings: dict, problems: list, activity, ...rest } = snapshot();
+  const { problems: list, activity, ...rest } = snapshot();
   const out: Partial<ReturnType<typeof snapshot>> = rest;
-  if (dict !== sent.strings) out.strings = sent.strings = dict;
   if (list !== sent.problems) out.problems = sent.problems = list;
   if (activityChanged || engine !== sent.engine) out.activity = activity;
   activityChanged = false;
@@ -317,9 +313,6 @@ function snapshot() {
     problems,
     update: updater?.state,
     version: app.getVersion(),
-    lang: language(),
-    rtl: isRtl(),
-    strings: strings(),
     defaultFolder,
   };
 }
@@ -389,7 +382,7 @@ const folderNames = (v: unknown): string[] => {
 const handlers: Record<string, (...args: any[]) => unknown> = {
   state: () => {
     const s = snapshot();
-    sent = { strings: s.strings, problems: s.problems, engine };
+    sent = { problems: s.problems, engine };
     activityChanged = false;
     return s;
   },
@@ -415,9 +408,7 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
       settings.user = r.user.id;
       settings.displayName = r.user.displayName;
       settings.rootId = r.user.rootId;
-      settings.language = r.user.language ?? null;
       encodeToken(settings, r.token);
-      applyLanguage();
       await saveSettings(settings);
       if (settings.folder) await startEngine();
       refresh();
@@ -567,7 +558,6 @@ app.whenReady().then(async () => {
   if (process.platform === 'darwin') app.dock?.hide();
   settings = await loadSettings();
   await pickDefaultFolder();
-  applyLanguage();
   updater = new Updater((s: UpdateState) => {
     if (s.state === 'ready') notify(t('Cloudy {version} is ready', { version: s.version }),
       process.platform === 'darwin' ? t('It is installed when you restart or quit Cloudy.') : t('Choose "Restart to update" in the menu to install it.'));
@@ -585,14 +575,4 @@ app.whenReady().then(async () => {
   }
   if (!configured()) showWindow(); // first run, or signed out: started at login with --hidden or not
   if (app.isPackaged) updater.start();
-  // The account language may have changed on the web.
-  if (signedIn()) {
-    api().me().then(async (me) => {
-      if (me.language === settings.language) return;
-      settings.language = me.language ?? null;
-      await saveSettings(settings);
-      applyLanguage();
-      refresh();
-    }).catch(() => {});
-  }
 });

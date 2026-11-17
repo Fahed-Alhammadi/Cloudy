@@ -5,25 +5,16 @@ import type { User } from '../auth.ts';
 import { readText, checkName, HttpError } from '../http.ts';
 import * as F from '../files.ts';
 import { sendNodeFile } from '../download.ts';
-import * as G from '../groupware.ts';
-import type { Kind, Collection, DavObject } from '../groupware.ts';
 import {
   NS, parseXml, child, descendant, key, elKey, esc, href, propRequest, Multistatus, sendXml, davError,
-  encodePath, httpDate, PRIVILEGES,
+  encodePath, httpDate,
 } from './xml.ts';
-import type { Props, PropRequest, XEl } from './xml.ts';
+import type { Props, XEl } from './xml.ts';
 
-const ALLOW = 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, MKCALENDAR, COPY, MOVE, LOCK, UNLOCK, REPORT';
-const ALLOW_GROUPWARE = 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, MKCALENDAR, REPORT';
-const DAV_HEADER = '1, 2, 3, calendar-access, addressbook, extended-mkcol';
+const ALLOW = 'OPTIONS, GET, HEAD, PUT, DELETE, PROPFIND, PROPPATCH, MKCOL, COPY, MOVE, LOCK, UNLOCK, REPORT';
+const DAV_HEADER = '1, 2, 3';
 
 const d = (n: string) => key(NS.d, n);
-const cal = (n: string) => key(NS.cal, n);
-const card = (n: string) => key(NS.card, n);
-const cs = (n: string) => key(NS.cs, n);
-const ic = (n: string) => key(NS.ic, n);
-
-const syncToken = (c: Collection) => `http://cloudy.local/sync/${c.ctag}`;
 
 /**
  * If-Match / If-None-Match (RFC 9110 §13.1.1-2) for writes: a client that saw an older version, or expects that no
@@ -52,19 +43,12 @@ function depth(req: IncomingMessage, dflt: 0 | 1 = 1): 0 | 1 {
 /** Handles everything under /dav and returns true, or false for other paths. */
 export async function handleDav(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   const path = url.pathname;
-  if (path === '/.well-known/caldav' || path === '/.well-known/carddav') {
-    res.writeHead(301, { Location: '/dav/' });
-    res.end();
-    return true;
-  }
   if (path !== '/dav' && !path.startsWith('/dav/')) return false;
 
   res.setHeader('DAV', DAV_HEADER);
   res.setHeader('MS-Author-Via', 'DAV');
   if (req.method === 'OPTIONS') {
-    // Calendars and address books take no COPY, MOVE or locks (they answer 405): only files advertise them.
-    const groupware = /^\/dav\/(calendars|addressbooks)\//.test(path);
-    res.writeHead(200, { Allow: groupware ? ALLOW_GROUPWARE : ALLOW, 'Content-Length': 0 });
+    res.writeHead(200, { Allow: ALLOW, 'Content-Length': 0 });
     res.end();
     return true;
   }
@@ -85,8 +69,6 @@ export async function handleDav(req: IncomingMessage, res: ServerResponse, url: 
   if (owner !== undefined && owner !== user.id) throw new HttpError(403, 'Forbidden');
 
   if (area === 'files' && owner) await files(req, res, user, rest);
-  else if (area === 'calendars' && owner) await groupware(req, res, user, G.CAL, rest);
-  else if (area === 'addressbooks' && owner) await groupware(req, res, user, G.CARD, rest);
   else await discovery(req, res, user, area, owner);
   return true;
 }
@@ -101,9 +83,6 @@ function principalProps(user: User): Props {
     [d('current-user-principal'), () => href(p)],
     [d('principal-URL'), () => href(p)],
     [d('principal-collection-set'), () => href('/dav/principals/')],
-    [cal('calendar-home-set'), () => href(`/dav/calendars/${encodeURIComponent(user.id)}/`)],
-    [card('addressbook-home-set'), () => href(`/dav/addressbooks/${encodeURIComponent(user.id)}/`)],
-    [cal('calendar-user-address-set'), () => (user.email ? href(`mailto:${user.email}`) : '') + href(p)],
     [d('current-user-privilege-set'), () => '<d:privilege><d:read/></d:privilege>'],
   ]);
 }
@@ -127,7 +106,7 @@ async function discovery(req: IncomingMessage, res: ServerResponse, user: User, 
   if (!area) {
     await ms.add('/dav/', plainCollection(user, 'Cloudy'), pr);
     if (depth(req) === 1) {
-      for (const a of ['files', 'calendars', 'addressbooks', 'principals']) {
+      for (const a of ['files', 'principals']) {
         await ms.add(`/dav/${a}/${uid}/`, a === 'principals' ? principalProps(user) : plainCollection(user, a), pr);
       }
     }
@@ -137,7 +116,7 @@ async function discovery(req: IncomingMessage, res: ServerResponse, user: User, 
       await ms.add('/dav/principals/', plainCollection(user, 'principals'), pr);
       if (depth(req) === 1) await ms.add(`/dav/principals/${uid}/`, principalProps(user), pr);
     }
-  } else if (['files', 'calendars', 'addressbooks'].includes(area)) {
+  } else if (area === 'files') {
     await ms.add(`/dav/${area}/`, plainCollection(user, area), pr);
     if (depth(req) === 1) await ms.add(`/dav/${area}/${uid}/`, plainCollection(user, area), pr);
   } else {
@@ -326,233 +305,4 @@ async function proppatchAccept(req: IncomingMessage, res: ServerResponse, path: 
   const ms = new Multistatus();
   ms.addPropStatus(path, results);
   ms.send(res);
-}
-
-// ---------------------------------------------------------------- CalDAV / CardDAV
-
-async function groupware(req: IncomingMessage, res: ServerResponse, user: User, k: Kind, segs: string[]) {
-  const area = k.key === 'cal' ? 'calendars' : 'addressbooks';
-  const homeHref = `/dav/${area}/${encodeURIComponent(user.id)}/`;
-  const collHref = (c: Collection) => `${homeHref}${encodeURIComponent(c.uri)}/`;
-  const objHref = (c: Collection, o: { uri: string }) => collHref(c) + encodeURIComponent(o.uri);
-  const [collUri, objUri, ...extra] = segs;
-  if (extra.length) throw new HttpError(404, 'Not found');
-
-  const collProps = (c: Collection): Props => {
-    const m: Props = new Map<string, () => string>([
-      [d('resourcetype'), () => '<d:collection/>' + (k.key === 'cal' ? '<cal:calendar/>' : '<card:addressbook/>')],
-      [d('displayname'), () => esc(c.name)],
-      [cs('getctag'), () => String(c.ctag)],
-      [d('sync-token'), () => syncToken(c)],
-      [d('owner'), () => href(`/dav/principals/${encodeURIComponent(user.id)}/`)],
-      [d('current-user-principal'), () => href(`/dav/principals/${encodeURIComponent(user.id)}/`)],
-      [d('current-user-privilege-set'), () => PRIVILEGES],
-      [d('supported-report-set'), () => (k.key === 'cal'
-        ? ['cal:calendar-multiget', 'cal:calendar-query', 'd:sync-collection']
-        : ['card:addressbook-multiget', 'card:addressbook-query', 'd:sync-collection'])
-        .map((r) => `<d:supported-report><d:report><${r}/></d:report></d:supported-report>`).join('')],
-    ]);
-    if (k.key === 'cal') {
-      m.set(ic('calendar-color'), () => esc(c.color));
-      m.set(cal('supported-calendar-component-set'), () => '<cal:comp name="VEVENT"/><cal:comp name="VTODO"/>');
-    } else {
-      m.set(card('supported-address-data'), () => '<card:address-data-type content-type="text/vcard" version="3.0"/>');
-    }
-    return m;
-  };
-
-  const dataKey = k.key === 'cal' ? cal('calendar-data') : card('address-data');
-  const objProps = (o: DavObject): Props => new Map<string, () => string>([
-    [d('resourcetype'), () => ''],
-    [d('getetag'), () => `"${o.etag}"`],
-    [d('getcontenttype'), () => (k.key === 'cal' ? `text/calendar; charset=utf-8; component=${o.component.toLowerCase()}` : k.contentType)],
-    [d('getcontentlength'), () => String(Buffer.byteLength(o.data))],
-    [d('getlastmodified'), () => httpDate(o.updated_at)],
-    [dataKey, () => esc(o.data)],
-  ]);
-
-  const homeProps = (): Props => {
-    const m = plainCollection(user, area);
-    m.set(d('current-user-privilege-set'), () => PRIVILEGES);
-    return m;
-  };
-
-  // ---- home collection
-  if (!collUri) {
-    if (req.method === 'PROPFIND') {
-      const pr = propRequest(parseXml(await readText(req)));
-      const ms = new Multistatus();
-      await ms.add(homeHref, homeProps(), pr);
-      if (depth(req) === 1) for (const c of await G.listCollections(k, user.id)) await ms.add(collHref(c), collProps(c), pr, [dataKey]);
-      return ms.send(res);
-    }
-    if (req.method === 'PROPPATCH') return proppatchAccept(req, res, homeHref);
-    if (req.method === 'REPORT') return new Multistatus().send(res);
-    throw new HttpError(405, 'Method not allowed');
-  }
-
-  const coll = await G.getCollection(k, user.id, collUri);
-
-  // ---- collection
-  if (objUri === undefined) {
-    switch (req.method) {
-      case 'MKCALENDAR':
-      case 'MKCOL': {
-        if (coll) throw new HttpError(405, 'Already exists');
-        if (req.method === 'MKCALENDAR' && k.key !== 'cal') throw new HttpError(403, 'Not a calendar home');
-        const body = parseXml(await readText(req));
-        const name = descendant(body, NS.d, 'displayname')?.text ?? collUri;
-        const color = descendant(body, NS.ic, 'calendar-color')?.text ?? '';
-        await G.createCollection(k, user.id, collUri, name, color.slice(0, 7));
-        res.writeHead(201, { 'Content-Length': 0 });
-        return void res.end();
-      }
-    }
-    if (!coll) throw new HttpError(404, 'Not found');
-    switch (req.method) {
-      case 'PROPFIND': {
-        const pr = propRequest(parseXml(await readText(req)));
-        const ms = new Multistatus();
-        await ms.add(collHref(coll), collProps(coll), pr);
-        if (depth(req, 0) === 1) for (const o of await G.listObjects(k, coll.id)) await ms.add(objHref(coll, o), objProps(o), pr, [dataKey]);
-        return ms.send(res);
-      }
-      case 'PROPPATCH':
-        return proppatchAccept(req, res, collHref(coll), async (p) => {
-          if (p.ns === NS.d && p.name === 'displayname') await G.updateCollection(k, coll.id, { name: p.text });
-          else if (p.ns === NS.ic && p.name === 'calendar-color') await G.updateCollection(k, coll.id, { color: p.text.slice(0, 7) });
-          return true;
-        });
-      case 'REPORT':
-        return report(req, res, k, coll, objHref, objProps);
-      case 'DELETE':
-        await G.deleteCollection(k, coll.id);
-        res.writeHead(204);
-        return void res.end();
-      case 'GET':
-      case 'HEAD': {
-        // Export the whole collection as one .ics / .vcf.
-        const objs = await G.listObjects(k, coll.id);
-        const body = k.key === 'cal' ? mergeCalendars(objs) : objs.map((o) => o.data.trim()).join('\r\n') + '\r\n';
-        res.writeHead(200, { 'Content-Type': k.contentType, 'Content-Disposition': `attachment; filename="${coll.uri}${k.ext}"` });
-        return void res.end(req.method === 'HEAD' ? undefined : body);
-      }
-      default:
-        throw new HttpError(405, 'Method not allowed');
-    }
-  }
-
-  // ---- object
-  if (!coll) throw new HttpError(404, 'Not found');
-  const obj = await G.getObject(k, coll.id, objUri);
-  switch (req.method) {
-    case 'GET':
-    case 'HEAD':
-      if (!obj) throw new HttpError(404, 'Not found');
-      res.writeHead(200, { 'Content-Type': k.contentType, ETag: `"${obj.etag}"`, 'Content-Length': Buffer.byteLength(obj.data) });
-      return void res.end(req.method === 'HEAD' ? undefined : obj.data);
-    case 'PUT': {
-      const { obj: saved, created } = await G.putObject(k, coll, objUri, await readText(req, 20 * 1024 * 1024), {
-        ifMatch: req.headers['if-match'] as string | undefined,
-        ifNoneMatch: req.headers['if-none-match'] as string | undefined,
-      });
-      res.writeHead(created ? 201 : 204, { ETag: `"${saved.etag}"`, 'Content-Length': 0 });
-      return void res.end();
-    }
-    case 'DELETE':
-      if (!(await G.deleteObject(k, coll, objUri, req.headers['if-match'] as string | undefined))) throw new HttpError(404, 'Not found');
-      res.writeHead(204);
-      return void res.end();
-    case 'PROPFIND': {
-      if (!obj) throw new HttpError(404, 'Not found');
-      const ms = new Multistatus();
-      await ms.add(objHref(coll, obj), objProps(obj), propRequest(parseXml(await readText(req))), [dataKey]);
-      return ms.send(res);
-    }
-    case 'PROPPATCH':
-      return proppatchAccept(req, res, objHref(coll, { uri: objUri }));
-    default:
-      throw new HttpError(405, 'Method not allowed');
-  }
-}
-
-function mergeCalendars(objs: DavObject[]): string {
-  const inner: string[] = [];
-  for (const o of objs) {
-    // Plain searches for the two markers (a lazy [\s\S]*? between them took minutes on a crafted 20 MB object).
-    const begin = /BEGIN:VCALENDAR\r?\n/i.exec(o.data);
-    if (!begin) continue;
-    const endRe = /END:VCALENDAR/gi;
-    endRe.lastIndex = begin.index + begin[0].length;
-    const end = endRe.exec(o.data);
-    if (!end) continue;
-    inner.push(o.data.slice(begin.index + begin[0].length, end.index).replace(/^(VERSION|PRODID|CALSCALE|METHOD):.*\r?\n/gim, '').trim());
-  }
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Cloudy//EN', ...inner, 'END:VCALENDAR', ''].join('\r\n');
-}
-
-function parseCalDavTime(s: string | undefined): Date | undefined {
-  const m = s && /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(s);
-  return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])) : undefined;
-}
-
-async function report(
-  req: IncomingMessage,
-  res: ServerResponse,
-  k: Kind,
-  coll: Collection,
-  objHref: (c: Collection, o: { uri: string }) => string,
-  objProps: (o: DavObject) => Props,
-) {
-  const body = parseXml(await readText(req));
-  if (!body) throw new HttpError(400, 'Missing REPORT body');
-  const pr: PropRequest = propRequest(body);
-  const ms = new Multistatus();
-
-  if (body.name === 'calendar-multiget' || body.name === 'addressbook-multiget') {
-    for (const h of body.children.filter((c) => c.ns === NS.d && c.name === 'href')) {
-      let uri = '';
-      try { uri = decodeURIComponent(h.text.split('/').filter(Boolean).pop() ?? ''); } catch { /* bad %-encoding: 404 below */ }
-      const o = uri ? await G.getObject(k, coll.id, uri) : undefined;
-      if (o) await ms.add(objHref(coll, o), objProps(o), pr);
-      else ms.addStatus(h.text, 404);
-    }
-    return ms.send(res);
-  }
-
-  if (body.name === 'calendar-query' || body.name === 'addressbook-query') {
-    let range: { start?: Date; end?: Date; component?: string } | undefined;
-    if (k.key === 'cal') {
-      const top = descendant(body, NS.cal, 'comp-filter');
-      const inner = top?.children.find((c) => c.ns === NS.cal && c.name === 'comp-filter');
-      const tr = descendant(inner ?? top, NS.cal, 'time-range');
-      range = {
-        component: inner?.attrs.name?.toUpperCase(),
-        start: parseCalDavTime(tr?.attrs.start),
-        end: parseCalDavTime(tr?.attrs.end),
-      };
-    }
-    for (const o of await G.listObjects(k, coll.id, range)) await ms.add(objHref(coll, o), objProps(o), pr);
-    return ms.send(res);
-  }
-
-  if (body.name === 'sync-collection') {
-    const raw = child(body, NS.d, 'sync-token')?.text ?? '';
-    if (!raw) {
-      for (const o of await G.listObjects(k, coll.id)) await ms.add(objHref(coll, o), objProps(o), pr);
-    } else {
-      const token = Number(raw.split('/').pop());
-      const changes = await G.changesSince(k, coll, token);
-      if (!changes) return davError(res, 403, '<d:valid-sync-token/>');
-      for (const ch of changes) {
-        const o = ch.deleted ? undefined : await G.getObject(k, coll.id, ch.uri);
-        if (o) await ms.add(objHref(coll, o), objProps(o), pr);
-        else ms.addStatus(objHref(coll, ch), 404);
-      }
-    }
-    ms.extra = `<d:sync-token>${syncToken(coll)}</d:sync-token>`;
-    return ms.send(res);
-  }
-
-  throw new HttpError(403, `Unsupported report ${body.name}`);
 }

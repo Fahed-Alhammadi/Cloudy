@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Per-device passwords for WebDAV / CalDAV / CardDAV clients.
+-- Per-device passwords for WebDAV clients.
 CREATE TABLE IF NOT EXISTS app_passwords (
   id bigserial PRIMARY KEY,
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -117,63 +117,8 @@ ALTER TABLE uploads ADD COLUMN IF NOT EXISTS share_id bigint REFERENCES shares(i
 -- Last chunk received: unfinished uploads expire a day after they last made progress.
 ALTER TABLE uploads ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
--- Groupware (CalDAV / CardDAV). ctag doubles as the RFC 6578 sync token.
-CREATE TABLE IF NOT EXISTS calendars (
-  id bigserial PRIMARY KEY,
-  owner text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  uri text NOT NULL,
-  name text NOT NULL,
-  color text NOT NULL DEFAULT '#0082c9',
-  ctag bigint NOT NULL DEFAULT 1,
-  UNIQUE (owner, uri)
-);
-
-CREATE TABLE IF NOT EXISTS calendar_objects (
-  id bigserial PRIMARY KEY,
-  collection_id bigint NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
-  uri text NOT NULL,
-  uid text NOT NULL DEFAULT '',
-  etag text NOT NULL,
-  data text NOT NULL,
-  component text NOT NULL DEFAULT 'VEVENT',
-  first_start timestamptz,
-  last_end timestamptz,                    -- NULL = unbounded (recurring)
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (collection_id, uri)
-);
-
-CREATE TABLE IF NOT EXISTS addressbooks (
-  id bigserial PRIMARY KEY,
-  owner text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  uri text NOT NULL,
-  name text NOT NULL,
-  color text NOT NULL DEFAULT '',
-  ctag bigint NOT NULL DEFAULT 1,
-  UNIQUE (owner, uri)
-);
-
-CREATE TABLE IF NOT EXISTS cards (
-  id bigserial PRIMARY KEY,
-  collection_id bigint NOT NULL REFERENCES addressbooks(id) ON DELETE CASCADE,
-  uri text NOT NULL,
-  uid text NOT NULL DEFAULT '',
-  etag text NOT NULL,
-  data text NOT NULL,
-  component text NOT NULL DEFAULT 'VCARD',
-  first_start timestamptz,
-  last_end timestamptz,
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (collection_id, uri)
-);
-
-CREATE TABLE IF NOT EXISTS dav_changes (
-  kind text NOT NULL,                      -- 'cal' | 'card'
-  collection_id bigint NOT NULL,
-  uri text NOT NULL,
-  token bigint NOT NULL,
-  deleted boolean NOT NULL
-);
-CREATE INDEX IF NOT EXISTS dav_changes_lookup ON dav_changes (kind, collection_id, token);
+-- Calendars and contacts (CalDAV / CardDAV) were removed in 2.0: Cloudy is about files.
+DROP TABLE IF EXISTS dav_changes, cards, addressbooks, calendar_objects, calendars;
 
 -- Android APKs used to be uploaded to the server; they are on GitHub releases now.
 DROP TABLE IF EXISTS app_releases;
@@ -246,8 +191,8 @@ CREATE TABLE IF NOT EXISTS password_resets (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_shares boolean NOT NULL DEFAULT true;
--- Preferred UI/email language (i18n.ts LANGUAGES); NULL = follow the browser / phone.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS language text;
+-- The web app, the apps and emails are English only since 2.0.
+ALTER TABLE users DROP COLUMN IF EXISTS language;
 -- User shares point at users by name (no foreign key): ones left by accounts deleted with older versions would be inherited
 -- by a new account with the same name. deleteUser removes them now; this clears the old ones.
 DELETE FROM shares s WHERE s.type = 'user' AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id = s.share_with);

@@ -5,7 +5,6 @@ import assert from 'node:assert/strict';
 import { requestUrl, checkName } from '../src/http.ts';
 import { attempt, checkRate } from '../src/auth.ts';
 import { validEmail } from '../src/mail.ts';
-import { parseContactsFile } from '../src/contacts-import.ts';
 import { esc } from '../src/dav/xml.ts';
 
 /** Milliseconds `fn` takes. */
@@ -63,21 +62,6 @@ test('email check is linear and still right', () => {
   // "a@" + many dots took minutes; it is answered at once now (also because nothing over 254 characters is tested).
   assert.ok(timed(() => validEmail('a@' + '.'.repeat(200) + ' x')) < 50);
   assert.ok(timed(() => validEmail('a@' + '.'.repeat(1_000_000) + ' x')) < 50);
-});
-
-test('contacts import: crafted files are parsed in linear time', () => {
-  // 80,000 empty lines took 2.6 s (and 20 MB would take days) with the old vCard detection.
-  const lines = Buffer.from('\n'.repeat(2_000_000));
-  const quietly = (buf: Buffer) => () => { try { parseContactsFile(buf); } catch { /* "no contacts" is the right answer */ } };
-  assert.ok(timed(quietly(lines)) < 2000);
-  // A CSV address cell with a long run of spaces (no line break) took quadratic time too.
-  const csv = Buffer.from(`Name,Address\nAnna,"${' '.repeat(200_000)}x"\n`);
-  assert.ok(timed(quietly(csv)) < 2000);
-  // Normal files still work.
-  const vcf = parseContactsFile(Buffer.from('\n\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Anna\r\nTEL:+49 30 1234\r\nEND:VCARD\r\n'));
-  assert.equal(vcf.format, 'vcard');
-  assert.equal(vcf.vcards.length, 1);
-  assert.match(vcf.vcards[0], /FN:Anna/);
 });
 
 test('DAV text never carries characters XML cannot hold', () => {

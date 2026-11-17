@@ -37,7 +37,7 @@ to reset it.
 ## Deleting your account
 
 In the web app open *Settings → Account*, or in the phone apps *More → Delete account*, and confirm with your password. This
-deletes your files, calendars, contacts and shares from the server. Details are in the
+deletes your files and shares from the server. Details are in the
 [privacy policy](privacy-policy.html#deleting-your-account).
 
 ## Reporting a problem

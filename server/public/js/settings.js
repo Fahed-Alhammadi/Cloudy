@@ -3,7 +3,7 @@
 import { get, post, put, patch, del, api } from './api.js';
 import { h, icon, avatar, isolate, formatSize, fullDate, toast, showError, modal, confirmDialog, promptDialog, copyText } from './ui.js';
 import { passkeysSupported, createPasskey, isPasskeyCancel } from './passkey.js';
-import { t, LANGUAGES, setLanguage, locale } from './i18n.js';
+import { t, locale } from './i18n.js';
 
 /** When an invitation ends, always as a relative time ("in 7 days", "in 5 hours"): the translations are written for it. */
 function until(iso) {
@@ -156,9 +156,7 @@ async function accountSections(me, ctx, rerender) {
   const name = h('input', { type: 'text', value: me.displayName });
   const email = h('input', { type: 'email', value: me.email });
   const notifyShares = h('input', { type: 'checkbox', checked: me.notifyShares !== false });
-  const language = h('select', {}, h('option', { value: '' }, t('Automatic (browser language)')),
-    LANGUAGES.map(([code, label]) => h('option', { value: code, selected: me.language === code }, label)));
-  // Repeating events keep their local time in this zone, and the apps' link expiry dates are read in it.
+  // The apps' link expiry dates are read in this zone.
   const zones = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
   const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const timezone = h('select', {}, [...new Set([me.timezone || browserZone, ...zones])].filter(Boolean)
@@ -179,7 +177,7 @@ async function accountSections(me, ctx, rerender) {
 
     h('form', { class: 'card form-grid', onsubmit: busyForm(async () => {
       emailPw.error.textContent = '';
-      const body = { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, language: language.value || null, timezone: timezone.value };
+      const body = { displayName: name.value, email: email.value, notifyShares: notifyShares.checked, timezone: timezone.value };
       if (emailChanged()) body.password = emailPw.input.value;
       try {
         await patch('/api/me', body);
@@ -188,20 +186,17 @@ async function accountSections(me, ctx, rerender) {
         else showError(err);
         return;
       }
-      // A new language redraws the whole app (sidebar included).
-      if ((me.language || '') !== language.value) await setLanguage(language.value || null);
       toast(t('Profile saved'));
       await ctx.refreshMe();
     }) },
       h('h2', { class: 'wide' }, t('Profile')),
       h('label', { class: 'field' }, h('span', {}, t('Display name')), name),
       h('label', { class: 'field' }, h('span', {}, t('Email')), email),
-      h('label', { class: 'field' }, h('span', {}, t('Language')), language),
       h('label', { class: 'field' }, h('span', {}, t('Time zone')), timezone),
       emailPwBox,
       // Only when this server can send email.
       options.passwordReset && h('label', { class: 'check wide' }, notifyShares, t('Email me when something is shared with me')),
-      h('p', { class: 'muted small wide' }, t('Your language is used here, in the Android and desktop apps and in emails. Your email is also used for password reset links and security notices.')),
+      h('p', { class: 'muted small wide' }, t('Your email is used for password reset links, security notices and share notifications.')),
       h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save profile')))),
 
     h('div', { class: 'card' }, h('h2', {}, t('Storage')),
@@ -258,9 +253,8 @@ async function appsSections(me, rerender) {
     h('code', { dir: 'ltr' }, url), h('button', { class: 'icon-btn', 'aria-label': t('Copy {what}', { what: label }), onclick: () => copyText(url) }, icon('copy')));
   return [
     h('div', { class: 'card first' }, h('h2', {}, t('Connect apps and devices')),
-      h('p', {}, t('Use these addresses in a WebDAV client (Finder, Windows Explorer, rclone, Cyberduck) or a calendar/contacts app (Thunderbird, DAVx⁵, Apple Calendar/Contacts). Sign in with your username and an app password.')),
+      h('p', {}, t('Use this address in a WebDAV client (Finder, Windows Explorer, rclone, Cyberduck). Sign in with your username and an app password.')),
       urlRow(t('Files (WebDAV)'), `${davBase}/files/${encodeURIComponent(me.id)}/`),
-      urlRow(t('Calendars & contacts'), `${davBase}/`),
       urlRow(t('Username'), me.id),
       h('h3', {}, t('App passwords')),
       appPasswords.length ? h('ul', { class: 'plain-list' }, appPasswords.map((p) => h('li', {}, icon('key'),
@@ -301,7 +295,7 @@ function deleteAccountCard() {
   const open = async () => {
     const deleted = await withPasswordDialog({
       title: t('Delete account?'), okLabel: t('Delete account'), danger: true,
-      intro: h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, calendars, contacts and devices. It can’t be undone.')),
+      intro: h('p', {}, t('This permanently deletes your account and everything in it: files (including trash and versions), shares and links, and devices. It can’t be undone.')),
       submit: (password) => post('/api/me/delete', { password }),
     });
     if (deleted) {
@@ -423,7 +417,7 @@ function twoFactorCard(me, rerender) {
   return h('div', { class: 'card' }, h('h2', {}, t('Two-factor authentication')),
     me.twoFactor
       ? h('div', {},
-          h('p', {}, h('span', { class: 'pill' }, t('on')), ' ', t('Signing in requires a code from your authenticator app. Apps that use WebDAV, CalDAV or CardDAV must use an app password.')),
+          h('p', {}, h('span', { class: 'pill' }, t('on')), ' ', t('Signing in requires a code from your authenticator app. WebDAV apps must use an app password.')),
           h('div', { class: 'row' },
             h('button', { class: 'btn', onclick: async () => {
               const r = await withPassword(t('New recovery codes'), t('Create new codes'), false, '/api/me/2fa/recovery-codes');
@@ -522,7 +516,7 @@ async function usersTab(ctx, rerender) {
     get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/invitations').catch(() => []), get('/api/auth/options').catch(() => ({}))]);
   const mailOn = !!options.passwordReset;
   const deleteUser = (u) => async () => {
-    if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files, calendars and contacts? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
+    if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
       await del(`/api/admin/users/${encodeURIComponent(u.id)}`).then(rerender, showError);
     }
   };

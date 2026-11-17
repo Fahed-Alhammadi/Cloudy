@@ -10,7 +10,7 @@ import type { User } from '../auth.ts';
 import { newToken, sha256, hashPassword, attemptInvitation, createSession, forgetBasicCache, getUser } from '../auth.ts';
 import { checkNewUser, checkGroups, insertUser, quotaValue } from '../users.ts';
 import { mailEnabled, mailOrigin, sendMailNow, validEmail } from '../mail.ts';
-import { mailText, pickLanguage } from '../i18n.ts';
+import { mailText } from '../mailtext.ts';
 import { meJson } from './account.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
@@ -92,15 +92,14 @@ async function deliver(req: IncomingMessage, me: User, inv: Invitation, token: s
   if (!send || !inv.email || !(await mailEnabled())) return out;
   const inviter = inv.invited_by ? await one<{ display_name: string }>(`SELECT display_name FROM users WHERE id = $1`, [inv.invited_by]) : undefined;
   const who = inviter?.display_name || me.display_name || me.id;
-  const lang = pickLanguage(me.language, req);
   try {
     await sendMailNow({
-      to: inv.email, lang,
-      subject: mailText(lang, 'inviteSubject', { who }),
-      text: mailText(lang, 'inviteText', {
-        who, days: VALID_DAYS, name: inv.display_name ? mailText(lang, 'inviteName', { name: inv.display_name }) : '',
+      to: inv.email,
+      subject: mailText('inviteSubject', { who }),
+      text: mailText('inviteText', {
+        who, days: VALID_DAYS, name: inv.display_name ? mailText('inviteName', { name: inv.display_name }) : '',
       }),
-      action: { label: mailText(lang, 'inviteAction'), url },
+      action: { label: mailText('inviteAction'), url },
     });
     await q(`UPDATE invitations SET emailed_at = now() WHERE id = $1`, [inv.id]);
     out.emailed = true;

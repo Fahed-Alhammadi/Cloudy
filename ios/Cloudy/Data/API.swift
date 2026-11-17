@@ -283,36 +283,6 @@ final class API: @unchecked Sendable {
             }
         }
     }
-
-    // MARK: calendar & contacts
-
-    func calendars() async throws -> [DavCollection] { try await get("/api/calendars") }
-    func events(_ calendarId: Int64, from: Date, to: Date) async throws -> [CalEvent] {
-        try await get("/api/calendars/\(calendarId)/events?start=\(enc(isoString(from)))&end=\(enc(isoString(to)))")
-    }
-    func createEvent(_ calendarId: Int64, _ e: EventInput) async throws {
-        try await send("POST", "/api/calendars/\(calendarId)/events", body: try encoder.encode(e), contentType: "application/json")
-    }
-    func updateEvent(_ calendarId: Int64, uri: String, _ e: EventInput) async throws {
-        try await send("PUT", "/api/calendars/\(calendarId)/events/\(enc(uri))", body: try encoder.encode(e), contentType: "application/json")
-    }
-    func deleteEvent(_ calendarId: Int64, uri: String) async throws { try await send("DELETE", "/api/calendars/\(calendarId)/events/\(enc(uri))") }
-
-    func addressBooks() async throws -> [DavCollection] { try await get("/api/addressbooks") }
-    func contacts(_ bookId: Int64) async throws -> [Contact] { try await get("/api/addressbooks/\(bookId)/contacts") }
-    func saveContact(_ bookId: Int64, _ c: Contact) async throws {
-        let body: [String: Any?] = ["givenName": c.givenName, "familyName": c.familyName, "org": c.org, "title": c.title,
-                                    "address": c.address, "birthday": c.birthday, "note": c.note,
-                                    "emails": c.emails, "phones": c.phones]
-        if c.uri.isEmpty { try await sendJSON("POST", "/api/addressbooks/\(bookId)/contacts", body) }
-        else { try await sendJSON("PUT", "/api/addressbooks/\(bookId)/contacts/\(enc(c.uri))", body) }
-    }
-    func deleteContact(_ bookId: Int64, uri: String) async throws { try await send("DELETE", "/api/addressbooks/\(bookId)/contacts/\(enc(uri))") }
-    /// Imports a .vcf or .csv file into an address book.
-    func importContacts(_ bookId: Int64, _ data: Data) async throws -> ImportResult {
-        try decode(await send("POST", "/api/addressbooks/\(bookId)/import", body: data))
-    }
-    func exportContacts(_ bookId: Int64) async throws -> Data { try await send("GET", "/api/addressbooks/\(bookId)/export") }
 }
 
 /// User-facing text for any error (server message, network problem, ATS block).

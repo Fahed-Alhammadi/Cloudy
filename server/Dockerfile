@@ -1,7 +1,7 @@
 # Cloudy all-in-one image: PostgreSQL 17 + LibreOffice (office previews) + libvips (thumbnails) + Cloudy server in one container.
 FROM node:24-trixie-slim
 ARG APP_VERSION=
-LABEL org.opencontainers.image.title="Cloudy" org.opencontainers.image.description="Self-hosted files, sharing, office previews, calendar and contacts"
+LABEL org.opencontainers.image.title="Cloudy" org.opencontainers.image.description="Self-hosted files, sharing, photo backup and office previews"
 
 # PostgreSQL 17 from Debian; no default cluster (the entrypoint creates its own in DB_DIR).
 # The optional LLVM JIT (~145 MB) is removed; the entrypoint runs PostgreSQL with jit=off.

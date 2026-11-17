@@ -50,7 +50,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import io.cloudy.app.data.AppLock
-import io.cloudy.app.data.Lang
 import io.cloudy.app.data.Live
 import io.cloudy.app.data.Office
 import io.cloudy.app.R
@@ -58,7 +57,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Password
 import androidx.compose.material.icons.outlined.Fingerprint
-import androidx.compose.material.icons.outlined.Language
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -178,15 +176,12 @@ fun MainScreen(sharedUris: MutableState<List<Uri>>) {
     )
     // Live updates while the app is visible; office file types once per session.
     val lifecycleOwner = LocalLifecycleOwner.current
-    val activity = LocalContext.current.findActivity()
     LaunchedEffect(lifecycleOwner) {
         runCatching { Services.api.me() }.onSuccess { me ->
             // The stored account gets what only /api/me says (whether the server makes thumbnails, storage used): the
             // sign-in answer has none of it, and the More tab was the only place that refreshed it.
             val known = Services.session.user.value
             if (known?.id == me.id) Services.session.updateUser(me.copy(rootId = me.rootId.takeIf { r -> r > 0 } ?: known.rootId))
-            // A language chosen for the account (on the web, or before this phone signed in) applies here too.
-            activity?.let { Lang.followAccount(it, me.id, me.language) }
         }
         Office.load(Services.api)
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) { Live.run(Services.api) }
@@ -306,7 +301,6 @@ fun MoreScreen(nav: NavController) {
     val u by Services.session.user.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
     var deleteAccount by rememberSaveable { mutableStateOf(false) }
-    var chooseLanguage by remember { mutableStateOf(false) }
     var lockOn by remember { mutableStateOf(AppLock.isEnabled(context)) }
     LaunchedEffect(Unit) {
         runCatching { Services.api.me() }.onSuccess { me ->
@@ -365,12 +359,6 @@ fun MoreScreen(nav: NavController) {
             Text(stringResource(R.string.section_security), Modifier.padding(start = 32.dp, top = 14.dp, bottom = 2.dp),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
             Group {
-                ListItem(
-                    modifier = Modifier.clickable { chooseLanguage = true }, colors = itemColors,
-                    leadingContent = { Badge(Icons.Outlined.Language, SettingColor.Blue) },
-                    headlineContent = { Text(stringResource(R.string.language)) },
-                    supportingContent = { Text(Lang.current(context)?.let { Lang.NAMES[it] } ?: stringResource(R.string.language_system)) },
-                )
                 val lockAvailable = remember { AppLock.isAvailable(context) }
                 val confirmTitle = stringResource(R.string.app_lock_turn_on)
                 ListItem(
@@ -420,7 +408,6 @@ fun MoreScreen(nav: NavController) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
     }
-    if (chooseLanguage) LanguageDialog { chooseLanguage = false }
     if (deleteAccount) DeleteAccountDialog { deleteAccount = false }
     if (confirmLogout) ConfirmDialog(stringResource(R.string.log_out), stringResource(R.string.log_out_text), stringResource(R.string.log_out), { confirmLogout = false }) {
         confirmLogout = false

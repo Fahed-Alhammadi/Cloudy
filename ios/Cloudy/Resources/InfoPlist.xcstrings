@@ -31,34 +31,10 @@
       "comment" : "Privacy - Camera Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "ar" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "يستخدم Cloudy الكاميرا فقط عند مسح مستند ضوئيًا لرفعه كملف PDF."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy nutzt die Kamera nur, wenn du ein Dokument scannst, um es als PDF hochzuladen."
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Cloudy uses the camera only when you scan a document to upload it as a PDF."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy usa la cámara solo cuando escaneas un documento para subirlo como PDF."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy utilise l’appareil photo uniquement lorsque vous numérisez un document pour l’envoyer en PDF."
           }
         }
       }
@@ -67,34 +43,10 @@
       "comment" : "Privacy - Face ID Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "ar" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "يستخدم Cloudy بصمة الوجه Face ID لفتح التطبيق عند تفعيل قفل التطبيق."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy verwendet Face ID zum Entsperren, wenn die App-Sperre aktiv ist."
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Cloudy uses Face ID to unlock the app when App lock is on."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy usa Face ID para desbloquear la app cuando el bloqueo está activado."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy utilise Face ID pour déverrouiller l’app lorsque le verrouillage est activé."
           }
         }
       }
@@ -103,34 +55,10 @@
       "comment" : "Privacy - Local Network Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "ar" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "يتصل Cloudy بخادم Cloudy الخاص بك عندما يكون على شبكتك المحلية."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy verbindet sich mit deinem Cloudy-Server, wenn er in deinem lokalen Netzwerk ist."
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Cloudy connects to your Cloudy server when it is on your local network."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy se conecta a tu servidor Cloudy cuando está en tu red local."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy se connecte à votre serveur Cloudy lorsqu’il est sur votre réseau local."
           }
         }
       }
@@ -139,34 +67,10 @@
       "comment" : "Privacy - Photo Library Additions Usage Description",
       "extractionState" : "extracted_with_value",
       "localizations" : {
-        "ar" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "يحفظ Cloudy الصور ومقاطع الفيديو التي تختارها في مكتبة الصور."
-          }
-        },
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy speichert Fotos und Videos, die du auswählst, in deiner Fotomediathek."
-          }
-        },
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Cloudy saves photos and videos you choose to your photo library."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy guarda en tu fototeca las fotos y vídeos que elijas."
-          }
-        },
-        "fr" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cloudy enregistre dans votre photothèque les photos et vidéos que vous choisissez."
           }
         }
       }

@@ -16,12 +16,11 @@ export interface User {
   quota_bytes: number | null;
   totp_enabled: boolean;
   notify_shares: boolean;
-  language: string | null;
-  /** IANA time zone (calendar events from clients that send none, link expiry dates from the apps). */
+  /** IANA time zone (link expiry dates from clients that send none). */
   timezone: string | null;
 }
 
-const USER_COLS = 'id, display_name, email, is_admin, disabled, quota_bytes, totp_enabled, notify_shares, language, timezone';
+const USER_COLS = 'id, display_name, email, is_admin, disabled, quota_bytes, totp_enabled, notify_shares, timezone';
 const SESSION_COOKIE = 'cloudy_session';
 
 function scrypt(pw: string, salt: Buffer): Promise<Buffer> {
@@ -247,7 +246,7 @@ export async function dropOtherSessions(req: IncomingMessage, userId: string): P
 
 /**
  * The signed-in user's password, before a sensitive change. Counted against the account only: the per-address counter
- * also takes wrong DAV passwords from a stale calendar app on the same network, which must not block the "confirm
+ * also takes wrong DAV passwords from a stale WebDAV client on the same network, which must not block the "confirm
  * your password" step that would fix that app.
  */
 export async function requirePassword(_req: IncomingMessage, userId: string, password: unknown, message = 'Wrong password'): Promise<void> {
@@ -301,7 +300,7 @@ export async function createAppToken(userId: string, name: string): Promise<stri
   return token;
 }
 
-// ---- HTTP Basic (WebDAV / CalDAV / CardDAV clients) ----
+// ---- HTTP Basic (WebDAV clients) ----
 // Successful checks are cached briefly: DAV clients authenticate every request
 // and scrypt is deliberately slow.
 const basicCache = new Map<string, { user: string; until: number }>();

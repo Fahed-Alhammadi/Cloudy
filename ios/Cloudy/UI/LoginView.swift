@@ -20,7 +20,7 @@ struct LoginView: View {
         NavigationStack {
             Form {
                 Section {
-                    BrandHeader(title: "Cloudy", text: "Sign in to your own Cloudy server: the self-hosted cloud for files, calendars and contacts.",
+                    BrandHeader(title: "Cloudy", text: "Sign in to your own Cloudy server: the self-hosted cloud for your files.",
                                 compact: heightClass == .compact)
                 }
                 Section {

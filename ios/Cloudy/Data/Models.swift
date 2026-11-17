@@ -11,8 +11,6 @@ struct User: Codable, Hashable {
     var quotaBytes: Int64?
     var used: Int64?
     var rootId: Int64?
-    /// Preferred language (en, ar, de, fr, es); nil = follow the device. Shared with the web app and emails.
-    var language: String?
     /// Days the server keeps deleted files in the trash.
     var trashDays: Int?
     /// The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only).
@@ -121,88 +119,6 @@ struct ChunkResult: Codable {
     var node: UploadedNode?
 }
 
-struct DavCollection: Codable, Identifiable, Hashable {
-    var id: Int64
-    var uri: String
-    var name: String
-    var color: String?
-}
-
-struct CalEvent: Codable, Hashable, Identifiable {
-    var calendarId: Int64
-    var uri: String
-    var uid: String?
-    var summary: String?
-    var location: String?
-    var description: String?
-    var start: String
-    var end: String
-    var allDay: Bool?
-    var recurring: Bool?
-    var rrule: String?
-    var masterStart: String?
-    var masterEnd: String?
-
-    /// One row per occurrence: recurring events share the uri.
-    var id: String { "\(calendarId)/\(uri)/\(start)" }
-    var isAllDay: Bool { allDay ?? false }
-}
-
-struct EventInput: Codable {
-    var summary: String
-    var start: String
-    var end: String
-    var allDay: Bool
-    var location: String
-    var description: String
-    var rrule: String
-    /// The iPhone's time zone (IANA name): new timed events are stored in it, so a repeating event keeps its local time
-    /// when the clocks change (server 1.19+; without it the account's zone is used, else UTC). Older servers ignore it.
-    var tz: String? = TimeZone.current.identifier
-}
-
-struct Contact: Codable, Hashable, Identifiable {
-    var uri: String = ""
-    var uid: String?
-    var fn: String?
-    var givenName: String = ""
-    var familyName: String = ""
-    var emails: [String] = []
-    var phones: [String] = []
-    var org: String = ""
-    var title: String = ""
-    var address: String = ""
-    var birthday: String = ""
-    var note: String = ""
-
-    var id: String { uri }
-    var displayName: String {
-        if let fn, !fn.isEmpty { return fn }
-        let n = [givenName, familyName].filter { !$0.isEmpty }.joined(separator: " ")
-        return n.isEmpty ? (emails.first ?? phones.first ?? org) : n
-    }
-
-    enum CodingKeys: String, CodingKey { case uri, uid, fn, givenName, familyName, emails, phones, org, title, address, birthday, note }
-
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        uri = try c.decodeIfPresent(String.self, forKey: .uri) ?? ""
-        uid = try c.decodeIfPresent(String.self, forKey: .uid)
-        fn = try c.decodeIfPresent(String.self, forKey: .fn)
-        givenName = try c.decodeIfPresent(String.self, forKey: .givenName) ?? ""
-        familyName = try c.decodeIfPresent(String.self, forKey: .familyName) ?? ""
-        emails = try c.decodeIfPresent([String].self, forKey: .emails) ?? []
-        phones = try c.decodeIfPresent([String].self, forKey: .phones) ?? []
-        org = try c.decodeIfPresent(String.self, forKey: .org) ?? ""
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        address = try c.decodeIfPresent(String.self, forKey: .address) ?? ""
-        birthday = try c.decodeIfPresent(String.self, forKey: .birthday) ?? ""
-        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
-    }
-}
-
 struct Sharees: Codable {
     var users: [Sharee]?
     var groups: [ShareeGroup]?
@@ -221,15 +137,6 @@ struct ShareeGroup: Codable, Hashable {
 struct ChangeEvent: Codable {
     var folders: [Int64]?
     var shares: Bool?
-}
-
-/// `POST /api/addressbooks/{id}/import` result.
-struct ImportResult: Codable {
-    var imported: Int?
-    var updated: Int?
-    var duplicates: Int?
-    var skipped: Int?
-    var errors: [String]?
 }
 
 // MARK: - Local file names
@@ -273,14 +180,3 @@ func parseDate(_ s: String?) -> Date? {
     guard let s, !s.isEmpty else { return nil }
     return isoFrac.date(from: s) ?? isoPlain.date(from: s)
 }
-
-func isoString(_ d: Date) -> String { isoPlain.string(from: d) }
-
-/// All-day dates are plain `YYYY-MM-DD` in the device's calendar.
-let dayFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.calendar = Calendar(identifier: .gregorian)
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.dateFormat = "yyyy-MM-dd"
-    return f
-}()

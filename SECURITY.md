@@ -1,6 +1,6 @@
 # Security Policy
 
-Cloudy stores people's files, calendars and contacts, so security reports get priority. Thank you for helping
+Cloudy stores people's files, so security reports get priority. Thank you for helping
 keep Cloudy and its users safe.
 
 ## Supported versions
@@ -48,7 +48,7 @@ servers and accounts you own.
 
 In scope:
 
-- the server: JSON API, WebDAV/CalDAV/CardDAV, public share links, sign-in (passwords, two-factor codes,
+- the server: JSON API, WebDAV, public share links, sign-in (passwords, two-factor codes,
   passkeys, app passwords), office previews;
 - the web app served by the server;
 - the Android, iPhone and desktop apps;

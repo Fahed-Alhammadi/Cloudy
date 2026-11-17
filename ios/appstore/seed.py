@@ -1,7 +1,7 @@
 """Fills a fresh, throwaway Cloudy server with the fictional demo account used for the App Store captures (README.md).
 Usage: python3 -I ios/appstore/seed.py <server url> <admin password> [<database url>]
-Creates user `sarah` (password printed at the end) with folders, files, photos, shares, two calendars around today and
-an address book, then backdates file dates in the database (if given) so lists show varied dates instead of "today".
+Creates user `sarah` (password printed at the end) with folders, files, photos and shares, then backdates file dates in
+the database (if given) so lists show varied dates instead of "today".
 Prints the device token and the CLOUDY_OPEN / CLOUDY_TOUR values. Photos are drawn with headless Chrome (render.py's path).
 Never run it against a real server."""
 import base64, datetime as dt, json, os, random, subprocess, sys, tempfile, urllib.error, urllib.request, uuid
@@ -156,62 +156,6 @@ for cookie, parent, name, size in [(ele, ele_root, 'Q4 report.pdf', 1_350_000), 
     nid = req('PUT', f"/api/uploads/{up['id']}", blob(size), cookie=cookie, headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})['node']['id']
     req('POST', f'/api/nodes/{nid}/shares', {'type': 'user', 'shareWith': USER}, cookie=cookie)
 
-# --- calendars: events around today (floating local times) --------------------------------------------------------------
-work = req('POST', '/api/calendars', {'name': 'Work', 'color': '#E8772E'}, cookie=me)['uri']
-today = dt.date.today()
-dav = f'{USER}:{PW}'
-
-
-def event(cal, day, start, end, title, where='', rrule='', allday=False):
-    d = today + dt.timedelta(days=day)
-    uid = uuid.uuid4().hex
-    if allday:
-        when = f'DTSTART;VALUE=DATE:{d:%Y%m%d}\r\nDTEND;VALUE=DATE:{d + dt.timedelta(days=end):%Y%m%d}'
-    else:
-        when = f'DTSTART:{d:%Y%m%d}T{start}00\r\nDTEND:{d:%Y%m%d}T{end}00'
-    ics = (f'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Cloudy demo//EN\r\nBEGIN:VEVENT\r\nUID:{uid}\r\nDTSTAMP:20261001T000000Z\r\n'
-           f'{when}\r\nSUMMARY:{title}\r\n' + (f'LOCATION:{where}\r\n' if where else '') + (f'RRULE:{rrule}\r\n' if rrule else '')
-           + 'END:VEVENT\r\nEND:VCALENDAR\r\n')
-    req('PUT', f'/dav/calendars/{USER}/{cal}/{uid}.ics', ics, auth=dav, headers={'Content-Type': 'text/calendar'})
-
-
-wd = today.weekday()  # events keyed to weekdays so any capture day looks like a normal week
-event('personal', 0, '1100', '1230', 'Brunch with Elena', 'Café Lumière')
-event('personal', -21, '1730', '1830', 'Yoga class', 'Studio 4', 'FREQ=WEEKLY;COUNT=10')
-event('personal', 0, '2000', '2030', 'Plan the week')
-event('personal', 2, '1900', '2130', 'Dinner with Sam', 'Olive & Thyme')
-event('personal', 5, 0, 4, 'Lisbon trip', allday=True)
-event('personal', -9, '0830', '0930', 'Dentist', 'Smile Clinic')
-event('personal', 19, 0, 1, 'Amira’s birthday', allday=True)
-event('personal', -16, '1800', '1930', 'Book club', 'City Library')
-for day, start, end, title, where in [(-26, '1000', '1100', 'Design review', 'Room 2'), (-18, '0900', '1200', 'Quarterly planning', 'Board room'),
-                                      (-17, '1230', '1330', 'Lunch with Daniel', 'Noodle Bar'), (-11, '1000', '1030', 'Website launch', ''),
-                                      (-9, '1500', '1530', '1:1 with Maya', ''), (-4, '1100', '1200', 'Client call – Northwind', 'Video call'),
-                                      (-2, '1400', '1500', 'Budget review', 'Room 1'), (2, '0930', '1030', 'Sprint kickoff', 'Room 2'),
-                                      (3, '1300', '1400', 'Brand workshop', 'Studio'), (12, '1000', '1130', 'Board meeting', 'Board room'),
-                                      (16, '1500', '1600', 'Website retro', 'Room 2')]:
-    event(work, day, start, end, title, where)
-event(work, -30, '0915', '0930', 'Team stand-up', 'Video call', 'FREQ=WEEKLY;BYDAY=MO,WE,FR;COUNT=40')
-
-# --- contacts ----------------------------------------------------------------------------------------------------------
-PEOPLE = [('Amira', 'Haddad', 'Northwind Studio', 'Creative Director'), ('Ben', 'Carter', 'Carter & Sons', 'Owner'),
-          ('Chloé', 'Martin', '', ''), ('Daniel', 'Okafor', 'Cloud Nine Labs', 'Finance Lead'), ('Elena', 'Rossi', 'Cloud Nine Labs', 'Designer'),
-          ('Farah', 'Nasser', '', ''), ('George', 'Lin', 'Brightside Health', 'Physiotherapist'), ('Hannah', 'Schmidt', '', ''),
-          ('Isaac', 'Mensah', 'Northwind Studio', 'Developer'), ('Julia', 'Fernández', '', ''), ('Karim', 'Benali', 'Atlas Travel', 'Agent'),
-          ('Lena', 'Novak', '', ''), ('Maya', 'Patel', 'Cloud Nine Labs', 'Product Manager'), ('Noah', 'Williams', '', ''),
-          ('Olivia', 'Brown', 'Greenleaf School', 'Teacher'), ('Sam', 'Taylor', '', ''), ('Yusuf', 'Kaya', 'Kaya Garage', 'Mechanic')]
-book = req('GET', '/api/addressbooks', cookie=me)[0]['uri']
-for i, (first, last, org, title) in enumerate(PEOPLE):
-    uid = uuid.uuid4().hex
-    mail = f'{first.lower().replace("é", "e")}.{last.lower().replace("á", "a")}@example.com'
-    v = (f'BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{uid}\r\nFN:{first} {last}\r\nN:{last};{first};;;\r\nEMAIL;TYPE=WORK:{mail}\r\n'
-         f'TEL;TYPE=CELL:+1 555 01{i:02d} {random.randint(100, 999)}\r\n' + (f'ORG:{org}\r\nTITLE:{title}\r\n' if org else ''))
-    if first == 'Amira':
-        v += ('TEL;TYPE=WORK:+1 555 0188 210\r\nADR;TYPE=WORK:;;12 Harbour Street;Portland;OR;97201;USA\r\n'
-              'BDAY:1990-' + (today + dt.timedelta(days=19)).strftime('%m-%d') + '\r\nURL:https://northwind.example.com\r\n'
-              'NOTE:Met at the design conference. Prefers calls in the morning.\r\n')
-    req('PUT', f'/dav/addressbooks/{USER}/{book}/{uid}.vcf', v + 'END:VCARD\r\n', auth=dav, headers={'Content-Type': 'text/vcard'})
-
 # --- backdate file dates, so lists show a realistic history ------------------------------------------------------------
 if DB:
     sql = ';'.join(f"UPDATE nodes SET mtime = now() - interval '{d} days' - interval '{random.randint(1, 600)} minutes' WHERE id = {n}"
@@ -221,5 +165,5 @@ if DB:
 token = req('POST', '/api/auth/token', {'user': USER, 'password': PW, 'deviceName': 'iPhone'})['token']
 print(json.dumps({'user': USER, 'password': PW, 'token': token, 'projects': proj, 'planning': plan,
                   'open_folder': f'folder:{proj}:Projects', 'open_text': f'text:{plan}:Weekly planning.md',
-                  'open_share': f'share:{travel}:Travel', 'contact': 'Amira Haddad',
-                  'tour': f'{proj}:Projects:{plan}:Weekly planning.md:Amira Haddad'}, indent=1))
+                  'open_share': f'share:{travel}:Travel',
+                  'tour': f'{proj}:Projects:{plan}:Weekly planning.md'}, indent=1))

@@ -18,8 +18,6 @@ export interface Settings {
   excluded: string[];
   paused: boolean;
   openAtLogin: boolean;
-  /** account language from the server (null = follow the computer) */
-  language?: string | null;
 }
 
 const file = (name: string) => path.join(app.getPath('userData'), name);

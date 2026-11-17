@@ -11,6 +11,35 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.0.0 (2026-11-17)
+
+Cloudy is now about files: calendars, contacts and the translations are gone.
+
+**Before you update**
+
+- **Export your calendars and contacts first** if you still need them (from the 1.20 web app, or with a CalDAV /
+  CardDAV app such as Thunderbird or DAVx⁵). 2.0 deletes them from the database on its first start, and there is no
+  way back.
+- Phones and computers that sync calendars or contacts with Cloudy over CalDAV or CardDAV stop syncing; remove those
+  accounts from them.
+- Update the apps too: Android 1.20, iPhone 1.18 and desktop 1.4 match this server. Older apps still work for files,
+  but their Calendar and Contacts screens show errors.
+
+**Removed**
+
+- Calendars and contacts: the web pages, `/api/calendars`, `/api/addressbooks`, contacts import and export, CalDAV
+  and CardDAV under `/dav/calendars/` and `/dav/addressbooks/`, and the `/.well-known/caldav` and `/.well-known/carddav`
+  redirects. The database tables `calendars`, `calendar_objects`, `addressbooks`, `cards` and `dav_changes` are
+  dropped.
+- Languages: the web app and the emails are in English only. The Language setting (web and apps) and the account's
+  `language` field are gone.
+
+**Unchanged**
+
+- WebDAV for files (`/dav/files/<username>/`) for Finder, Windows Explorer, rclone and Cyberduck, with app passwords.
+- The account's time zone, used for share links that expire at the end of a day.
+- File names in any language, including right-to-left scripts, still show correctly.
+
 ## 1.20.1 (2026-11-15)
 
 A fix for the web app's new look. Nothing to do before you update.
