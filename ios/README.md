@@ -48,7 +48,7 @@ opens *New profile picture* with that file from the Mac, `go:<file>` also saves 
 Login screen without typing: `SIMCTL_CHILD_CLOUDY_LOGIN_TEST=<user>:<password>` fills in the form;
 `SIMCTL_CHILD_CLOUDY_PASSWORD_VISIBLE=1` starts password fields shown (eye toggled on).
 Looking at states and motion without tapping (all in `Cloudy/UI/Screenshots.swift`): `SIMCTL_CHILD_CLOUDY_SCRIPT=<seconds>:<step>;…`
-plays steps such as `tab:1`, `folder:<id>:<name>`, `route:trash` (or `devices`, `password`, `links`), `pop`, `grid`, `sort:date`, `select:3`, `done`,
+plays steps such as `tab:1`, `folder:<id>:<name>`, `route:trash` (or `devices`, `password`, `links`, `about`), `pop`, `grid`, `sort:date`, `select:3`, `done`,
 `landscape`; `CLOUDY_LANDSCAPE=1` starts rotated (the simulator can't be rotated from the command line),
 `CLOUDY_LOCK=1` shows the app-lock screen, `CLOUDY_ICONS=1` one row per file type, `CLOUDY_LOGIN_ERROR=<text>` the sign-in
 screen with an error, and `CLOUDY_SERVER` without a token fills in the sign-in screen's address.

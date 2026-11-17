@@ -1,3 +1,4 @@
+• New About Cloudy screen in More → Support, with the website and the privacy policy. Support now sits below Sign out, and the version is at the bottom of More.
 • Profile pictures: tap your picture in More to choose a photo, change it or remove it. It is the same picture as on the web.
 • See people's pictures in "Shared with you" and in the sharing screen, also when you look someone up to share with.
 • Profile pictures need Cloudy server 1.20 or newer.

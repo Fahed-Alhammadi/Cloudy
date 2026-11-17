@@ -13,6 +13,7 @@ enum Route: Hashable {
     case trash
     case devices
     case password
+    case about
 }
 
 struct FilesTab: View {
@@ -52,6 +53,7 @@ extension View {
             case .trash: TrashView()
             case .devices: DevicesView()
             case .password: ChangePasswordView()
+            case .about: AboutView()
             }
         }
     }

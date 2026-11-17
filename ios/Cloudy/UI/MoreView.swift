@@ -9,12 +9,6 @@ struct MoreView: View {
     @State private var deleting = false
     @State private var deleteError: String?
 
-    private var version: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
-        return "\(v) (\(b))"
-    }
-
     var body: some View {
         NavigationStack {
             List {
@@ -48,18 +42,6 @@ struct MoreView: View {
                     Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy.")
                 }
                 Section {
-                    if let web = URL(string: session.server) {
-                        Link(destination: web) { SettingsLabel("Open Cloudy on the web", icon: "safari.fill", color: .settingsBlue).foregroundStyle(.primary) }
-                    }
-                    Link(destination: privacyPolicyURL) { SettingsLabel("Privacy policy", icon: "hand.raised.fill", color: .settingsPurple).foregroundStyle(.primary) }
-                    LabeledContent("Version", value: version)
-                }
-                Section {
-                    Link(destination: helpURL) { SettingsLabel("Help", icon: "questionmark", color: .settingsBlue).foregroundStyle(.primary) }
-                    Link(destination: feedbackURL) { SettingsLabel("Send feedback", icon: "bubble.left.fill", color: .settingsGreen).foregroundStyle(.primary) }
-                    Link(destination: rateURL) { SettingsLabel("Rate Cloudy", icon: "star.fill", color: .settingsPink).foregroundStyle(.primary) }
-                }
-                Section {
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                 }
                 // App Store 5.1.1(v): the account can be deleted in the app. Same wording and flow as the web and Android.
@@ -70,6 +52,17 @@ struct MoreView: View {
                     .disabled(deleting)
                 } footer: {
                     Text("Deletes your account and all your data on this server for good.")
+                }
+                // Support comes last, as on Android; the version sits under it, at the very bottom.
+                Section {
+                    Link(destination: helpURL) { SettingsLabel("Help", icon: "questionmark", color: .settingsBlue) }.tint(.primary)
+                    Link(destination: feedbackURL) { SettingsLabel("Send feedback", icon: "bubble.left.fill", color: .settingsGreen) }.tint(.primary)
+                    Link(destination: rateURL) { SettingsLabel("Rate Cloudy", icon: "star.fill", color: .settingsPink) }.tint(.primary)
+                    NavigationLink(value: Route.about) { SettingsLabel("About Cloudy", icon: "info", color: .settingsGray) }
+                } header: {
+                    Text("Support")
+                } footer: {
+                    Text("Version \(appVersion)").frame(maxWidth: .infinity).padding(.top, 16)
                 }
             }
             .navigationTitle("More")
