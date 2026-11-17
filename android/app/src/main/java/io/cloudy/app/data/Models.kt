@@ -15,6 +15,8 @@ data class User(
     val trashDays: Int? = null,
     /** The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only). */
     val thumbnails: Boolean = false,
+    /** The profile picture's version (`GET /api/users/{id}/avatar?v=<it>`, server 1.20+), or null when there is none. */
+    val avatar: String? = null,
 )
 
 /** A device token (Settings → Devices on the web, More → Devices here). */
@@ -47,6 +49,8 @@ data class FileNode(
     // Present on "shared with you" and search results.
     val canEdit: Boolean? = null,
     val ownerName: String? = null,
+    /** The owner's profile picture version ("shared with you", server 1.20+). */
+    val ownerAvatar: String? = null,
     val shareId: Long? = null,
     val shareType: String? = null,
     val path: String? = null,
@@ -80,6 +84,9 @@ data class Share(
     val nodeId: Long,
     val type: String,
     val shareWith: String? = null,
+    /** The person's display name and profile picture version (user shares, server 1.20+). */
+    val shareWithName: String? = null,
+    val shareWithAvatar: String? = null,
     val canEdit: Boolean = false,
     val token: String? = null,
     val url: String? = null,
@@ -105,7 +112,7 @@ data class ChunkResult(val received: Long, val done: Boolean, val node: Uploaded
 data class Sharees(val users: List<Sharee> = emptyList(), val groups: List<ShareeGroup> = emptyList())
 
 @Serializable
-data class Sharee(val id: String, val displayName: String = "")
+data class Sharee(val id: String, val displayName: String = "", val avatar: String? = null)
 
 @Serializable
 data class ShareeGroup(val id: String)

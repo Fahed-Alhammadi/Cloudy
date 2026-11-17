@@ -331,7 +331,7 @@ fun MoreScreen(nav: NavController) {
 
             Group {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Avatar(u?.displayName ?: "", 56.dp)
+                    ProfilePicture(u, 56.dp)
                     Column(Modifier.padding(start = 16.dp).weight(1f)) {
                         Text(u?.displayName ?: "", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("${u?.id} · ${Services.session.server.substringAfter("://")}", style = MaterialTheme.typography.bodyMedium,

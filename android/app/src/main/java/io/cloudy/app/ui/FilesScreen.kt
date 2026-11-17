@@ -66,6 +66,7 @@ import androidx.compose.material.icons.outlined.LinkOff
 import androidx.compose.material.icons.outlined.ManageAccounts
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Share
@@ -132,6 +133,7 @@ import io.cloudy.app.data.NodeListing
 import io.cloudy.app.data.Live
 import io.cloudy.app.data.ListCache
 import io.cloudy.app.data.Share
+import io.cloudy.app.data.Sharees
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -448,6 +450,8 @@ fun NodeList(
     reload: () -> Unit,
     scope: CoroutineScope,
     subtitle: (FileNode) -> String? = { null },
+    /** A small picture of the person before the subtitle (the owner on "Shared with you"). */
+    subtitlePerson: ((FileNode) -> Triple<String, String, String?>?)? = null,
     grid: Boolean = false,
     onSelecting: (Boolean) -> Unit = {},
 ) {
@@ -505,8 +509,13 @@ fun NodeList(
                     },
                     headlineContent = { Text(node.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
                     supportingContent = {
-                        Text(subtitle(node) ?: listOfNotNull(formatWhen(node.mtime).ifEmpty { null }, if (node.isDir) null else formatSize(node.size)).joinToString(" · "),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val text = subtitle(node) ?: listOfNotNull(formatWhen(node.mtime).ifEmpty { null }, if (node.isDir) null else formatSize(node.size)).joinToString(" · ")
+                        val person = subtitlePerson?.invoke(node)
+                        if (person == null) Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        else Row(verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(person.first, 18.dp, person.second, person.third)
+                            Text(text, Modifier.padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     },
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -733,8 +742,20 @@ fun SharesDialog(node: FileNode, onDismiss: () -> Unit) {
                     list.forEach { sh ->
                         val link = sh.type == "link"
                         ListItem(
-                            leadingContent = { Icon(if (link) Icons.Outlined.Link else Icons.Outlined.PersonAdd, null) },
-                            headlineContent = { Text(if (link) stringResource(R.string.public_link) else (sh.shareWith ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            leadingContent = {
+                                when (sh.type) {
+                                    "user" -> Avatar(sh.shareWithName ?: sh.shareWith ?: "", 40.dp, sh.shareWith, sh.shareWithAvatar)
+                                    "group" -> Icon(Icons.Outlined.Groups, null)
+                                    else -> Icon(Icons.Outlined.Link, null)
+                                }
+                            },
+                            headlineContent = {
+                                Text(when (sh.type) {
+                                    "link" -> stringResource(R.string.public_link)
+                                    "group" -> stringResource(R.string.group_name, sh.shareWith ?: "")
+                                    else -> sh.shareWithName?.ifBlank { null } ?: sh.shareWith ?: "" // the name; the dialog is too narrow for "Name (id)"
+                                }, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            },
                             supportingContent = {
                                 Text(listOfNotNull(
                                     if (sh.canEdit) stringResource(R.string.share_can_edit) else if (link) null else stringResource(R.string.share_read_only),
@@ -775,11 +796,11 @@ fun PeopleDialog(node: FileNode, onDismiss: () -> Unit) {
     var target by rememberSaveable { mutableStateOf("") }
     var canEdit by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
-    var suggestions by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var suggestions by remember { mutableStateOf<Sharees?>(null) }
     LaunchedEffect(target) {
         delay(250) // one lookup per pause in typing, not per letter
         if (target.length >= 1) runCatching { Services.api.sharees(target.removePrefix("group:")) }.onSuccess { s ->
-            suggestions = s.users.map { it.id to it.displayName } + s.groups.map { "group:${it.id}" to context.getString(R.string.group_name, it.id) }
+            suggestions = s
         }
     }
     AlertDialog(
@@ -788,8 +809,19 @@ fun PeopleDialog(node: FileNode, onDismiss: () -> Unit) {
         text = {
             Column {
                 OutlinedTextField(target, { target = it }, label = { Text(stringResource(R.string.username_or_group)) }, singleLine = true)
-                suggestions.take(5).forEach { (id, label) ->
-                    Text("$label ($id)", Modifier.fillMaxWidth().clickable { target = id }.padding(vertical = 8.dp))
+                // People with their picture, then groups; five at most.
+                val people = suggestions?.users.orEmpty().take(5)
+                people.forEach { u ->
+                    Row(Modifier.fillMaxWidth().clickable { target = u.id }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Avatar(u.displayName.ifBlank { u.id }, 32.dp, u.id, u.avatar)
+                        Text(if (u.displayName.isBlank()) u.id else "${u.displayName} (${u.id})", Modifier.padding(start = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                suggestions?.groups.orEmpty().take(5 - people.size).forEach { g ->
+                    Row(Modifier.fillMaxWidth().clickable { target = "group:${g.id}" }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) { Icon(Icons.Outlined.Groups, null) }
+                        Text(stringResource(R.string.group_name, g.id), Modifier.padding(start = 12.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 Row(Modifier.fillMaxWidth().toggleable(canEdit, role = androidx.compose.ui.semantics.Role.Checkbox) { canEdit = it },
                     verticalAlignment = Alignment.CenterVertically) {
@@ -867,7 +899,7 @@ fun NodeListScreen(nav: NavController, kind: String, isTab: Boolean = false) {
                         "shared-out" -> context.getString(R.string.with_targets, outgoing[n.id] ?: "")
                         else -> null
                     }
-                })
+                }, subtitlePerson = if (kind == "shared-in") { n -> Triple(n.ownerName ?: n.owner, n.owner, n.ownerAvatar) } else null)
             }
         }
     }

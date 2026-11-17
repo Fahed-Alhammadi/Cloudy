@@ -25,6 +25,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Description
@@ -76,6 +79,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.cloudy.app.R
+import io.cloudy.app.Services
 import io.cloudy.app.data.FileNode
 import java.time.Instant
 import java.time.ZoneId
@@ -214,13 +218,21 @@ private val AVATAR_COLORS = listOf(0xFF0B6BCB, 0xFF0E9AA7, 0xFF1F9D55, 0xFFE8772
 /** A stable color per name, so a person keeps their avatar color everywhere. */
 fun avatarColor(name: String): Color = AVATAR_COLORS[Math.floorMod(name.hashCode(), AVATAR_COLORS.size)]
 
-/** Initials in a circle filled with the name's color. */
+/**
+ * A person as a circle: their profile picture when [userId] and [version] (the picture's version from the server) are
+ * known, else initials on the name's color. The initials stay underneath, so a picture that can't load shows them.
+ */
 @Composable
-fun Avatar(name: String, size: Dp = 40.dp) {
+fun Avatar(name: String, size: Dp = 40.dp, userId: String? = null, version: String? = null) {
     val initials = name.split(' ').filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1) }.uppercase().ifEmpty { "?" }
     val color = avatarColor(name).forTheme()
+    // The circle has a fixed size, so the initials ignore the font scale (they would no longer fit).
+    val fontSize = with(LocalDensity.current) { (size * 0.38f).toSp() }
     Box(Modifier.size(size).clip(CircleShape).background(color.copy(alpha = if (isSystemInDarkTheme()) 0.3f else 0.16f)), contentAlignment = Alignment.Center) {
-        Text(initials, color = color, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+        Text(initials, color = color, fontWeight = FontWeight.SemiBold, fontSize = fontSize, maxLines = 1)
+        if (userId != null && version != null) {
+            AsyncImage(Services.api.avatarUrl(userId, version), null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+        }
     }
 }
 

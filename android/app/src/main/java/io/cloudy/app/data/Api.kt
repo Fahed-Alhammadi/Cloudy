@@ -157,6 +157,15 @@ class Api(private val session: Session) {
     suspend fun deleteShare(id: Long) { send("DELETE", "/api/shares/$id") }
     suspend fun sharees(q: String): Sharees = decode(send("GET", "/api/sharees?q=${enc(q)}"))
 
+    // ---------------------------------------------------------------- profile pictures (server 1.20+)
+    /** The version in the address makes it immutable: a new picture has a new address, so caches never go stale. */
+    fun avatarUrl(userId: String, version: String) = url("/api/users/${enc(userId)}/avatar?v=${enc(version)}")
+
+    /** Stores [jpeg] as the signed-in user's picture; answers its new version. */
+    suspend fun setAvatar(jpeg: ByteArray): String =
+        json.parseToJsonElement(send("PUT", "/api/me/avatar", jpeg.toRequestBody("image/jpeg".toMediaType()))).jsonObject["avatar"]!!.jsonPrimitive.content
+    suspend fun removeAvatar() { send("DELETE", "/api/me/avatar") }
+
     // ---------------------------------------------------------------- transfer
     fun downloadUrl(id: Long, inline: Boolean = false) = url("/api/nodes/$id/download" + if (inline) "?inline" else "")
 

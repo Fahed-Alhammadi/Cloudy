@@ -227,4 +227,19 @@
     <string name="too_many_attempts">Too many failed attempts, try again later</string>
     <string name="password_changed">Password changed</string>
     <string name="change_password_note">Web browsers signed in to your account are signed out. This phone and your other devices stay signed in.</string>
+    <!-- Profile picture (More screen); same words as the web's Settings → Profile picture. -->
+    <string name="profile_picture">Profile picture</string>
+    <string name="upload_picture">Upload picture</string>
+    <string name="change_picture">Change picture</string>
+    <string name="remove_picture">Remove profile picture</string>
+    <string name="remove_picture_text">Your initials are shown instead.</string>
+    <string name="remove">Remove</string>
+    <string name="new_profile_picture">New profile picture</string>
+    <string name="picture_preview">Preview of your new profile picture</string>
+    <string name="picture_preview_note">This is how other people see you in Cloudy.</string>
+    <string name="save_picture">Save picture</string>
+    <string name="picture_saved">Profile picture saved</string>
+    <string name="picture_removed">Profile picture removed</string>
+    <string name="picture_unreadable">This picture can\'t be read. Choose another one.</string>
+    <string name="picture_unsupported">This server can\'t store profile pictures yet. Ask its operator to update Cloudy.</string>
 </resources>
