@@ -102,9 +102,6 @@ data class UploadedNode(val id: Long, val name: String, val size: Long)
 data class ChunkResult(val received: Long, val done: Boolean, val node: UploadedNode? = null)
 
 @Serializable
-data class Version(val id: Long, val size: Long, val mtime: String)
-
-@Serializable
 data class Sharees(val users: List<Sharee> = emptyList(), val groups: List<ShareeGroup> = emptyList())
 
 @Serializable

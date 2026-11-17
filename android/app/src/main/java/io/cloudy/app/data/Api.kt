@@ -122,8 +122,6 @@ class Api(private val session: Session) {
     suspend fun search(q: String): List<FileNode> = decode(send("GET", "/api/search?q=${enc(q)}"))
     suspend fun sharedWithMe(): List<FileNode> = decode(send("GET", "/api/shares/incoming"))
     suspend fun sharedByMe(): List<Share> = decode(send("GET", "/api/shares/outgoing"))
-    suspend fun versions(id: Long): List<Version> = decode(send("GET", "/api/nodes/$id/versions"))
-    suspend fun restoreVersion(id: Long, vid: Long) { send("POST", "/api/nodes/$id/versions/$vid/restore") }
 
     suspend fun trash(): List<TrashItem> = decode(send("GET", "/api/trash"))
     suspend fun restore(id: Long) { send("POST", "/api/trash/$id/restore") }
