@@ -145,6 +145,16 @@ req('POST', f'/api/nodes/{travel}/shares', {'type': 'link', 'password': 'lisbon2
 dan_root = req('GET', '/api/me', cookie=dan)['rootId']
 team = req('POST', f'/api/nodes/{dan_root}/folders', {'name': 'Team photos'}, cookie=dan)['id']
 req('POST', f'/api/nodes/{team}/shares', {'type': 'user', 'shareWith': USER}, cookie=dan)
+# More shared with Sarah, so the Shared tab (Android) is not a single row.
+ele = session('elena', PW)
+ele_root = req('GET', '/api/me', cookie=ele)['rootId']
+for cookie, parent, name, edit in [(ele, ele_root, 'Recipes', True), (dan, dan_root, 'Office move 2027', False)]:
+    nid = req('POST', f'/api/nodes/{parent}/folders', {'name': name}, cookie=cookie)['id']
+    req('POST', f'/api/nodes/{nid}/shares', {'type': 'user', 'shareWith': USER, 'canEdit': edit}, cookie=cookie)
+for cookie, parent, name, size in [(ele, ele_root, 'Q4 report.pdf', 1_350_000), (dan, dan_root, 'Budget review.xlsx', 142_000)]:
+    up = req('POST', '/api/uploads', {'parentId': parent, 'name': name, 'size': size}, cookie=cookie)
+    nid = req('PUT', f"/api/uploads/{up['id']}", blob(size), cookie=cookie, headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})['node']['id']
+    req('POST', f'/api/nodes/{nid}/shares', {'type': 'user', 'shareWith': USER}, cookie=cookie)
 
 # --- calendars: events around today (floating local times) --------------------------------------------------------------
 work = req('POST', '/api/calendars', {'name': 'Work', 'color': '#E8772E'}, cookie=me)['uri']

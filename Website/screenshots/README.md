@@ -1,5 +1,5 @@
 Screenshots shown on the GitHub Pages site (`Website/index.html`). The main README shows `overview.png` and four of
-the Google Play images (`../play/web/`).
+the Google Play images (`../play/website/`).
 
 ```
 screenshots/
@@ -18,7 +18,7 @@ screenshots/
 
 - **Android** (every folder under `android/` uses the same file names): `files.png`, `grid.png` (Photos folder as a
   grid), `preview.png` (text editor), `sharing.png`, `photos.png` (Photo backup),
-  `more.png`, `dark.png` (Files in the dark theme). The website shows all phone shots and four 7-inch tablet shots;
+  `recent.png`, `shared.png` (the Recent and Shared tabs), `more.png`, `dark.png` (Files in the dark theme). The website shows all phone shots and four 7-inch tablet shots;
   `Website/play/render.py` turns them into the Google Play phone and tablet screenshots and the feature graphic.
   How they are taken: demo account from `ios/appstore/seed.py` (for Android set the quota to 53687091200 so the app
   shows 50 GB), the debug build (`io.cloudy.app.debug`), `cloud.local` as the server name via `adb root` + a
@@ -28,8 +28,9 @@ screenshots/
   with its display overridden (as done for app version 1.16): `adb shell wm size 1200x1920; adb shell wm density 320` for
   the 7-inch set, `wm size 1600x2560` + `wm density 320` + `wm user-rotation lock 1` for the 10-inch set, then
   `wm size reset; wm density reset; wm user-rotation lock 0`. Photo backup creates a "Camera Uploads" folder when it is
-  switched on: take `photos.png` last and delete that folder again. The desktop and XR sets are still from app version
-  1.15 (bottom bar instead of the side rail). The desktop and XR images are big (4 and 8 GB): install with
+  switched on: take `photos.png` last and delete that folder again. All five sets were retaken for app version 1.19
+  (Files · Recent · Shared · More). On desktop and XR the hosts trick also works (`adb root` is allowed); on XR use the
+  app's own back arrow, and scroll the short panel to reach "Weekly planning.md". The desktop and XR images are big (4 and 8 GB): install with
   `sdkmanager "system-images;android-34;android-desktop;arm64-v8a" "system-images;android-34;google-xr;arm64-v8a"`
   and uninstall again afterwards. On XR the system starts in dark mode (`cmd uimode night no`), Back closes the panel
   (use the app's own back arrow) and the short panel needs the file actions sheet dragged up to reach "Manage sharing".

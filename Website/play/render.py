@@ -1,5 +1,6 @@
 """Renders the Google Play graphics in this folder with headless Chrome (macOS path below).
-Usage: python3 -I Website/play/render.py
+Usage: python3 -I Website/play/render.py [form ...]   (forms: phone tablet-7-inch tablet-10-inch desktop xr; default all)
+  The feature graphic and web/ are always rendered (they use the phone and 7-inch captures).
 Sources (raw emulator captures, demo account from ios/appstore/seed.py, see ../screenshots/README.md):
   ../screenshots/android/phone/*.png            phone, 1080x2400 (Pixel 7, API 35)
   ../screenshots/android/tablet/7-inch/*.png    7-inch tablet, 1200x1920 (Nexus 7 2013, API 35)
@@ -7,13 +8,13 @@ Sources (raw emulator captures, demo account from ios/appstore/seed.py, see ../s
   ../screenshots/android/desktop/*.jpg          Android desktop, 2560x1440 (desktop_medium, android-desktop API 34)
   ../screenshots/android/xr/*.jpg               Android XR headset view, 2048x2048 (xr_headset_device, google-xr API 34)
 Output (every set: 8 images, the same story):
-  phone/NN-name.png           1080x1920 (9:16)   Play "Phone screenshots"
-  tablet-7-inch/NN-name.png   1920x1080 (16:9)   Play "7-inch tablet screenshots"
-  tablet-10-inch/NN-name.png  1920x1080 (16:9)   Play "10-inch tablet screenshots"
-  desktop/NN-name.png         1920x1080 (16:9)   Play "Desktop screenshots"
-  xr/NN-name.png              3840x2400 (8:5)    Play "Android XR screenshots" (8:5 is required for XR)
-  feature-graphic.png  1024x500           Play "Feature graphic" (also the website's og:image)
-  web/NN-name.jpg      540x960            the phone shots for the website's "Cloudy for Android" section
+  phone-screenshots/NN-name.png           1080x1920 (9:16)   Play "Phone screenshots"
+  7-inch-tablet-screenshots/NN-name.png   1920x1080 (16:9)   Play "7-inch tablet screenshots"
+  10-inch-tablet-screenshots/NN-name.png  1920x1080 (16:9)   Play "10-inch tablet screenshots"
+  desktop-screenshots/NN-name.png         1920x1080 (16:9)   Play "Desktop screenshots"
+  android-xr-screenshots/NN-name.png      3840x2160 (16:9)   Play "Android XR screenshots"
+  feature-graphic/feature-graphic.png     1024x500           Play "Feature graphic" (also the website's og:image)
+  website/NN-name.jpg  540x960            the phone shots for the website's "Cloudy for Android" section
 Design: the website's night-sky palette (site.css) and IBM Plex Sans; device frames drawn in CSS."""
 import os, subprocess, tempfile
 
@@ -28,8 +29,8 @@ SCREENS = [
     ('grid', 'Photos', 'See your photos at a glance', 'Browse folders as a grid with thumbnails'),
     ('photos', 'Photo backup', 'New photos back up by themselves', 'Straight to your server, on Wi‑Fi only if you like'),
     ('sharing', 'Sharing', 'Share with people or with a link', 'Passwords and expiry dates keep links private'),
-    ('calendar', 'Calendar', 'Your calendar on every device', 'Synced with the web app and CalDAV'),
-    ('contacts', 'Contacts', 'All your contacts in one place', 'Import .vcf or .csv files, export any time'),
+    ('recent', 'Recent', 'Pick up where you left off', 'The files you opened or changed lately, one tap away'),
+    ('shared', 'Shared', 'Everything shared with you', 'Folders and files from family and colleagues, in one place'),
     ('preview', 'Editor', 'Jot it down, wherever you are', 'Open and edit text and Markdown files'),
     ('dark', 'Dark theme', 'Easy on the eyes at night', 'Light and dark follow your device’s setting'),
 ]
@@ -139,9 +140,13 @@ def wide_device(kind, src, width):
             f'<img src="file://{src}" style="width:100%;height:100%;object-fit:cover;object-position:50% 58%"></div>')
 
 
-# Canvas per form factor: (width, height, scale). Android XR wants 8:5 (Play Console help, "Add preview assets"),
-# rendered at 2x = 3840x2400; the others 16:9.
-CANVAS = {'tablet-10-inch': (1920, 1080, 1), 'desktop': (1920, 1080, 1), 'xr': (1920, 1200, 2)}
+# Canvas per form factor: (width, height, scale). All 16:9 (Play Console, 2026: XR accepts 16:9 or 9:16, 720-7680 px);
+# XR rendered at 2x = 3840x2160.
+CANVAS = {'tablet-10-inch': (1920, 1080, 1), 'desktop': (1920, 1080, 1), 'xr': (1920, 1080, 2)}
+
+# Output folder per form factor, named after the Play Console field it is uploaded to (see README.md here).
+OUT = {'phone': 'phone-screenshots', 'tablet-7-inch': '7-inch-tablet-screenshots', 'tablet-10-inch': '10-inch-tablet-screenshots',
+       'desktop': 'desktop-screenshots', 'xr': 'android-xr-screenshots'}
 
 WIDE = {  # form factor -> (device kind, capture folder, extension, first headline)
     'tablet-10-inch': ('tablet10', os.path.join('tablet', '10-inch'), 'png', None),
@@ -176,7 +181,7 @@ FEATURE = page(1024, 500, f'''
     <img src="file://{SITE}/logo.svg" width="92" height="92" style="border-radius:22px;box-shadow:0 10px 30px rgba(0,8,30,.45)">
     <div style="font-size:76px;font-weight:600;letter-spacing:-.03em">Cloudy</div>
   </div>
-  <h1 style="font-size:36px;margin-top:28px;line-height:1.2;letter-spacing:-.01em">Your own cloud for files, photos, calendars and contacts</h1>
+  <h1 style="font-size:36px;margin-top:28px;line-height:1.2;letter-spacing:-.01em">Your own cloud for your files and photos</h1>
   <p style="font-size:21px;margin-top:16px;color:#9fd0ff;font-weight:600;letter-spacing:.02em">Self-hosted · Private · Open source</p>
 </div>
 {tablet(os.path.join(SHOTS, 'tablet', '7-inch', 'grid.png'), 600, 64, 300, 'transform:rotate(-4deg)')}
@@ -193,20 +198,23 @@ def render(html, out, w, h, scale=1):
 
 
 if __name__ == '__main__':
-    for d in ('phone', 'tablet-7-inch', *WIDE):
-        os.makedirs(os.path.join(HERE, d), exist_ok=True)
+    import sys
+    forms = sys.argv[1:] or ['phone', 'tablet-7-inch', *WIDE]
+    for d in forms:
+        os.makedirs(os.path.join(HERE, OUT[d]), exist_ok=True)
     for i, (name, kicker, title, sub) in enumerate(SCREENS):
         n = f'{i + 1:02d}-{name}.png'
-        render(phone_shot(i, name, kicker, title, sub), os.path.join(HERE, 'phone', n), 1080, 1920)
-        render(tablet_shot(i, name, kicker, title, sub), os.path.join(HERE, 'tablet-7-inch', n), 1920, 1080)
-        for form in WIDE:
+        if 'phone' in forms: render(phone_shot(i, name, kicker, title, sub), os.path.join(HERE, OUT['phone'], n), 1080, 1920)
+        if 'tablet-7-inch' in forms: render(tablet_shot(i, name, kicker, title, sub), os.path.join(HERE, OUT['tablet-7-inch'], n), 1920, 1080)
+        for form in (f for f in WIDE if f in forms):
             w, h, scale = CANVAS[form]
-            render(wide_shot(form, i, name, kicker, title, sub), os.path.join(HERE, form, n), w, h, scale)
-    render(FEATURE, os.path.join(HERE, 'feature-graphic.png'), 1024, 500)
-    # Smaller JPEG copies of the phone shots for the website's Android section (web/NN-name.jpg, 540x960).
-    os.makedirs(os.path.join(HERE, 'web'), exist_ok=True)
+            render(wide_shot(form, i, name, kicker, title, sub), os.path.join(HERE, OUT[form], n), w, h, scale)
+    os.makedirs(os.path.join(HERE, 'feature-graphic'), exist_ok=True)
+    render(FEATURE, os.path.join(HERE, 'feature-graphic', 'feature-graphic.png'), 1024, 500)
+    # Smaller JPEG copies of the phone shots for the website's Android section (website/NN-name.jpg, 540x960).
+    os.makedirs(os.path.join(HERE, 'website'), exist_ok=True)
     for i, (name, *_rest) in enumerate(SCREENS):
         n = f'{i + 1:02d}-{name}'
-        subprocess.run(['sips', '-Z', '960', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', os.path.join(HERE, 'phone', n + '.png'),
-                        '--out', os.path.join(HERE, 'web', n + '.jpg')], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(['sips', '-Z', '960', '-s', 'format', 'jpeg', '-s', 'formatOptions', '82', os.path.join(HERE, OUT['phone'], n + '.png'),
+                        '--out', os.path.join(HERE, 'website', n + '.jpg')], check=True, stdout=subprocess.DEVNULL)
     print('rendered')
