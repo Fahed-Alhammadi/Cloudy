@@ -21,7 +21,7 @@ struct MoreView: View {
                 if let user = session.user {
                     Section {
                         HStack(spacing: 14) {
-                            Avatar(name: user.name, size: 52)
+                            ProfilePicture(user: user, size: 52)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(user.name).font(.title3.weight(.semibold))
                                 Text(verbatim: "\(user.id) · \(URL(string: session.server)?.host ?? session.server)")
@@ -75,6 +75,8 @@ struct MoreView: View {
             .navigationTitle("More")
             .withRoutes()
             .refreshable { await session.refresh() }
+            // A picture or name changed on the web shows when More opens, as on Android.
+            .task { await session.refresh() }
             .confirmationDialog("Sign out of Cloudy?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { session.signOut() }
             } message: {

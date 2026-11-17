@@ -54,7 +54,13 @@ struct ShareSheetView: View {
                         LabeledContent {
                             Text(s.canEdit == true ? "Can edit" : "Can view").font(.subheadline)
                         } label: {
-                            Label(s.shareWith ?? "", systemImage: s.type == "group" ? "person.3.fill" : "person.fill")
+                            if s.type == "group" {
+                                Label(s.shareWith ?? "", systemImage: "person.3.fill")
+                            } else {
+                                // The person's name and picture (server 1.20+; older ones send only the user name).
+                                let name = (s.shareWithName ?? "").isEmpty ? (s.shareWith ?? "") : s.shareWithName!
+                                Label { Text(name) } icon: { Avatar(name: name, size: 28, userId: s.shareWith, version: s.shareWithAvatar) }
+                            }
                         }
                     }
                     .onDelete { remove(people, $0) }
@@ -63,7 +69,8 @@ struct ShareSheetView: View {
                     Toggle("Can edit", isOn: $canEdit)
                     ForEach(sharees.users ?? [], id: \.id) { u in
                         Button { shareWith(u.id, group: false) } label: {
-                            Label((u.displayName ?? "").isEmpty ? u.id : "\(u.displayName!) (\(u.id))", systemImage: "person.badge.plus")
+                            let name = (u.displayName ?? "").isEmpty ? u.id : u.displayName!
+                            Label { Text(name == u.id ? u.id : "\(name) (\(u.id))") } icon: { Avatar(name: name, size: 28, userId: u.id, version: u.avatar) }
                         }
                     }
                     ForEach(sharees.groups ?? [], id: \.id) { g in

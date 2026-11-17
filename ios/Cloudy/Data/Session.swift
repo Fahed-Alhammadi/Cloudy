@@ -74,5 +74,6 @@ final class Session {
         user = nil
         FileCache.clear()
         Task { await Thumbnails.shared.clear() }
+        Task { await Avatars.shared.clear() }
     }
 }

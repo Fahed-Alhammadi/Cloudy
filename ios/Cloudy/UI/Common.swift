@@ -86,9 +86,17 @@ struct TypeTile: View {
     }
 }
 
+/// Who a row's subtitle is about ("From Sarah" on Shared with you): shown as a small picture before it.
+struct RowPerson: Hashable {
+    var name: String
+    var id: String
+    var avatar: String?
+}
+
 struct NodeRow: View {
     let node: FileNode
     var subtitle: String?
+    var person: RowPerson? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -96,8 +104,11 @@ struct NodeRow: View {
             TypeTile(node: node)
             VStack(alignment: .leading, spacing: 2) {
                 Text(node.name).lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                Text(subtitle ?? defaultSubtitle).font(.footnote).foregroundStyle(.secondary)
-                    .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                HStack(spacing: 5) {
+                    if let person { Avatar(name: person.name, size: 16, userId: person.id, version: person.avatar) }
+                    Text(subtitle ?? defaultSubtitle).font(.footnote).foregroundStyle(.secondary)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                }
             }
             Spacer(minLength: 0)
             if node.isFavorite {
@@ -154,13 +165,17 @@ func avatarColor(_ name: String) -> Color {
     return avatarColors[Int(((h % n) + n) % n)]
 }
 
-/// Initials in a circle tinted with the name's color (16 % in light mode, 30 % in dark mode, as on Android).
-/// Grows with Dynamic Type like `TypeTile`.
+/// A person as a circle: their profile picture when `userId` and `version` (the picture's version from the server) are
+/// known, else initials tinted with the name's color (16 % in light mode, 30 % in dark mode, as on Android). The
+/// initials stay underneath, so a picture that can't load shows them. Grows with Dynamic Type like `TypeTile`.
 struct Avatar: View {
     let name: String
     var size: CGFloat = 40
+    var userId: String? = nil
+    var version: String? = nil
     @Environment(\.colorScheme) private var scheme
     @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
+    @State private var picture: UIImage?
 
     var body: some View {
         let letters = name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
@@ -171,7 +186,19 @@ struct Avatar: View {
             .foregroundStyle(color)
             .frame(width: side, height: side)
             .background(Circle().fill(color.opacity(scheme == .dark ? 0.3 : 0.16)))
+            .overlay {
+                if let picture {
+                    Image(uiImage: picture).resizable().scaledToFill().frame(width: side, height: side).clipShape(Circle())
+                        .transition(.opacity)
+                }
+            }
             .accessibilityHidden(true)
+            .task(id: "\(userId ?? "")|\(version ?? "")") {
+                guard let userId, let version else { picture = nil; return }
+                if let img = Avatars.shared.cached(userId: userId, version: version) { picture = img; return }
+                let img = await Avatars.shared.image(userId: userId, version: version)
+                withAnimation(.easeOut(duration: 0.2)) { picture = img }
+            }
     }
 }
 

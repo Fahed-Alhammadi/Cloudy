@@ -182,6 +182,20 @@ final class API: @unchecked Sendable {
     }
     func deleteShare(_ id: Int64) async throws { try await send("DELETE", "/api/shares/\(id)") }
     func sharees(_ q: String) async throws -> Sharees { try await get("/api/sharees?q=\(enc(q))") }
+
+    // MARK: profile pictures (server 1.20+)
+
+    /// The version in the address makes it immutable: a new picture has a new address.
+    func avatar(userId: String, version: String) async throws -> Data {
+        try await send("GET", "/api/users/\(enc(userId))/avatar?v=\(enc(version))")
+    }
+    /// Stores `jpeg` as the signed-in user's picture; returns its new version.
+    func setAvatar(_ jpeg: Data) async throws -> String {
+        struct Answer: Decodable { var avatar: String }
+        let answer: Answer = try decode(await send("PUT", "/api/me/avatar", body: jpeg, contentType: "image/jpeg"))
+        return answer.avatar
+    }
+    func removeAvatar() async throws { _ = try await send("DELETE", "/api/me/avatar") }
     func publicURL(_ share: Share) -> URL? { share.url.flatMap { try? url($0) } }
 
     // MARK: transfer

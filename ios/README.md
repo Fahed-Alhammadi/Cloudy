@@ -43,6 +43,8 @@ Account deletion without tapping: add `SIMCTL_CHILD_CLOUDY_DELETE_TEST=<password
 *Delete account* prompt filled in, or `go:<password>` to submit it (Debug builds only; it really deletes the account).
 Password change without typing: `SIMCTL_CHILD_CLOUDY_SCRIPT='1:route:password'` opens *Change password*, and
 `SIMCTL_CHILD_CLOUDY_PASSWORD_TEST=[go:]<current>:<new>[:<repeat>]` fills it in (`go:` also submits; it really changes it).
+Profile picture without the photo picker (it can't be scripted): `SIMCTL_CHILD_CLOUDY_PICTURE_TEST=<file>` (with `CLOUDY_TAB=3`)
+opens *New profile picture* with that file from the Mac, `go:<file>` also saves it, `remove` removes the current picture.
 Login screen without typing: `SIMCTL_CHILD_CLOUDY_LOGIN_TEST=<user>:<password>` fills in the form;
 `SIMCTL_CHILD_CLOUDY_PASSWORD_VISIBLE=1` starts password fields shown (eye toggled on).
 Looking at states and motion without tapping (all in `Cloudy/UI/Screenshots.swift`): `SIMCTL_CHILD_CLOUDY_SCRIPT=<seconds>:<step>;…`

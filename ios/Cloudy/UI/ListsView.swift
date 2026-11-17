@@ -9,7 +9,7 @@ struct NodeListView: View {
 
     var body: some View {
         List(nodes ?? [], selection: $actions.selection) { node in
-            FileRow(node: node, actions: actions, subtitle: subtitle(node))
+            FileRow(node: node, actions: actions, subtitle: subtitle(node), person: person(node))
         }
         .environment(\.editMode, .constant(actions.selecting ? .active : .inactive))
         .overlay {
@@ -61,6 +61,11 @@ struct NodeListView: View {
         case .favorites: "star"
         case .shared: "person.2"
         }
+    }
+
+    private func person(_ n: FileNode) -> RowPerson? {
+        guard kind == .shared, let owner = n.owner else { return nil }
+        return RowPerson(name: n.ownerName ?? owner, id: owner, avatar: n.ownerAvatar)
     }
 
     private func subtitle(_ n: FileNode) -> String? {

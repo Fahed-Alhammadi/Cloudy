@@ -354,16 +354,17 @@ struct FileRow: View {
     let node: FileNode
     let actions: FileActions
     var subtitle: String?
+    var person: RowPerson? = nil
 
     var body: some View {
         let content = HStack(spacing: 2) {
-            NodeRow(node: node, subtitle: subtitle)
+            NodeRow(node: node, subtitle: subtitle, person: person)
             ActionsButton(node: node, actions: actions)
         }
         Group {
             if actions.selecting {
                 // Multi-select: the List (in edit mode) handles the tap and draws the checkmark.
-                NodeRow(node: node, subtitle: subtitle)
+                NodeRow(node: node, subtitle: subtitle, person: person)
             } else if let route = node.route(canEdit: actions.canEditContent(node)) {
                 // A hidden link makes the whole row tappable without the disclosure chevron.
                 ZStack {

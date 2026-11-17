@@ -15,6 +15,8 @@ struct User: Codable, Hashable {
     var trashDays: Int?
     /// The server makes small previews of pictures and PDFs (`/api/nodes/{id}/thumb`, server 1.19+, `/api/me` only).
     var thumbnails: Bool?
+    /// The profile picture's version (`GET /api/users/{id}/avatar?v=<it>`, server 1.20+), nil when there is none.
+    var avatar: String?
 
     var name: String { (displayName ?? "").isEmpty ? id : displayName! }
 }
@@ -49,6 +51,8 @@ struct FileNode: Codable, Identifiable, Hashable {
     // Present on "shared with you" and search results.
     var canEdit: Bool?
     var ownerName: String?
+    /// The owner's profile picture version ("shared with you", server 1.20+).
+    var ownerAvatar: String?
     var shareId: Int64?
     var shareType: String?
     var path: String?
@@ -88,6 +92,9 @@ struct Share: Codable, Identifiable, Hashable {
     var nodeId: Int64
     var type: String
     var shareWith: String?
+    /// The person's display name and profile picture version (user shares, server 1.20+).
+    var shareWithName: String?
+    var shareWithAvatar: String?
     var canEdit: Bool?
     var token: String?
     var url: String?
@@ -127,6 +134,7 @@ struct Sharees: Codable {
 struct Sharee: Codable, Hashable {
     var id: String
     var displayName: String?
+    var avatar: String?
 }
 
 struct ShareeGroup: Codable, Hashable {
