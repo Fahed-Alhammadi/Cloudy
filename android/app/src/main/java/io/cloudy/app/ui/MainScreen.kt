@@ -373,6 +373,14 @@ fun MoreScreen(nav: NavController) {
                 Entry(R.string.change_password, Icons.Outlined.Password, SettingColor.Orange, "password")
                 Entry(R.string.devices, Icons.Outlined.Devices, SettingColor.Indigo, "devices")
             }
+            // Help, feedback, rating, the website, the privacy policy and the version all live in About.
+            Group {
+                ListItem(modifier = Modifier.clickable { nav.navigate("about") }, colors = itemColors,
+                    leadingContent = { Badge(Icons.Outlined.Info, SettingColor.Gray) },
+                    headlineContent = { Text(stringResource(R.string.about)) },
+                    supportingContent = { Text(stringResource(R.string.about_summary)) },
+                    trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline) })
+            }
             Group {
                 ListItem(
                     modifier = Modifier.clickable { confirmLogout = true }, colors = itemColors,
@@ -384,14 +392,6 @@ fun MoreScreen(nav: NavController) {
                     leadingContent = { Badge(Icons.Outlined.PersonRemove, MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer) },
                     headlineContent = { Text(stringResource(R.string.delete_account), color = MaterialTheme.colorScheme.error) },
                 )
-            }
-            // Help, feedback, rating, the website, the privacy policy and the version all live in About.
-            Group {
-                ListItem(modifier = Modifier.clickable { nav.navigate("about") }, colors = itemColors,
-                    leadingContent = { Badge(Icons.Outlined.Info, SettingColor.Gray) },
-                    headlineContent = { Text(stringResource(R.string.about)) },
-                    supportingContent = { Text(stringResource(R.string.about_summary)) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline) })
             }
             // Adding up the offline folder reads the disk: done in the background, shown when ready.
             val offlineBytes by produceState<Long?>(null) { value = withContext(Dispatchers.IO) { Services.offline.usedBytes() } }

@@ -41,6 +41,10 @@ struct MoreView: View {
                 } footer: {
                     Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy.")
                 }
+                // Help, feedback, rating, the website, the privacy policy and the version all live in About.
+                Section {
+                    NavigationLink(value: Route.about) { SettingsLabel("About Cloudy", icon: "info", color: .settingsGray) }
+                }
                 Section {
                     Button("Sign out", role: .destructive) { confirmSignOut = true }
                 }
@@ -52,10 +56,6 @@ struct MoreView: View {
                     .disabled(deleting)
                 } footer: {
                     Text("Deletes your account and all your data on this server for good.")
-                }
-                // Help, feedback, rating, the website, the privacy policy and the version all live in About.
-                Section {
-                    NavigationLink(value: Route.about) { SettingsLabel("About Cloudy", icon: "info", color: .settingsGray) }
                 }
             }
             .navigationTitle("More")

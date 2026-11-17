@@ -1,4 +1,4 @@
-• About Cloudy in More now holds Help, Send feedback, Rate Cloudy, the website, the privacy policy and the version.
+• About Cloudy now sits above Sign out and Delete account in More. It holds Help, Send feedback, Rate Cloudy, the website, the privacy policy and the version.
 • Profile pictures: tap your picture in More to choose a photo, change it or remove it. It is the same picture as on the web.
 • See people's pictures in "Shared with you" and in the sharing screen, also when you look someone up to share with.
 • Profile pictures need Cloudy server 1.20 or newer.
