@@ -11,7 +11,9 @@
 # Without them the publish job fails.
 # Release notes: ios/whatsnew/en-US.txt (update it with each version bump) → TestFlight "What to Test" and, from the second
 #   App Store version on, "What's New" if that version already exists in App Store Connect (scripts/appstore-whatsnew.mjs).
-# macos-26 runner: App Store Connect only accepts builds made with the iOS 26 SDK (Xcode 26) or newer.
+# Xcode 27 (iOS 27 SDK), as App Store Connect asks for: GitHub's `xcode-27` runner (macOS 27; public preview at the time
+#   of writing, see actions/runner-images). Its default is 27.1, so DEVELOPER_DIR picks 27.2 = the Mac's Xcode.
+#   When that version leaves the image, point DEVELOPER_DIR at a newer /Applications/Xcode_27.x.app.
 name: iOS
 
 on:
@@ -35,11 +37,15 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+
 jobs:
   build:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
+      - run: xcodebuild -version
       - name: Release tag matches the version in the files
         if: github.ref_type == 'tag'
         run: python3 scripts/version.py check "$GITHUB_REF_NAME"
@@ -51,7 +57,7 @@ jobs:
   publish:
     needs: build
     if: github.ref_type == 'tag'
-    runs-on: macos-26
+    runs-on: xcode-27
     permissions:
       contents: read
     steps:
