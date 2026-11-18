@@ -10,6 +10,8 @@ export interface Account {
   server: string;
   user: string;
   displayName?: string;
+  /** The profile picture's version on the server (null or missing: none). */
+  avatar?: string | null;
   /** base64; encrypted when `tokenEncrypted`. Missing: signed out by the server (folder and history kept). */
   token?: string;
   tokenEncrypted?: boolean;
@@ -204,4 +206,19 @@ export async function runMove(home: string, account: Account): Promise<string | 
       return 'stuck';
     }
   }
+}
+
+/**
+ * The sync folder for a place the user picked with "Change…": the account always gets its own Cloudy/<username>
+ * folder there, as by default. Picking the Cloudy folder itself gives Cloudy/<username>; picking a folder that is
+ * already named after the account (a Cloudy/<username> from before) keeps it as it is.
+ */
+export function folderIn(chosen: string, user: string, platform: string = process.platform): string {
+  const p = path.resolve(chosen);
+  const name = folderName(user);
+  const fold = (s: string) => (caseInsensitive(platform) ? s.normalize('NFC').toLowerCase() : s.normalize('NFC'));
+  const base = fold(path.basename(p));
+  if (base === fold(name) || new RegExp(`^${fold(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\(\\d+\\)$`).test(base)) return p;
+  if (base === fold('Cloudy')) return path.join(p, name);
+  return path.join(p, 'Cloudy', name);
 }

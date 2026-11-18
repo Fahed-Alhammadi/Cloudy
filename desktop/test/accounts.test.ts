@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defaultFolder, folderName, needsMove, overlaps, parseSettings, runMove, MARKER, MIGRATED_ID, type Account } from '../src/main/accounts.ts';
+import { defaultFolder, folderIn, folderName, needsMove, overlaps, parseSettings, runMove, MARKER, MIGRATED_ID, type Account } from '../src/main/accounts.ts';
 
 const tempHome = () => mkdtemp(path.join(tmpdir(), 'cloudy-home-'));
 const acct = (o: Partial<Account>): Account => ({ id: 'x1', server: 'https://cloud.example.com', user: 'fahed', excluded: [], paused: false, ...o });
@@ -162,4 +162,16 @@ test('an old folder chosen as "~/cloudy" on macOS is moved too', async () => {
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+test('a place chosen with "Change…" gets Cloudy/<username>, unless it is already that folder', () => {
+  const p = (...s: string[]) => path.join('/Users/me', ...s);
+  assert.equal(folderIn(p('Documents'), 'fahed', 'darwin'), p('Documents', 'Cloudy', 'fahed'));
+  assert.equal(folderIn(p('Documents', 'Cloudy'), 'fahed', 'darwin'), p('Documents', 'Cloudy', 'fahed'));
+  assert.equal(folderIn(p('Documents', 'cloudy'), 'fahed', 'darwin'), p('Documents', 'cloudy', 'fahed'));
+  assert.equal(folderIn(p('Cloudy', 'fahed'), 'fahed', 'darwin'), p('Cloudy', 'fahed'));
+  assert.equal(folderIn(p('Cloudy', 'Fahed'), 'fahed', 'darwin'), p('Cloudy', 'Fahed'));
+  assert.equal(folderIn(p('Cloudy', 'Fahed'), 'fahed', 'linux'), p('Cloudy', 'Fahed', 'Cloudy', 'fahed'));
+  assert.equal(folderIn(p('Cloudy', 'fahed (2)'), 'fahed', 'darwin'), p('Cloudy', 'fahed (2)'));
+  assert.equal(folderIn(p('Work'), 'a/b', 'linux'), p('Work', 'Cloudy', 'a_b'));
 });

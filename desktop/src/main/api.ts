@@ -17,7 +17,8 @@ export interface RemoteNode {
 }
 
 /** `id` is the username. */
-export interface Me { id: string; displayName?: string; rootId: number }
+/** `id` is the username; `avatar` the profile picture's version (servers from 1.20; null: none). */
+export interface Me { id: string; displayName?: string; rootId: number; avatar?: string | null }
 
 export class ApiError extends Error {
   status: number;
@@ -149,6 +150,25 @@ export class Api {
   }
 
   me = () => this.json<Me>('GET', '/api/me');
+
+  /** A profile picture's bytes (null: none); `version` is the user's `avatar`. */
+  async avatar(user: string, version: string): Promise<Buffer | null> {
+    const d = deadline(undefined, JSON_TIMEOUT);
+    try {
+      const res = await this.request('GET', `/api/users/${encodeURIComponent(user)}/avatar?v=${encodeURIComponent(version)}`, undefined, {}, d.signal);
+      const data = Buffer.from(await res.arrayBuffer());
+      return data.length <= 4 * 1024 * 1024 ? data : null;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw d.expired() ? timedOut() : e;
+    } finally {
+      d.done();
+    }
+  }
+
+  /** Stores a JPEG as the signed-in user's profile picture; answers its version. */
+  setAvatar = (jpeg: Uint8Array) => this.call<{ avatar: string }>('PUT', '/api/me/avatar', jpeg as BodyInit, { 'Content-Type': 'image/jpeg' });
+  removeAvatar = () => this.json<void>('DELETE', '/api/me/avatar');
   revoke = () => this.json<void>('POST', '/api/auth/revoke');
   node = (id: number) => this.json<{ node: RemoteNode; children?: RemoteNode[] }>('GET', `/api/nodes/${id}`);
   mkdir = (parentId: number, name: string) => this.json<RemoteNode>('POST', `/api/nodes/${parentId}/folders`, { name });

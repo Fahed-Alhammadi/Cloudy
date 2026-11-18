@@ -9,7 +9,7 @@ import path from 'node:path';
 import { Api, ApiError, normalizeServer } from './api.ts';
 import { SyncEngine, stateFitsServer, type Status, type Activity, type Problem } from './sync.ts';
 import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveState, clearState, type Account, type Settings } from './store.ts';
-import { canonical, defaultFolder, inside, needsMove, overlaps, runMove } from './accounts.ts';
+import { canonical, defaultFolder, folderIn, folderName, inside, needsMove, overlaps, runMove } from './accounts.ts';
 import { t } from './i18n.ts';
 import { Updater, type UpdateState } from './updater.ts';
 
@@ -23,8 +23,12 @@ interface Run {
   activityChanged: boolean;
   /** Suggested folder while the account has none yet (setup). */
   defaultFolder?: string;
+  /** The profile picture as a data: address for the window (the version it shows). */
+  avatar?: { version: string; data: string };
+  /** When /api/me was last asked (name and picture changed elsewhere). */
+  meAt?: number;
   /** What the window already has of the large parts (sent again only when they changed). */
-  sent: { problems?: Problem[]; engine?: SyncEngine | null };
+  sent: { problems?: Problem[]; engine?: SyncEngine | null; avatar?: string | null };
 }
 
 let settings: Settings;
@@ -305,10 +309,10 @@ async function setPaused(a: Account, paused: boolean): Promise<void> {
 function showWindow(): void {
   if (win) { win.show(); win.focus(); return; }
   win = new BrowserWindow({
-    width: 580,
-    height: 720,
-    minWidth: 460,
-    minHeight: 520,
+    width: 820,
+    height: 680,
+    minWidth: 520,
+    minHeight: 540,
     title: 'Cloudy',
     show: false,
     autoHideMenuBar: true,
@@ -355,8 +359,10 @@ function accountSnapshot(a: Account) {
     id: a.id,
     label: label(a),
     server: a.server,
+    host: host(a.server),
     user: a.user,
     displayName: a.displayName,
+    avatar: (a.avatar && r.avatar?.version === a.avatar ? r.avatar.data : null) as string | null,
     signedIn: signedIn(a),
     configured: configured(a),
     folder: a.folder,
@@ -375,6 +381,7 @@ function snapshot() {
   return {
     accounts: settings.accounts.map(accountSnapshot),
     openAtLogin: settings.openAtLogin,
+    home: process.platform === 'win32' ? null : home, // the window shows paths in it as "~/…"
     update: updater?.state,
     version: app.getVersion(),
   };
@@ -386,9 +393,10 @@ function update() {
   const s = snapshot();
   return {
     ...s,
-    accounts: s.accounts.map(({ problems, activity, ...rest }) => {
+    accounts: s.accounts.map(({ problems, activity, avatar, ...rest }) => {
       const r = runs.get(rest.id)!;
       const out: Partial<ReturnType<typeof accountSnapshot>> = rest;
+      if (avatar !== r.sent.avatar) out.avatar = r.sent.avatar = avatar;
       if (problems !== r.sent.problems) out.problems = r.sent.problems = problems;
       if (r.activityChanged || r.engine !== r.sent.engine) out.activity = activity;
       r.activityChanged = false;
@@ -470,8 +478,9 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
     const s = snapshot();
     for (const a of settings.accounts) {
       const r = run(a);
-      r.sent = { problems: r.problems, engine: r.engine };
+      r.sent = { problems: r.problems, engine: r.engine, avatar: s.accounts.find((x) => x.id === a.id)?.avatar ?? null };
       r.activityChanged = false;
+      void refreshMe(a); // a name or picture changed in the web app or a phone shows when the window opens
     }
     return s;
   },
@@ -494,15 +503,56 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
     return (r.children ?? []).filter((c) => c.isDir).map((c) => c.name).sort((x, y) => x.localeCompare(y));
   },
 
+  /** Asks where the account's files go; the answer is the place's Cloudy/<username> folder (see `folderIn`). */
   async chooseFolder(id: unknown) {
     if (!win) return null;
     const a = account(id);
+    const now = a.folder ?? run(a).defaultFolder;
     const r = await dialog.showOpenDialog(win, {
-      title: t('Choose the folder to keep in sync'),
-      defaultPath: a.folder ?? run(a).defaultFolder ?? home,
+      title: t('Choose where to keep your Cloudy files'),
+      message: t('Cloudy puts a Cloudy/{name} folder in the place you choose.', { name: folderName(a.user) }),
+      buttonLabel: t('Choose'),
+      defaultPath: !now ? home : path.basename(path.dirname(now)).toLowerCase() === 'cloudy' ? path.dirname(path.dirname(now)) : path.dirname(now),
       properties: ['openDirectory', 'createDirectory'],
     });
-    return r.canceled ? null : r.filePaths[0];
+    return r.canceled ? null : folderIn(r.filePaths[0], a.user);
+  },
+
+  /** Stores a new profile picture: a JPEG the window made (square, at most 512 pixels, no metadata). */
+  async setAvatar(id: unknown, jpeg: unknown) {
+    const a = account(id);
+    if (!(jpeg instanceof Uint8Array) || jpeg.length < 4 || jpeg.length > 1024 * 1024 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error('bad argument');
+    try {
+      const { avatar } = await api(a).setAvatar(jpeg);
+      a.avatar = avatar;
+      run(a).avatar = { version: avatar, data: `data:image/jpeg;base64,${Buffer.from(jpeg).toString('base64')}` };
+      await saveSettings(settings);
+      refresh();
+      return { ok: true };
+    } catch (e) {
+      return { error: pictureError(e) };
+    }
+  },
+
+  async removeAvatar(id: unknown) {
+    const a = account(id);
+    try {
+      await api(a).removeAvatar();
+      a.avatar = null;
+      run(a).avatar = undefined;
+      await saveSettings(settings);
+      refresh();
+      return { ok: true };
+    } catch (e) {
+      return { error: pictureError(e) };
+    }
+  },
+
+  /** The About page's links: fixed addresses only. */
+  openLink(name: unknown) {
+    const url = LINKS[name as keyof typeof LINKS];
+    if (typeof name !== 'string' || !Object.hasOwn(LINKS, name)) throw new Error('bad argument');
+    return shell.openExternal(url);
   },
 
   async folderHasFiles(folder: unknown) {
@@ -525,6 +575,55 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   checkUpdates: () => updater.check(),
   installUpdate: () => installUpdate(),
 };
+
+const LINKS = {
+  website: 'https://fahed-alhammadi.github.io/Cloudy/',
+  help: 'https://fahed-alhammadi.github.io/Cloudy/support.html',
+  feedback: 'https://github.com/Fahed-Alhammadi/Cloudy/issues',
+  privacy: 'https://fahed-alhammadi.github.io/Cloudy/privacy-policy.html',
+};
+
+const pictureError = (e: any): string => {
+  if (e instanceof ApiError && (e.status === 404 || e.status === 405)) return t('This server can’t store profile pictures yet. Ask its administrator to update Cloudy.');
+  if (e instanceof ApiError) return e.message;
+  return t('Could not reach the server: {message}', { message: e?.cause?.message ?? e?.message ?? String(e) });
+};
+
+/** Fetches the account's profile picture when the window does not have this version yet. */
+async function loadAvatar(a: Account): Promise<void> {
+  const r = run(a);
+  if (!a.avatar || r.avatar?.version === a.avatar || !signedIn(a)) return;
+  const version = a.avatar;
+  const data = await api(a).avatar(a.user, version).catch(() => null);
+  if (!data || a.avatar !== version) return;
+  const mime = data[0] === 0xff && data[1] === 0xd8 ? 'image/jpeg' : data[0] === 0x89 && data[1] === 0x50 ? 'image/png'
+    : data.subarray(8, 12).toString('latin1') === 'WEBP' ? 'image/webp' : null;
+  if (!mime) return;
+  r.avatar = { version, data: `data:${mime};base64,${data.toString('base64')}` };
+  refresh();
+}
+
+/** Picks up a new name or profile picture (changed in the web app or a phone); at most once a minute. */
+async function refreshMe(a: Account): Promise<void> {
+  const r = run(a);
+  if (!signedIn(a) || (r.meAt && Date.now() - r.meAt < 60_000)) return void loadAvatar(a);
+  r.meAt = Date.now();
+  try {
+    const me = await api(a).me();
+    if (me.id !== a.user) return;
+    const avatar = me.avatar ?? null;
+    if (me.displayName !== a.displayName || avatar !== (a.avatar ?? null)) {
+      a.displayName = me.displayName;
+      a.avatar = avatar;
+      if (!avatar) r.avatar = undefined;
+      await saveSettings(settings);
+      refresh();
+    }
+  } catch {
+    // offline or signed out: the engine reports that
+  }
+  await loadAvatar(a);
+}
 
 /**
  * Signs in. The same account again (same server and username: signed out by the server, or signed in twice)
@@ -561,8 +660,11 @@ async function login(server: unknown, user: unknown, password: unknown, code?: u
       settings.accounts.push(a);
     }
     a.displayName = r.user.displayName;
+    a.avatar = r.user.avatar ?? null;
     a.rootId = r.user.rootId;
     encodeToken(a, r.token);
+    run(a).meAt = Date.now();
+    void loadAvatar(a);
     if (!a.folder) run(a).defaultFolder = await defaultFolder(home, a.user, otherFolders(a));
     await saveSettings(settings);
     if (a.folder) await startEngine(a);
@@ -735,6 +837,7 @@ app.whenReady().then(async () => {
       if (!run(a).engine && configured(a) && !a.movingFrom) await startEngine(a).catch((e) => console.error('Cloudy: start', e));
     }
   });
+  for (const a of settings.accounts) void refreshMe(a);
   if (atLogin) setTimeout(() => void startAll(), LOGIN_DELAY);
   else await startAll();
   // First run, signed out, or an account still to set up: started at login with --hidden or not.

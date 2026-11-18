@@ -8,8 +8,13 @@ tray app with a small settings window. Files only.
 
 Each account has its own folder, by default `~/Cloudy/<username>` (`~/Cloudy/fahed`, `~/Cloudy/demo1`; the same
 username on a second server gets `fahed (2)`), its own sync engine, sync state (`sync-state-<id>.json`) and pause
-switch. Folders of two accounts may never be the same or one inside the other. The settings window shows the accounts
-along the top (status dot each, "+ Add account"); the tray menu is flat with one account and has a submenu per account
+switch. "Change…" asks for a *place*: the account's folder is `<place>/Cloudy/<username>` (picking a `Cloudy` folder
+gives `Cloudy/<username>`, picking a folder already named after the account keeps it; `folderIn` in accounts.ts).
+Folders of two accounts may never be the same or one inside the other. The settings window has the accounts on a
+night-sky rail at the side (profile picture or initials with a status badge each, "Add account", the app's Settings +
+About at the bottom; only the pictures in narrow windows); the account page lets the user change or remove their
+profile picture (cropped to a square ≤ 512 px JPEG in the window, `PUT /api/me/avatar`; servers before 1.20 get a
+clear message); the tray menu is flat with one account and has a submenu per account
 with several. Signing in to an account that is already there (same server and username) updates it instead of adding
 it twice. `src/main/accounts.ts` (no Electron imports, `test/accounts.test.ts`) holds the settings format, the default
 folders and the move below.
