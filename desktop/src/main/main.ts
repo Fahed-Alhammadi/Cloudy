@@ -46,6 +46,12 @@ const home = (!app.isPackaged && process.env.CLOUDY_HOME) || homedir();
 const primary = app.requestSingleInstanceLock();
 if (!primary) app.quit();
 else app.on('second-instance', () => showWindow());
+// macOS: clicking Cloudy in the Dock (kept there, or opening the app again from Finder/Launchpad while it runs) is a
+// "reopen": show the window. Without this, the Dock icon did nothing once the window was closed. Only after start-up
+// (the settings are loaded); a click during start-up is answered by the start-up itself.
+let started = false;
+let activatedEarly = false;
+app.on('activate', () => { if (started) showWindow(); else activatedEarly = true; });
 if (process.platform === 'win32') app.setAppUserModelId('io.cloudy.desktop'); // notifications under the Start-menu shortcut's identity
 app.on('window-all-closed', () => { /* keep running in the tray */ });
 
@@ -840,7 +846,9 @@ app.whenReady().then(async () => {
   for (const a of settings.accounts) void refreshMe(a);
   if (atLogin) setTimeout(() => void startAll(), LOGIN_DELAY);
   else await startAll();
-  // First run, signed out, or an account still to set up: started at login with --hidden or not.
-  if (!settings.accounts.length || settings.accounts.some((a) => !configured(a))) showWindow();
+  started = true;
+  // First run, signed out, or an account still to set up: started at login with --hidden or not. Also when the user
+  // opened Cloudy themselves (Dock, Finder, Launchpad) rather than the login item.
+  if (!settings.accounts.length || settings.accounts.some((a) => !configured(a)) || (activatedEarly && !atLogin)) showWindow();
   if (app.isPackaged) updater.start();
 });
