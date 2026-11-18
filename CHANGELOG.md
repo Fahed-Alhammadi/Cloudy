@@ -11,6 +11,13 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.1.1 (2026-11-18)
+
+A small fix in the web app. Nothing to do before you update.
+
+- Logging out now goes back to the sign-in page at `/`. Before, the address bar kept the page you were on (for example
+  `/files`). When a session expires, the address is still kept, so signing in again brings you back to that page.
+
 ## 2.1.0 (2026-11-17)
 
 WebDAV is gone: Cloudy's own apps and the web app are the way in. Nothing to do before you update, unless you use a
