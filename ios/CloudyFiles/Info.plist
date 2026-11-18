@@ -31,6 +31,9 @@
 	</dict>
 	<key>NSExtension</key>
 	<dict>
+		<!-- Required by App Store export (ITMS: "Missing Info.plist value"). -->
+		<key>NSExtensionFileProviderDocumentGroup</key>
+		<string>group.io.cloudy.app</string>
 		<key>NSExtensionFileProviderSupportsEnumeration</key>
 		<true/>
 		<key>NSExtensionPointIdentifier</key>
