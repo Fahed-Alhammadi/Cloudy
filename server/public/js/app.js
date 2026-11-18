@@ -471,6 +471,9 @@ async function logOut() {
   await post('/api/logout').catch(() => {});
   ctx.me = null;
   document.body.classList.remove('nav-open');
+  // Logged out on purpose: the address goes back to the start (/files/12 would otherwise stay in the address bar
+  // and be where the next person signing in lands). An expired session keeps it, so signing in again returns there.
+  history.replaceState(null, '', '/');
   renderLogin();
 }
 

@@ -515,6 +515,21 @@ console.log('== invitations');
   await admin('DELETE', `/api/admin/users/${invited}`);
 }
 
+console.log('== log out');
+{
+  // Logging out leaves the folder's address: the sign-in page is at "/", and signing in starts at the files.
+  await page.goto(`${BASE}/files/${invoices.id}`); await page.waitForSelector('.file-row');
+  await page.locator('.avatar-btn').click();
+  await page.getByRole('menuitem', { name: 'Log out' }).click();
+  await page.waitForSelector('.login-card');
+  check('log out goes back to "/" (the folder\'s address does not stay)', new URL(page.url()).pathname === '/', page.url());
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PW);
+  await page.locator('button[type=submit]').click();
+  await page.waitForSelector('.files-view');
+  check('signing in again after log out opens the files', new URL(page.url()).pathname === '/' || new URL(page.url()).pathname === '/files', page.url());
+}
+
 check('no errors in the page', errors.length === 0, errors);
 await browser.close();
 await admin('DELETE', `/api/admin/users/${USER}`);
