@@ -39,7 +39,7 @@ struct MoreView: View {
                         Toggle(isOn: $appLock) { SettingsLabel("App lock", icon: "faceid", color: .settingsGreen) }
                     }
                 } footer: {
-                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy.")
+                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy. While it is on, Cloudy is not shown in the Files app.")
                 }
                 // Help, feedback, rating, the website, the privacy policy and the version all live in About.
                 Section {

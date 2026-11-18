@@ -56,6 +56,8 @@ struct FileNode: Codable, Identifiable, Hashable {
     var shareId: Int64?
     var shareType: String?
     var path: String?
+    /// Content hash (server 1.16+; may be missing until the server has computed it).
+    var sha256: String?
 
     var bytes: Int64 { size ?? 0 }
     var isFavorite: Bool { favorite ?? false }

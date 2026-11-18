@@ -57,6 +57,10 @@ The iPhone app works like the Android app above, with these differences:
 - **App lock** uses Face ID, Touch ID or your passcode through iOS. The app only learns whether it succeeded.
 - **Share to Cloudy:** the app's share extension appears in other apps' share sheets. The files you choose there are uploaded to your
   server with the same device token as the app, into the folder you pick; the extension reads nothing else and keeps no copy.
+- **Cloudy in the Files app:** while you are signed in, Cloudy appears under *Locations* in Apple's Files app (and in other apps'
+  open and save dialogs). It shows the files on your server using the app's device token. Files you open there are downloaded to
+  storage that iOS manages for the Files app and may remove when space is needed; files you save or change there are uploaded to
+  your server. Signing out, or turning on the app lock, removes the location and those copies from the iPhone.
 - **Local network:** iOS may ask to allow access to devices on your local network. This is only used to reach a Cloudy server at a local address.
 - **First launch:** a welcome screen lets you answer the iOS permission dialogs (local network, camera, photos, Face ID) before you sign in,
   so your first sign-in to a server on your network works right away. Each one is optional and can be changed later in the iOS Settings app.

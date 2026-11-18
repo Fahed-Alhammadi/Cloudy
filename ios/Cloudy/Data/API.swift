@@ -15,10 +15,23 @@ struct APIError: LocalizedError {
 final class API: @unchecked Sendable {
     static let shared = API()
 
-    /// Set by `Session`; read on any thread.
-    var server = ""
-    var token: String?
+    /// Set by `Session` (and the extensions); read and written from any thread, so behind a lock (the Files
+    /// extension sets them from concurrent tasks).
+    var server: String {
+        get { lock.withLock { _server } }
+        set { lock.withLock { _server = newValue } }
+    }
+    var token: String? {
+        get { lock.withLock { _token } }
+        set { lock.withLock { _token = newValue } }
+    }
+    private let lock = NSLock()
+    private var _server = ""
+    private var _token: String?
     var onUnauthorized: () -> Void = {}
+    /// Upload chunks are copied to a file and streamed from it instead of being held in memory (the Files extension:
+    /// iOS gives it little memory). The app keeps the in-memory path. Set once, before any upload.
+    var chunksFromFile = false
 
     let http: URLSession = {
         let c = URLSessionConfiguration.default
@@ -218,9 +231,14 @@ final class API: @unchecked Sendable {
     /// retried from the offset the server reports, so a chunk it already stored is neither sent twice nor turned into an
     /// "Offset mismatch" failure.
     @discardableResult
-    func upload(_ parentId: Int64, name: String, file: URL, progress: @escaping (Int64, Int64) -> Void) async throws -> Int64? {
+    /// `keepBoth`: a file that appeared under that name meanwhile stays, the upload is stored as "name (2)" (server
+    /// `onConflict: "rename"`; older servers ignore it and replace the file, keeping the old content as a version).
+    func upload(_ parentId: Int64, name: String, file: URL, keepBoth: Bool = false,
+                progress: @escaping (Int64, Int64) -> Void) async throws -> Int64? {
         let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
-        let s: UploadSession = try decode(await sendJSON("POST", "/api/uploads", ["parentId": parentId, "name": name, "size": size]))
+        var body: [String: Any?] = ["parentId": parentId, "name": name, "size": size]
+        if keepBoth { body["onConflict"] = "rename" }
+        let s: UploadSession = try decode(await sendJSON("POST", "/api/uploads", body))
         do {
             let fh = try FileHandle(forReadingFrom: file)
             defer { try? fh.close() }
@@ -229,10 +247,11 @@ final class API: @unchecked Sendable {
             while true {
                 try Task.checkCancellation()
                 try fh.seek(toOffset: UInt64(offset))
-                let chunk = try fh.read(upToCount: s.chunkSize) ?? Data()
+                let chunk: Chunk = chunksFromFile ? try Chunk(copying: fh, max: s.chunkSize) : .memory(try fh.read(upToCount: s.chunkSize) ?? Data())
+                defer { chunk.discard() }
                 let result: ChunkResult
                 do {
-                    result = try decode(await send("PUT", "/api/uploads/\(s.id)", body: chunk, headers: ["Upload-Offset": String(offset)]))
+                    result = try decode(await sendChunk(chunk, path: "/api/uploads/\(s.id)", offset: offset))
                     failures = 0
                 } catch where API.isTransient(error) {
                     failures += 1
@@ -242,7 +261,7 @@ final class API: @unchecked Sendable {
                     do {
                         let st: UploadStatus = try await get("/api/uploads/\(s.id)")
                         offset = st.received
-                    } catch let e as APIError where e.status == 404 && offset + Int64(chunk.count) == size {
+                    } catch let e as APIError where e.status == 404 && offset + chunk.count == size {
                         // The last chunk went through: the server finished the file and removed the upload.
                         progress(size, size)
                         return nil
@@ -261,6 +280,57 @@ final class API: @unchecked Sendable {
             let id = s.id
             Task.detached { try? await API.shared.send("DELETE", "/api/uploads/\(id)") }
             throw error
+        }
+    }
+
+    /// One upload chunk: in memory, or (`chunksFromFile`) in a temporary file.
+    private enum Chunk {
+        case memory(Data)
+        case file(URL, Int64)
+
+        /// Copies up to `max` bytes from the handle's position to a temporary file, 1 MiB at a time.
+        init(copying fh: FileHandle, max: Int) throws {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("chunk-" + UUID().uuidString)
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            var copied = 0
+            do {
+                let out = try FileHandle(forWritingTo: url)
+                defer { try? out.close() }
+                while copied < max {
+                    let piece = try autoreleasepool { try fh.read(upToCount: min(1 << 20, max - copied)) } ?? Data()
+                    if piece.isEmpty { break }
+                    try out.write(contentsOf: piece)
+                    copied += piece.count
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: url) // disk full or the source vanished: no leftover
+                throw error
+            }
+            self = .file(url, Int64(copied))
+        }
+
+        var count: Int64 {
+            switch self {
+            case .memory(let d): Int64(d.count)
+            case .file(_, let n): n
+            }
+        }
+        var isEmpty: Bool { count == 0 }
+
+        func discard() { if case .file(let url, _) = self { try? FileManager.default.removeItem(at: url) } }
+    }
+
+    private func sendChunk(_ chunk: Chunk, path: String, offset: Int64) async throws -> Data {
+        switch chunk {
+        case .memory(let data):
+            return try await send("PUT", path, body: data, headers: ["Upload-Offset": String(offset)])
+        case .file(let url, _):
+            var req = try request("PUT", path)
+            req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            req.setValue(String(offset), forHTTPHeaderField: "Upload-Offset")
+            let (data, res) = try await http.upload(for: req, fromFile: url)
+            try check(data, res, path: path)
+            return data
         }
     }
 

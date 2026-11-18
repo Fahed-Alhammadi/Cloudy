@@ -39,6 +39,9 @@ struct RootView: View {
         // which are presented above the root view and would otherwise stay visible and usable while "locked".
         .onChange(of: locked, initial: true) { _, l in LockWindow.shared.set(visible: l && session.isLoggedIn, unlock: unlock) }
         .onChange(of: session.isLoggedIn) { _, on in LockWindow.shared.set(visible: locked && on, unlock: unlock) }
+        // "Cloudy" in the Files app exists while signed in, except with the app lock on: the Files app would open the
+        // same files without Face ID.
+        .onChange(of: session.isLoggedIn && !appLock, initial: true) { _, on in FilesDomain.setAvailable(on) }
         .onChange(of: phase) { _, p in
             // Lock on leaving the app; the lock screen also hides content in the app switcher.
             // Only prompt when coming back from the background: Face ID itself makes the app inactive.

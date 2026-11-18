@@ -1,4 +1,3 @@
-• Built with the latest Apple tools (Xcode 27). About Cloudy sits above Sign out and Delete account in More, with Help, Send feedback, Rate Cloudy, the website, the privacy policy and the version.
-• Profile pictures: tap your picture in More to choose a photo, change it or remove it. It is the same picture as on the web.
-• See people's pictures in "Shared with you" and in the sharing screen, also when you look someone up to share with.
-• Profile pictures need Cloudy server 1.20 or newer.
+• Cloudy in the Files app: your Cloudy files now appear under Locations in Apple's Files app, and in the open and save screens of other apps. Open, save, rename, move and delete files there, with picture previews. The first time, the Files app asks you to turn Cloudy on.
+• Files shared with you are in the "Shared with you" folder.
+• Signing out removes Cloudy from the Files app. With App lock on, Cloudy stays out of the Files app, so your files are only reachable with Face ID.

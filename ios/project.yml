@@ -8,8 +8,8 @@ options:
   developmentLanguage: en
 settings:
   base:
-    MARKETING_VERSION: "1.19.3"
-    CURRENT_PROJECT_VERSION: "18"
+    MARKETING_VERSION: "1.20.0"
+    CURRENT_PROJECT_VERSION: "19"
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: "JEXQBK3SQ5"          # your Apple Team ID (or pick the team in Xcode → Signing & Capabilities)
     CODE_SIGN_STYLE: Automatic
@@ -21,6 +21,8 @@ targets:
       - path: Cloudy
     dependencies:
       - target: CloudyShare
+        embed: true
+      - target: CloudyFiles
         embed: true
     entitlements:
       path: Cloudy/Cloudy.entitlements
@@ -59,6 +61,32 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.cloudy.app.share
         PRODUCT_NAME: CloudyShare
         INFOPLIST_FILE: CloudyShare/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+  # "Cloudy" under Locations in the Files app (File Provider): lists, opens and saves files with the app's device token.
+  CloudyFiles:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: CloudyFiles
+      - path: Cloudy/Data/API.swift
+      - path: Cloudy/Data/Models.swift
+      - path: Cloudy/Data/Keychain.swift
+      - path: Cloudy/Data/FilesDomain.swift
+      - path: Cloudy/Resources/Localizable.xcstrings
+    entitlements:
+      path: CloudyFiles/CloudyFiles.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.cloudy.app]
+        keychain-access-groups: [$(AppIdentifierPrefix)io.cloudy.app]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.cloudy.app.files
+        PRODUCT_NAME: CloudyFiles
+        INFOPLIST_FILE: CloudyFiles/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         LOCALIZATION_PREFERS_STRING_CATALOGS: YES

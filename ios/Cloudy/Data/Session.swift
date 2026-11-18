@@ -27,6 +27,9 @@ final class Session {
         // Simulator testing/screenshots: `SIMCTL_CHILD_CLOUDY_SERVER=… SIMCTL_CHILD_CLOUDY_TOKEN=… xcrun simctl launch …`
         let env = ProcessInfo.processInfo.environment
         if let s = env["CLOUDY_SERVER"], let t = env["CLOUDY_TOKEN"] {
+            // Stored like a real sign-in, so the Files extension (which reads them) can be tested too.
+            Session.sharedDefaults.set(s, forKey: "server")
+            Keychain.set("token", t)
             server = s
             API.shared.server = s
             API.shared.token = t
@@ -51,6 +54,8 @@ final class Session {
 
     func update(_ user: User) {
         defaults.set(try? JSONEncoder().encode(user), forKey: "user")
+        // The Files extension maps the root folder to the location itself.
+        if let root = user.rootId { Session.sharedDefaults.set(root, forKey: "rootId") }
         self.user = user
     }
 
@@ -70,6 +75,7 @@ final class Session {
         // "Share to Cloudy" remembers a folder of this account; it means nothing to the next one.
         Session.sharedDefaults.removeObject(forKey: "shareFolderId")
         Session.sharedDefaults.removeObject(forKey: "shareFolderName")
+        Session.sharedDefaults.removeObject(forKey: "rootId")
         defaults.removeObject(forKey: "user")
         user = nil
         FileCache.clear()

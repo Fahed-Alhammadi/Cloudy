@@ -21,9 +21,11 @@ enum Live {
                 try await API.shared.streamEvents(onOpen: {
                     Task { @MainActor in
                         if connectedBefore { NotificationCenter.default.post(name: .cloudyResync, object: nil) }
+                        FilesDomain.changed() // may have missed changes while the stream was down
                         connectedBefore = true
                     }
                 }) { ev in
+                    FilesDomain.changed()
                     DispatchQueue.main.async { NotificationCenter.default.post(name: .cloudyChange, object: ev) }
                 }
             } catch let e as APIError where e.status == 401 || e.status == 404 {
