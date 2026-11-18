@@ -105,3 +105,13 @@ button.link { border-color: transparent; background: none; color: var(--accent);
 .status progress { width: 100%; margin-top: 10px; accent-color: var(--accent); }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .status.busy .dot { animation: none; } }
+
+/* Accounts along the top: one pill per account (status dot + name), the chosen one filled, then "Add account". */
+.accounts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.account { display: inline-flex; align-items: center; gap: 7px; max-width: 220px; border-radius: 999px; padding: 6px 12px; }
+.account .dot { margin-top: 0; }
+.account[aria-current="page"] { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
+.account.add { color: var(--accent); border-style: dashed; }
+.account.busy .dot { background: var(--accent); }
+.account.warn .dot, .account.paused .dot { background: var(--warn); }
+.account.bad .dot { background: var(--danger); }

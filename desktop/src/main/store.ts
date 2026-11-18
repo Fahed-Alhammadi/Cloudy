@@ -5,20 +5,9 @@ import { randomBytes } from 'node:crypto';
 import { open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { packState, unpackState, type SyncState } from './sync.ts';
+import { parseSettings, MIGRATED_ID, type Account, type Settings } from './accounts.ts';
 
-export interface Settings {
-  server?: string;
-  user?: string;
-  displayName?: string;
-  /** base64; encrypted when `tokenEncrypted` */
-  token?: string;
-  tokenEncrypted?: boolean;
-  rootId?: number;
-  folder?: string;
-  excluded: string[];
-  paused: boolean;
-  openAtLogin: boolean;
-}
+export type { Account, Settings };
 
 const file = (name: string) => path.join(app.getPath('userData'), name);
 
@@ -62,28 +51,40 @@ function writeJson(name: string, data: unknown): Promise<void> {
   });
 }
 
+/**
+ * Settings of every account. A one-account file from 1.4 or older is converted (see accounts.ts); its sync state
+ * becomes that account's file first, so an interrupted conversion simply runs again.
+ */
 export async function loadSettings(): Promise<Settings> {
-  return { excluded: [], paused: false, openAtLogin: true, ...(await readJson<Partial<Settings>>('settings.json')) };
+  const raw = await readJson<unknown>('settings.json');
+  const settings = parseSettings(raw);
+  if ((raw as any)?.version !== 2 && settings.accounts.some((a) => a.id === MIGRATED_ID)) {
+    await rename(file('sync-state.json'), file(stateName(MIGRATED_ID))).catch(() => {});
+    await saveSettings(settings);
+  }
+  return settings;
 }
 
 export const saveSettings = (s: Settings) => writeJson('settings.json', s);
 
-export function encodeToken(s: Settings, token: string): void {
-  s.tokenEncrypted = safeStorage.isEncryptionAvailable();
-  s.token = s.tokenEncrypted ? safeStorage.encryptString(token).toString('base64') : Buffer.from(token).toString('base64');
+export function encodeToken(a: Account, token: string): void {
+  a.tokenEncrypted = safeStorage.isEncryptionAvailable();
+  a.token = a.tokenEncrypted ? safeStorage.encryptString(token).toString('base64') : Buffer.from(token).toString('base64');
 }
 
-export function decodeToken(s: Settings): string | null {
-  if (!s.token) return null;
+export function decodeToken(a: Account): string | null {
+  if (!a.token) return null;
   try {
-    const raw = Buffer.from(s.token, 'base64');
-    return s.tokenEncrypted ? safeStorage.decryptString(raw) : raw.toString();
+    const raw = Buffer.from(a.token, 'base64');
+    return a.tokenEncrypted ? safeStorage.decryptString(raw) : raw.toString();
   } catch {
     return null;
   }
 }
 
-export const loadState = async () => unpackState(await readJson<unknown>('sync-state.json'));
-export const saveState = (s: SyncState) => writeJson('sync-state.json', packState(s));
+/** One sync-state file per account (ids are generated hex or "main": safe as file names). */
+const stateName = (id: string) => `sync-state-${id}.json`;
+export const loadState = async (id: string) => unpackState(await readJson<unknown>(stateName(id)));
+export const saveState = (id: string, s: SyncState) => writeJson(stateName(id), packState(s));
 /** After any save still in flight, so a late write cannot bring the old state back. */
-export const clearState = () => queued('sync-state.json', () => rm(file('sync-state.json'), { force: true }));
+export const clearState = (id: string) => queued(stateName(id), () => rm(file(stateName(id)), { force: true }));

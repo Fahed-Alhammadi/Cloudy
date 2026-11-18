@@ -1,7 +1,25 @@
 # Cloudy desktop
 
-Sync client for macOS, Windows and Linux (Electron + TypeScript). It keeps one folder on the computer in two-way sync
-with the user's Cloudy files. It is a menu bar / system tray app with a small settings window. Files only.
+Sync client for macOS, Windows and Linux (Electron + TypeScript). It keeps a folder on the computer in two-way sync
+with the user's Cloudy files, for one or several accounts (same server or different ones). It is a menu bar / system
+tray app with a small settings window. Files only.
+
+## Accounts (1.5+)
+
+Each account has its own folder, by default `~/Cloudy/<username>` (`~/Cloudy/fahed`, `~/Cloudy/demo1`; the same
+username on a second server gets `fahed (2)`), its own sync engine, sync state (`sync-state-<id>.json`) and pause
+switch. Folders of two accounts may never be the same or one inside the other. The settings window shows the accounts
+along the top (status dot each, "+ Add account"); the tray menu is flat with one account and has a submenu per account
+with several. Signing in to an account that is already there (same server and username) updates it instead of adding
+it twice. `src/main/accounts.ts` (no Electron imports, `test/accounts.test.ts`) holds the settings format, the default
+folders and the move below.
+
+Upgrading from 1.4 or older: the one account becomes account `main` (its `sync-state.json` → `sync-state-main.json`),
+and if it synced exactly `~/Cloudy`, that folder is moved once into `~/Cloudy/<username>`: renamed aside
+(`~/.Cloudy-moving-<id>`), `~/Cloudy` created, renamed into place. Renames keep every file's identity, so the sync
+history still fits and nothing is transferred again; an interrupted move is finished at the next start, and when it
+can't be done (a program has the folder open on Windows) the folder stays and the move is tried at the next start.
+Other folders are never moved.
 
 ## How sync works
 
@@ -56,9 +74,10 @@ files are still read).
 Downloads go to a temp file and replace the local file only when complete (size checked). Upload chunks that fail on
 the way are retried from the offset the server stored. Requests time out instead of hanging (downloads and live events
 after a silence). Pausing, signing out and quitting abort running transfers; quitting saves what the cycle finished.
-`sync-state.json` is written atomically (temp file, fsync, rename), one write at a time, and records the folder it
+Each account's sync state is written atomically (temp file, fsync, rename), one write at a time, and records the folder it
 belongs to: a state from another folder or account is never applied (an empty state only compares, never deletes).
-After the server signs the app out, "Sign in again" keeps the folder and its state; another account starts over.
+After the server signs the app out, "Sign in again" keeps the folder and its state (it must be the same account;
+another one is added with "+ Add account").
 
 Sign-in uses `POST /api/auth/token` (a device token named "Desktop (<hostname>)"). The token is encrypted with
 `safeStorage` (the OS keychain).
@@ -69,7 +88,8 @@ Sign-in uses `POST /api/auth/token` (a device token named "Desktop (<hostname>)"
 src/main/main.ts      tray, window, IPC handlers, login item
 src/main/sync.ts      sync engine
 src/main/api.ts       Cloudy API client (chunked upload, download, SSE)
-src/main/store.ts     settings.json / sync-state.json (userData), token encryption
+src/main/store.ts     settings.json / sync-state-<account>.json (userData), token encryption
+src/main/accounts.ts  several accounts: settings format, default folders ~/Cloudy/<username>, moving an old ~/Cloudy
 src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z) (electron-updater, generic feed)
 src/main/i18n.ts      t(): English texts with {name} placeholders (the app is English only)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
