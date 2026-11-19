@@ -912,3 +912,67 @@ test('a folder excluded while a cycle reads the server is not deleted on the ser
   assert.ok((await api.node(folder.id)).children!.find((c) => c.name === 'Keep'), 'and still on the server');
   assert.deepEqual(a.trashed, ['Keep']);
 });
+
+test('badges: new items wait, synced ones are synced, problems show up to the top, ignored and excluded have none', { skip }, async () => {
+  const { a } = await setup('badges');
+  await mkdir(path.join(a.dir, 'Docs/Deep'), { recursive: true });
+  await mkdir(path.join(a.dir, 'Off'));
+  await writeFile(path.join(a.dir, 'Docs/Deep/note.txt'), 'note');
+  await writeFile(path.join(a.dir, '.DS_Store'), 'ignored');
+  assert.equal(a.engine.badge('Docs/Deep/note.txt'), 'syncing'); // not synced yet
+  const seen = new Set<string>();
+  const during: (string | null)[] = [];
+  a.engine.on('badges', (paths: string[]) => {
+    for (const p of paths) seen.add(p);
+    if (paths.includes('Docs/Deep/note.txt')) during.push(a.engine.badge('Docs'));
+  });
+  assert.deepEqual(await a.sync(), []);
+  assert.ok(during.includes('syncing'), 'its folders show "syncing" while it is uploaded');
+  for (const p of ['Docs/Deep/note.txt', 'Docs/Deep', 'Docs', '']) assert.ok(seen.has(p), `a change is announced for "${p}"`);
+  for (const p of ['', 'Docs', 'Docs/Deep', 'Docs/Deep/note.txt', 'Off']) assert.equal(a.engine.badge(p), 'synced', p);
+  assert.equal(a.engine.badge('.DS_Store'), null);
+  assert.equal(a.engine.badge('Docs/Deep/NOTE.TXT'.normalize('NFD')), a.engine['caseInsensitive'] ? 'synced' : 'syncing');
+
+  // A name the server refuses: the file and every folder above it show the problem.
+  await writeFile(path.join(a.dir, 'Docs/Deep/ trailing.txt'), 'x');
+  await a.sync();
+  assert.ok(a.engine.problems.length > 0);
+  assert.equal(a.engine.badge('Docs/Deep/ trailing.txt'), 'error');
+  assert.equal(a.engine.badge('Docs'), 'error');
+  assert.equal(a.engine.badge(''), 'error');
+  assert.equal(a.engine.badge('Off'), 'synced');
+  await rm(path.join(a.dir, 'Docs/Deep/ trailing.txt'));
+  await a.sync();
+  assert.equal(a.engine.badge('Docs'), 'synced');
+
+  await a.engine.setExcluded(['Off']);
+  assert.equal(a.engine.badge('Off'), null);
+  await a.engine.stop();
+});
+
+test('badges: a renamed file and a folder already on both sides are announced once synced', { skip }, async () => {
+  const { a, b } = await setup('badges-moves');
+  await mkdir(path.join(a.dir, 'Empty'));
+  await writeFile(path.join(a.dir, 'a.txt'), 'a');
+  await a.sync();
+
+  // Renamed here: Finder asks for the new name at once ("syncing"); the move must announce it, or it stays blue.
+  await rename(path.join(a.dir, 'a.txt'), path.join(a.dir, 'b.txt'));
+  assert.equal(a.engine.badge('b.txt'), 'syncing');
+  const seen = new Set<string | null>();
+  a.engine.on('badges', (paths: string[] | null) => { if (paths === null) seen.add(null); else for (const p of paths) seen.add(p); });
+  await a.sync();
+  assert.equal(a.engine.badge('b.txt'), 'synced');
+  assert.ok(seen.has('b.txt'), 'the new name is announced');
+
+  // A folder that exists on both sides but not in the state (a re-linked folder): recorded, and announced.
+  await mkdir(path.join(b.dir, 'Empty'));
+  assert.equal(b.engine.badge('Empty'), 'syncing');
+  const seenB = new Set<string>();
+  b.engine.on('badges', (paths: string[] | null) => { for (const p of paths ?? []) seenB.add(p); });
+  await b.sync();
+  assert.equal(b.engine.badge('Empty'), 'synced');
+  assert.ok(seenB.has('Empty'), 'the recorded folder is announced');
+  await a.engine.stop();
+  await b.engine.stop();
+});

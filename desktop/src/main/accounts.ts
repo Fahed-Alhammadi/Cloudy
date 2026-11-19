@@ -29,6 +29,9 @@ export interface Settings {
   version: 2;
   accounts: Account[];
   openAtLogin: boolean;
+  /** Windows and Linux: the user's choice for the file manager badges (missing: Linux on, Windows off; macOS keeps
+   * the choice itself). */
+  badges?: boolean;
 }
 
 /** The id the account from a one-account settings file gets (its state file was sync-state.json). */
@@ -44,7 +47,7 @@ export function parseSettings(raw: unknown): Settings {
   if (o.version === 2 && Array.isArray(o.accounts)) {
     const accounts = o.accounts.filter((a: any) => a && typeof a.id === 'string' && typeof a.server === 'string' && typeof a.user === 'string')
       .map((a: any): Account => ({ ...a, excluded: Array.isArray(a.excluded) ? a.excluded : [], paused: !!a.paused }));
-    return { version: 2, accounts, openAtLogin };
+    return { version: 2, accounts, openAtLogin, ...(typeof o.badges === 'boolean' ? { badges: o.badges } : {}) };
   }
   const accounts: Account[] = [];
   if (typeof o.server === 'string' && typeof o.user === 'string' && (o.folder || o.token)) {

@@ -2,6 +2,7 @@
 // several accounts (each its own folder, by default ~/Cloudy/<username>, and its own sync engine).
 // The settings window (src/ui) talks to this process through the `cloudy` IPC channel (src/preload/preload.ts).
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification, powerMonitor, net } from 'electron';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -12,6 +13,9 @@ import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveSt
 import { canonical, defaultFolder, folderIn, folderName, inside, needsMove, overlaps, runMove } from './accounts.ts';
 import { t } from './i18n.ts';
 import { Updater, type UpdateState } from './updater.ts';
+import { FinderBadges } from './finder.ts';
+import { addToList, installDll, registerClasses, removeFromList, unregisterClasses } from './badges-win.ts';
+import { install as installLinuxBadges, uninstall as uninstallLinuxBadges } from './badges-linux.ts';
 
 const OUT = __dirname; // out/ (bundled main.cjs, preload.cjs, ui/, icons/)
 const userAgent = `Cloudy Desktop/${app.getVersion()} (${process.platform})`;
@@ -37,10 +41,11 @@ let tray: Tray | null = null;
 let win: BrowserWindow | null = null;
 let updater: Updater;
 
-// Development runs can use a separate profile: CLOUDY_USER_DATA=/tmp/cloudy-test npm start
-if (!app.isPackaged && process.env.CLOUDY_USER_DATA) app.setPath('userData', process.env.CLOUDY_USER_DATA);
-// Development runs can also use another home folder for the default sync folders: CLOUDY_HOME=/tmp/home
-const home = (!app.isPackaged && process.env.CLOUDY_HOME) || homedir();
+// Test runs can use a separate profile, also of a packaged build next to an installed Cloudy (each profile is its own
+// single instance): CLOUDY_USER_DATA=/tmp/cloudy-test npm start
+if (process.env.CLOUDY_USER_DATA) app.setPath('userData', process.env.CLOUDY_USER_DATA);
+// … and another home folder for the default sync folders: CLOUDY_HOME=/tmp/home
+const home = process.env.CLOUDY_HOME || homedir();
 // A second copy only brings the first one's window to the front. (`quit` is asynchronous: `ready` can still fire,
 // so the start-up below is guarded too.)
 const primary = app.requestSingleInstanceLock();
@@ -85,6 +90,8 @@ const account = (id: unknown): Account => {
   return a;
 };
 const host = (server: string) => { try { return new URL(server).host; } catch { return server; } };
+
+const notSynced = (n: number) => (n === 1 ? t('1 item could not be synced') : t('{count} items could not be synced', { count: n }));
 
 /** "Fahed Alhammadi", or "fahed (cloud.example.com)" when two accounts would look the same. */
 function label(a: Account): string {
@@ -164,6 +171,7 @@ async function startEngine(a: Account): Promise<void> {
   engine.on('status', (s: Status) => {
     try {
       if (s.phase === 'auth' && lastPhase !== 'auth') notify(who(t('Cloudy signed you out')), t('Sign in again to keep your files in sync.'));
+      if (s.phase !== lastPhase) finder?.changed([a.folder!]); // the folder's own badge follows signed out / missing
       lastPhase = s.phase;
       refresh();
     } catch {}
@@ -176,6 +184,13 @@ async function startEngine(a: Account): Promise<void> {
     } catch {}
   });
   engine.on('problems', (p: Problem[]) => { r.problems = p; try { refresh(); } catch {} });
+  const folder = a.folder!;
+  // null: everything below the folder may look different (a folder was renamed).
+  engine.on('badges', (rels: string[] | null) => {
+    try {
+      if (finder?.connected) finder.changed(rels && rels.map((p) => (p ? path.join(folder, p) : folder)));
+    } catch {}
+  });
   engine.on('kept', (folder: string) => {
     try {
       notify(who(t('"{name}" was kept on this computer', { name: folder })),
@@ -214,7 +229,7 @@ function statusText(a: Account): string {
       if (s.code === 'remote-missing') return t('The Cloudy folder no longer exists on the server');
       return t('Problem: {message}', { message: s.error ?? '' });
     case 'syncing': return s.total ? t('Syncing {done} of {total}', { done: s.done, total: s.total }) : t('Checking for changes…');
-    default: return r.problems.length ? t('{count} items could not be synced', { count: r.problems.length }) : t('Up to date');
+    default: return r.problems.length ? notSynced(r.problems.length) : t('Up to date');
   }
 }
 
@@ -231,7 +246,7 @@ function overallText(): string {
   if (list.some((a) => run(a).engine?.status?.phase === 'syncing')) return t('Syncing…');
   if (list.every((a) => run(a).engine?.isPaused)) return t('Paused');
   const problems = list.reduce((n, a) => n + run(a).problems.length, 0);
-  return problems ? t('{count} items could not be synced', { count: problems }) : t('Up to date');
+  return problems ? notSynced(problems) : t('Up to date');
 }
 
 // ---------------------------------------------------------------- tray
@@ -253,6 +268,7 @@ let menuTimer: NodeJS.Timeout | null = null;
 let lastMenu = 0;
 
 function refresh(): void {
+  finder?.setFolders(settings.accounts.filter((a) => a.folder && run(a).engine).map((a) => a.folder!));
   scheduleSend();
   if (menuTimer) return;
   menuTimer = setTimeout(() => { menuTimer = null; lastMenu = Date.now(); buildMenu(); }, Math.max(0, lastMenu + MENU_MS - Date.now()));
@@ -308,6 +324,159 @@ async function setPaused(a: Account, paused: boolean): Promise<void> {
   if (paused) e?.pause();
   else e?.resume();
   refresh();
+}
+
+// ---------------------------------------------------------------- file manager badges
+
+// A green tick, blue arrows or a red mark on the items in the sync folders:
+//   macOS    the Finder Sync extension (desktop/finder, in Cloudy.app/Contents/PlugIns), turned on and off with pluginkit
+//   Windows  overlay handlers in CloudyBadges.dll (desktop/explorer), registered for this user (badges-win.ts)
+//   Linux    extensions for GNOME Files, Nemo and Caja in ~/.local/share (badges-linux.ts); Dolphin's plugin comes
+//            with the .deb package
+// All of them ask this app (finder.ts) through the loopback port and secret in finder.json, at a fixed place in the
+// real home folder (the macOS extension's sandbox may read only that file; not the profile folder, which test runs move).
+const FINDER_ID = 'io.cloudy.desktop.finder';
+let finder: FinderBadges | null = null;
+/** "on", "off" (the user turned them off), "unset" (macOS: never chosen), "missing" (not in this copy of Cloudy). */
+type BadgeState = 'on' | 'off' | 'unset' | 'missing';
+let badgeState: BadgeState | null = null;
+
+function portFile(): string {
+  if (process.platform === 'darwin') return path.join(homedir(), 'Library', 'Application Support', 'Cloudy', 'finder.json');
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || path.join(homedir(), 'AppData', 'Roaming'), 'Cloudy', 'finder.json');
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), '.config'), 'Cloudy', 'finder.json');
+}
+
+/** Which badge the file manager shows on `abs`: asked of the engine of the account whose folder holds it. */
+function badgeOf(abs: string): ReturnType<SyncEngine['badge']> {
+  const found = badgeIn(abs);
+  // macOS spells some system folders two ways ("/tmp/…" is "/private/tmp/…"): try the other one.
+  if (found !== undefined || process.platform !== 'darwin') return found ?? null;
+  const other = /^\/(tmp|var|etc)\//.test(abs) ? `/private${abs}` : abs.startsWith('/private/') ? abs.slice('/private'.length) : null;
+  return other ? badgeIn(other) ?? null : null;
+}
+
+/** undefined: in no account's folder. Windows: any case (Explorer passes the names as they are on disk). */
+function badgeIn(abs: string): ReturnType<SyncEngine['badge']> | undefined {
+  if (abs.split(/[\\/]/).some((n) => n === '.' || n === '..')) return undefined; // only plain paths inside a folder
+  const fold = process.platform === 'win32' ? (p: string) => p.toLowerCase() : (p: string) => p;
+  for (const a of settings.accounts) {
+    const f = a.folder;
+    if (!f) continue;
+    const head = fold(abs.slice(0, f.length));
+    if (head !== fold(f) || (abs.length > f.length && abs[f.length] !== path.sep)) continue;
+    return run(a).engine?.badge(abs.slice(f.length + 1).split(path.sep).join('/')) ?? null;
+  }
+  return undefined;
+}
+
+async function serveBadges(on: boolean): Promise<void> {
+  if (on && !finder) {
+    const f = new FinderBadges(portFile(), badgeOf);
+    await f.start();
+    finder = f;
+  } else if (!on && finder) {
+    const f = finder;
+    finder = null;
+    await f.close();
+  }
+  refresh();
+}
+
+const pluginkit = (...args: string[]) => new Promise<string>((resolve) => {
+  execFile('/usr/bin/pluginkit', args, { timeout: 10_000 }, (_e, out) => resolve(String(out ?? '')));
+});
+
+async function readFinderState(): Promise<BadgeState> {
+  // "+    io.cloudy.desktop.finder(1.7.0)": the first column is the user's choice (+ on, - off, blank never chosen).
+  const line = (await pluginkit('-m', '-A', '-i', FINDER_ID)).split('\n').find((l) => l.includes(FINDER_ID));
+  if (!line) return 'missing';
+  return line.trimStart() !== line ? 'unset' : line.startsWith('+') ? 'on' : line.startsWith('-') ? 'off' : 'unset';
+}
+
+/** Windows and Linux: what comes with this copy of Cloudy (in its resources folder). */
+const badgeFiles = () => process.platform === 'win32'
+  ? path.join(process.resourcesPath, 'explorer', 'CloudyBadges.dll')
+  : path.join(process.resourcesPath, 'linux');
+const explorerDir = () => path.join(process.env.LOCALAPPDATA || path.join(homedir(), 'AppData', 'Local'), 'Cloudy', 'Explorer');
+
+/** Windows and Linux: puts the badges in place (or removes them) for this user. Windows, `ask`: also adds them to
+ * (removes them from) File Explorer's list, which needs the user's permission as administrator (throws when declined);
+ * only when the user switches them, never at start. */
+async function applyBadges(on: boolean, ask = false): Promise<void> {
+  if (process.platform === 'win32') {
+    if (on) {
+      await registerClasses(await installDll(badgeFiles(), explorerDir(), app.getVersion()));
+      if (ask) await addToList(app.getPath('temp'));
+    } else {
+      await unregisterClasses();
+      if (ask) await removeFromList(app.getPath('temp'));
+    }
+  } else if (on) await installLinuxBadges(badgeFiles(), homedir());
+  else await uninstallLinuxBadges(badgeFiles(), homedir());
+}
+
+/** Windows and Linux: whether the user wants them (Windows: off until turned on, it asks for permission). */
+const badgesWanted = () => (process.platform === 'win32' ? settings.badges === true : settings.badges !== false);
+
+/** One badge change at a time (the switch can be clicked again while Windows' registry is still being written),
+ * in the order asked, so the last one wins. */
+let badgeChain: Promise<void> = Promise.resolve();
+function badgeTask(fn: () => Promise<void>): Promise<void> {
+  const run = badgeChain.then(fn);
+  badgeChain = run.catch(() => {});
+  return run;
+}
+
+function setBadgesEnabled(on: boolean): Promise<void> {
+  return badgeTask(async () => {
+    if (process.platform === 'darwin') {
+      await pluginkit('-e', on ? 'use' : 'ignore', '-i', FINDER_ID);
+      badgeState = await readFinderState();
+    } else {
+      let now = on;
+      try {
+        await applyBadges(on, true);
+      } catch (e) {
+        // Turning them on failed (Windows: permission declined): they stay off. Turning off: off anyway (the next
+        // start removes what is left).
+        console.error('Cloudy: file manager badges', e);
+        now = false;
+        if (on) await applyBadges(false).catch(() => {});
+      }
+      await serveBadges(now);
+      settings.badges = now;
+      await saveSettings(settings);
+      badgeState = now ? 'on' : 'off';
+    }
+    refresh();
+  });
+}
+
+/** At start: serves the badges and puts the extension of this copy of Cloudy in place, turned on unless the user
+ * turned it off (System Settings or Cloudy's Settings on macOS; Cloudy's Settings elsewhere). */
+function startBadges(): Promise<void> {
+  return badgeTask(async () => {
+    if (process.platform === 'darwin') {
+      await serveBadges(true);
+      if (!app.isPackaged) return;
+      const appex = path.join(path.dirname(path.dirname(app.getPath('exe'))), 'PlugIns', 'CloudyFinder.appex');
+      if (await lstat(appex).catch(() => null)) await pluginkit('-a', appex);
+      badgeState = await readFinderState();
+      if (badgeState === 'unset') {
+        await pluginkit('-e', 'use', '-i', FINDER_ID);
+        badgeState = await readFinderState();
+      }
+    } else if (!(await lstat(badgeFiles()).catch(() => null))) {
+      badgeState = 'missing';
+    } else {
+      const on = badgesWanted();
+      badgeState = on ? 'on' : 'off';
+      await applyBadges(on); // off: leftovers of an earlier run (e.g. one that stopped while turning them off) go
+      if (on) await serveBadges(true);
+    }
+    refresh();
+  });
 }
 
 // ---------------------------------------------------------------- window
@@ -388,6 +557,10 @@ function snapshot() {
     accounts: settings.accounts.map(accountSnapshot),
     openAtLogin: settings.openAtLogin,
     home: process.platform === 'win32' ? null : home, // the window shows paths in it as "~/…"
+    // The Settings switch: which file manager, and whether it is on (null: no badges in this copy).
+    badges: badgeState === 'on' || badgeState === 'off' || badgeState === 'unset'
+      ? { state: badgeState, where: process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'explorer' : 'linux' }
+      : null,
     update: updater?.state,
     version: app.getVersion(),
   };
@@ -579,6 +752,11 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
   openWeb: (id: unknown) => shell.openExternal(account(id).server),
   openRelease: () => updater.state.state === 'available' && /^https:\/\/github\.com\//.test(updater.state.url) && shell.openExternal(updater.state.url),
   checkUpdates: () => updater.check(),
+  async setBadges(on: unknown) {
+    if (typeof on !== 'boolean' || !badgeState || badgeState === 'missing') throw new Error('bad argument');
+    await setBadgesEnabled(on).catch((e) => console.error('Cloudy: file manager badges', e));
+    return badgeState; // the window shows this (also when the switch did not change: e.g. permission declined)
+  },
   installUpdate: () => installUpdate(),
 };
 
@@ -760,6 +938,7 @@ ipcMain.handle('cloudy', (e, name: unknown, ...args: unknown[]) => {
 // cycles finished is saved; bounded, so quitting never hangs.
 let quitting = false;
 async function flush(): Promise<void> {
+  void finder?.close(); // its finder.json goes: the extension stops badging until Cloudy runs again
   await Promise.race([Promise.all(settings.accounts.map((a) => stopEngine(a, true))), new Promise((r) => setTimeout(r, 4000))]);
 }
 app.on('before-quit', (e) => {
@@ -770,6 +949,7 @@ app.on('before-quit', (e) => {
   // prevented, and Electron drops that nested quit (the app kept running).
   void flush().finally(() => setTimeout(() => app.quit(), 0));
 });
+app.on('will-quit', () => finder?.removePortFileSync());
 async function installUpdate(): Promise<void> {
   if (updater.state.state !== 'ready') return;
   quitting = true;
@@ -844,6 +1024,8 @@ app.whenReady().then(async () => {
     }
   });
   for (const a of settings.accounts) void refreshMe(a);
+  // Development runs (npm start) leave the badges to an installed Cloudy, unless CLOUDY_FINDER=1.
+  if (app.isPackaged || process.env.CLOUDY_FINDER) void startBadges().catch((e) => console.error('Cloudy: file manager badges', e));
   if (atLogin) setTimeout(() => void startAll(), LOGIN_DELAY);
   else await startAll();
   started = true;

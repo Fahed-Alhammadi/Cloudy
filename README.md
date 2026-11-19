@@ -79,7 +79,9 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
   optional upload into the shared folder.
 - **Desktop sync:** pick which folders to sync; changes go up and down within seconds; renames and moves aren't
   transferred again; edits in two places keep both copies; deletions go to the trash. Several accounts at once, each
-  in its own folder (`~/Cloudy/<username>`). It runs in the menu bar or system tray.
+  in its own folder (`~/Cloudy/<username>`). Badges in Finder, File Explorer and Linux file managers (GNOME Files,
+  Nemo, Caja, Dolphin) show what is synced, still syncing or could not be synced. It runs in the menu bar or system
+  tray.
 - **Phone apps:** browse, preview and share files, send them to other apps and receive files from any app's share
   sheet ("Share to Cloudy"), scan documents to PDF, text editing, app lock, Recent and Shared tabs. Android also has
   offline files and automatic photo backup; on the iPhone, Cloudy also appears in Apple's Files app.

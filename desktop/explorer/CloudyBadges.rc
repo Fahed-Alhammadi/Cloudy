@@ -1,0 +1,26 @@
+// Overlay icons, in the order of the handlers (GetOverlayInfo: index 0, 1, 2). Drawn by ../badges/render.swift.
+101 ICON "icons/synced.ico"
+102 ICON "icons/syncing.ico"
+103 ICON "icons/error.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "CompanyName", "Fahed Alhammadi"
+      VALUE "FileDescription", "Cloudy sync status in File Explorer"
+      VALUE "InternalName", "CloudyBadges"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Fahed Alhammadi"
+      VALUE "OriginalFilename", "CloudyBadges.dll"
+      VALUE "ProductName", "Cloudy"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

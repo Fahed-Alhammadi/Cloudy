@@ -87,6 +87,68 @@ another one is added with "+ Add account").
 Sign-in uses `POST /api/auth/token` (a device token named "Desktop (<hostname>)"). The token is encrypted with
 `safeStorage` (the OS keychain).
 
+## File manager badges (1.7+)
+
+A green tick (synced), blue arrows (being synced, or new and not synced yet) or a red mark (not synced: the account's
+problem list; folders above a problem show it too) on the items in every running account's folder, in Finder, File
+Explorer, GNOME Files, Nemo, Caja and Dolphin. The file manager side holds no state: `src/main/finder.ts` serves the
+answers on `127.0.0.1` (random port) and writes the port and two random values to `finder.json` (0600, removed at
+quit) at a fixed place: `~/Library/Application Support/Cloudy/` (macOS), `%APPDATA%\Cloudy\` (Windows),
+`~/.config/Cloudy/` (Linux). The app sends the first value when an extension connects (an extension checks it before
+saying anything: a process of another user that took over the port learns nothing), the extension must answer with the
+second. Then one JSON object per line (`folders`, `ask`, `badges`, `changed`; see the comment at the top of finder.ts).
+The answers come from `SyncEngine.badge(path)`; the engine announces changed paths (`badges` event), so the badges
+update live. The badges show only while Cloudy runs. Settings has one switch per computer ("Finder", "File Explorer"
+or "File manager"; on Windows and Linux stored as `badges: false` in settings.json, on macOS by pluginkit).
+
+The pictures for Windows and Linux are drawn by `badges/render.swift` (`swift badges/render.swift` from desktop/;
+writes `explorer/icons/*.ico` and `linux/icons/hicolor/*/emblems/emblem-cloudy-*.png`, committed). Finder draws its own
+from SF Symbols, which may be used only on Apple platforms.
+
+**macOS** (`finder/`): a Finder Sync extension (`io.cloudy.desktop.finder`, Swift, built by `finder/build.sh` with
+`swiftc`, no Xcode project). Its sandbox may read only finder.json (temporary-exception entitlement,
+`finder/CloudyFinder.entitlements`). An app group's container does not work for this: macOS 27 refuses the
+non-sandboxed Electron app there (TCC "AppDataDetailed"), even with the team-prefixed group entitlement.
+Packaging: `npm run dist:mac` builds the extension, `scripts/after-pack.cjs` copies it into
+`Cloudy.app/Contents/PlugIns/` and signs it (Developer ID from `CSC_NAME`, else ad hoc) before electron-builder signs
+the app around it (electron-builder never signs `PlugIns` itself); `mac.x64ArchFiles` lets the universal merge keep the
+already-universal binary. At start the app registers the extension (`pluginkit -a`) and turns it on unless the user
+turned it off; Settings → Finder switches it (`pluginkit -e use|ignore`). Testing a packaged build next to an installed
+Cloudy: `open -n dist/mac-arm64/Cloudy.app --args --user-data-dir=/tmp/x --use-mock-keychain` (launch with `open`;
+`env -u ELECTRON_RUN_AS_NODE` from VS Code), then a Finder window on the account's folder.
+
+**Windows** (`explorer/`): `CloudyBadges.dll` (C++, x64, static CRT, built by `node explorer/build.mjs` with MSVC
+found through vswhere; `npm run dist:win` runs it) holds three icon overlay handlers (synced, syncing, not synced).
+Explorer, and every program that shows a file dialog, calls `IsMemberOf` for each item it draws; it answers from a
+cache and a background thread asks the app, then `SHChangeNotify(SHCNE_UPDATEITEM)` makes Explorer draw the item
+again. The app (`src/main/badges-win.ts`) copies the DLL to `%LOCALAPPDATA%\Cloudy\Explorer\<version>-<size>\` (a
+loaded DLL cannot be replaced by an update; old copies are removed once unused) and registers the handlers for the
+current user (`HKCU\Software\Classes\CLSID\{…01-03}`, at every start, no administrator needed). Explorer reads its list
+of handlers only from HKLM (`…\Explorer\ShellIconOverlayIdentifiers\  Cloudy*`; tried on a Windows runner with
+Explorer screenshots: an HKCU list is ignored), so the badges are off by default on Windows and turning them on in
+Settings imports the three names with `reg import` as administrator (one Windows permission prompt; declined: they
+stay off). Two leading spaces in the names: Explorer uses only the first 15 handlers by name; this is after Dropbox's,
+before OneDrive's and Windows' own. Turning them off asks again to take the names out. Uninstalling (not updating)
+removes the handlers and asks to take the names out (`explorer/installer.nsh`). Explorer reads the list when it
+starts: the badges appear after signing in to Windows again. Tests: `test/explorer.test.ts` with
+`explorer/build/harness.exe` (`node explorer/build.mjs --test`; the registry test only with `CLOUDY_TEST_REGISTRY=1`,
+as in CI's Windows package job, which runs as administrator). Not testable on CI: an elevated process (the runner's
+Explorer) ignores per-user COM classes, so the screenshots used classes in HKLM; a normal user's Explorer uses HKCU.
+
+**Linux** (`linux/`): `cloudy-badges.py` is one extension for GNOME Files (Nautilus 3.0/4.x API), Nemo and Caja
+(their Python extension packages: python3-nautilus, python3-nemo, python3-caja); the app (`src/main/badges-linux.ts`)
+copies it into `~/.local/share/{nautilus,nemo,caja}-python/extensions/` with `HOST = '…'` as the first line, and the
+emblems into `~/.local/share/icons/hicolor/` (no root, also for the AppImage). It runs on the file manager's main loop
+(GLib IO watches, no threads) and calls `invalidate_extension_info()` when an answer or change comes. Dolphin:
+`linux/dolphin/cloudyoverlay.cpp`, a KF6 `KOverlayIconPlugin` (Qt plugin), built by `linux/dolphin/build.sh` in
+Debian 13 (KF6 6.13, Qt 6.8: loads in those and newer; CI builds x64 and arm64 on their own runners). Only the .deb can
+install it (Qt's plugin folder is a system folder): `linux/deb/after-install.sh` copies it to
+`/usr/lib/<multiarch>/qt6/plugins/kf6/overlayicon/` when Qt 6 is there, `after-remove.sh` removes it; both scripts
+are electron-builder's own templates plus that part (compare them with `app-builder-lib/templates/linux/` when
+electron-builder is updated). The file managers load extensions when they start: the first time, the badges appear
+after signing out and back in. Checked in containers (Xvfb) with Ubuntu 26.04 (GNOME Files 50, Nemo, Caja) and Debian
+13 (Dolphin), the last two with the real .deb against a local server.
+
 ## Layout
 
 ```
@@ -95,12 +157,22 @@ src/main/sync.ts      sync engine
 src/main/api.ts       Cloudy API client (chunked upload, download, SSE)
 src/main/store.ts     settings.json / sync-state-<account>.json (userData), token encryption
 src/main/accounts.ts  several accounts: settings format, default folders ~/Cloudy/<username>, moving an old ~/Cloudy
+src/main/finder.ts    file manager badges: loopback server the extensions ask (finder/, explorer/, linux/)
+src/main/badges-win.ts   Windows: copies and registers explorer/CloudyBadges.dll for this user
+src/main/badges-linux.ts Linux: installs linux/cloudy-badges.py + emblems into ~/.local/share
 src/main/updater.ts   updates from the newest GitHub release (tag desktop-X.Y.Z) (electron-updater, generic feed)
 src/main/i18n.ts      t(): English texts with {name} placeholders (the app is English only)
 src/preload/          contextBridge: cloudy.call(name, ...args), cloudy.onUpdate(fn)
 src/ui/               settings window (plain HTML/JS/CSS, no framework)
 assets/               app icon: icon.png 1024 px (Windows/Linux); macOS Cloudy.icon (Icon Composer, blue in light+dark) → scripts/mac-icon.sh → Assets.car + icon.icns (committed); tray icons (cloud only: white tray.png for Windows/Linux, trayMacTemplate = 18 pt macOS template image)
 test/sync.test.ts     sync tests: two engines against a real server
+test/finder.test.ts   the badge server (handshake, answers, change batching)
+test/explorer.test.ts Windows: the overlay DLL against the badge server, registry (CI)
+test/badges-linux.test.ts  Linux: extension + emblems in and out of ~/.local/share
+badges/render.swift   draws the Windows overlay icons and Linux emblems
+finder/               macOS Finder Sync extension (Swift) + Info.plist, entitlements, build.sh
+explorer/             Windows overlay handlers (C++ DLL), build.mjs, installer.nsh, test harness
+linux/                cloudy-badges.py (GNOME Files, Nemo, Caja), dolphin/ (KF6 plugin), deb/ (postinst/postrm), icons/
 ```
 
 ## Develop
@@ -108,7 +180,7 @@ test/sync.test.ts     sync tests: two engines against a real server
 ```sh
 cd desktop && npm install
 npm start                                   # build + run (from VS Code's terminal: env -u ELECTRON_RUN_AS_NODE npm start)
-CLOUDY_USER_DATA=/tmp/cloudy-dev npm start  # separate settings/profile for development runs
+CLOUDY_USER_DATA=/tmp/cloudy-dev npm start  # separate settings/profile (CLOUDY_HOME: other default folders)
 npm run typecheck
 CLOUDY_TEST_URL=http://localhost:8080 CLOUDY_TEST_USER=admin CLOUDY_TEST_PASSWORD=… npm test
 npm run dist:mac | dist:win | dist:linux    # packages in dist/ (unsigned locally: CSC_IDENTITY_AUTO_DISCOVERY=false)

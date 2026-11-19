@@ -1,5 +1,6 @@
 # Desktop sync app (Electron: macOS, Windows, Linux). Runs when desktop/ changes.
-#   - every push / pull request: type-check, sync tests against a Cloudy server run from server/, packages for all three
+#   - every push / pull request: type-check, sync tests against a Cloudy server run from server/, the file manager
+#     badges (Explorer DLL tested on Windows, Dolphin plugin built for x64 + arm64), packages for all three
 #   - tag desktop-X.Y.Z (must match desktop/package.json, scripts/version.py check): macOS signed with the Developer ID
 #     certificates and notarized, then the GitHub release titled vX.Y.Z with every package and the latest*.yml files the
 #     installed apps update from (scripts/github-release.sh, desktop/src/main/updater.ts).
@@ -72,9 +73,31 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+          python3 -m py_compile linux/cloudy-badges.py
+          bash -n linux/deb/after-install.sh && bash -n linux/deb/after-remove.sh
+
+  # Dolphin (KDE) plugin for the Linux packages, built on each architecture in Debian 13 (linux/dolphin/build.sh).
+  dolphin:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: desktop/linux/dolphin/build.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dolphin-${{ matrix.arch }}
+          path: desktop/linux/dolphin/build/${{ matrix.arch }}/cloudyoverlay.so
+          if-no-files-found: error
 
   package:
-    needs: test
+    needs: [test, dolphin]
     strategy:
       fail-fast: false
       matrix:
@@ -100,6 +123,28 @@ jobs:
         run: echo "release=${{ github.ref_type == 'tag' }}" >> "$GITHUB_OUTPUT"
       - run: npm ci
         working-directory: desktop
+
+      # File Explorer badges: the DLL against the badge server, and Windows finding it in this user's registry.
+      - name: Explorer badges test
+        if: matrix.target == 'win'
+        working-directory: desktop
+        env:
+          CLOUDY_TEST_REGISTRY: '1'
+        run: |
+          node explorer/build.mjs --test
+          node --test test/explorer.test.ts test/finder.test.ts
+
+      - uses: actions/download-artifact@v8
+        if: matrix.target == 'linux'
+        with:
+          pattern: dolphin-*
+          path: desktop/linux/dolphin/dl
+      - name: Dolphin plugins in place
+        if: matrix.target == 'linux'
+        working-directory: desktop/linux/dolphin
+        run: |
+          for arch in x64 arm64; do mkdir -p build/$arch && mv dl/dolphin-$arch/cloudyoverlay.so build/$arch/; done
+          rm -rf dl
 
       # Release builds only: both Developer ID certificates go into a throwaway keychain for this run, with Apple's
       # intermediates so the chain to the root is complete. electron-builder then finds them by name.

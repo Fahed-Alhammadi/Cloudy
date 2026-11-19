@@ -538,6 +538,27 @@ function generalParts() {
       h('input', { type: 'checkbox', 'data-key': 'login-item', checked: state.openAtLogin, onchange: (e) => cloudy.call('setOpenAtLogin', e.target.checked) }),
       h('span', {}, t('Start Cloudy when I log in')))));
 
+  // Sync badges in the file manager (null: none in this copy, e.g. development runs).
+  const b = state.badges;
+  const finder = part('g-finder', [JSON.stringify(b)], () => {
+    if (!b) return null;
+    const where = {
+      finder: [t('Finder'), t('Show sync status in Finder'), null],
+      explorer: [t('File Explorer'), t('Show sync status in File Explorer'),
+        t('Turning this on asks for administrator permission once. They appear after you sign out of Windows and back in.')],
+      linux: [t('File manager'), t('Show sync status in the file manager'),
+        t('GNOME Files, Nemo and Caja need their Python extension package (for example python3-nautilus); Dolphin needs Cloudy’s .deb package. The first time, they appear after you sign out and back in.')],
+    }[b.where];
+    if (!where) return null;
+    return h('section', { class: 'block' },
+      h('h2', {}, where[0]),
+      h('label', { class: 'check' },
+        h('input', { type: 'checkbox', 'data-key': 'finder', checked: b.state === 'on', onchange: (e) => cloudy.call('setBadges', e.target.checked).then((now) => { e.target.checked = now === 'on'; }, () => {}) }),
+        h('span', {}, where[1])),
+      h('p', { class: 'muted small' }, t('A green tick on synced items, blue arrows while they sync, and a red mark on items that could not be synced (listed on the account’s page).')),
+      where[2] && h('p', { class: 'muted small' }, where[2]));
+  });
+
   const u = state.update ?? { state: 'idle' };
   const updates = part('g-update', [JSON.stringify(u), state.version], () => {
     const updateText = {
@@ -583,7 +604,7 @@ function generalParts() {
       h('p', { class: 'muted small foot' }, t('Open source under the MIT License.')));
   });
 
-  return [head, startup, updates, about];
+  return [head, startup, finder, updates, about];
 }
 
 // ---------------------------------------------------------------- start

@@ -1,0 +1,4 @@
+LIBRARY CloudyBadges
+EXPORTS
+  DllGetClassObject PRIVATE
+  DllCanUnloadNow PRIVATE

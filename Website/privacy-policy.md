@@ -79,6 +79,10 @@ The desktop app (macOS, Windows, Linux) only syncs files; it has no photo backup
 - **Device name:** your computer's name (for example "Desktop (my-laptop)") labels the device token on your server.
 - **Device token:** encrypted with your operating system's keychain (Keychain on macOS, the Windows data protection API, the Secret
   Service on Linux) and stored with the app's settings on this computer. Signing out revokes it on the server.
+- **Sync badges in the file manager:** a small add-on that comes with the app (Finder on macOS, File Explorer on Windows,
+  GNOME Files, Nemo, Caja and Dolphin on Linux) shows whether items in your sync folders are synced. It asks only the
+  Cloudy app on the same computer (a connection that never leaves your computer) and sends nothing anywhere else. You can
+  turn it off in Cloudy's Settings (on macOS also in System Settings). On Windows it is off until you turn it on.
 - **Updates:** see below. There is no advertising, analytics or tracking.
 
 ## App updates

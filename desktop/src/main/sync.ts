@@ -47,6 +47,8 @@ export interface Status { phase: Phase; done: number; total: number; current?: s
 export type ActivityKind = 'uploaded' | 'downloaded' | 'deleted-local' | 'deleted-remote' | 'moved' | 'conflict' | 'folder';
 export interface Activity { time: number; path: string; kind: ActivityKind }
 export interface Problem { path: string; message: string }
+/** What the file manager shows on an item (Finder badges): in sync, waiting or being synced, or not synced (a problem). */
+export type Badge = 'synced' | 'syncing' | 'error';
 
 export interface EngineOptions {
   api: Api;
@@ -199,6 +201,11 @@ const ancestorIn = (set: Set<string>, p: string) => {
   for (let d = parentOf(p); d; d = parentOf(d)) if (set.has(d)) return true;
   return false;
 };
+/** The folders above `p`, nearest first, ending with "" (the sync folder). */
+const ancestorsOf = (p: string) => {
+  const out: string[] = [];
+  for (let d = parentOf(p); ; d = parentOf(d)) { out.push(d); if (!d) return out; }
+};
 /** Adds every folder above `p` to `set` (stops at the first one already there: its parents are there too). */
 const addAncestors = (set: Set<string>, p: string) => {
   for (let d = parentOf(p); d && !set.has(d); d = parentOf(d)) set.add(d);
@@ -340,6 +347,15 @@ export class SyncEngine extends EventEmitter {
   private baseIndex: { byIno: Map<number, string>; byPath: Map<string, string> } | null = null;
   /** Names in local folders by folded name, for diskName (one readdir per folder per cycle). */
   private dirNames = new Map<string, Map<string, string>>();
+  /** Paths the running cycle still has work for, and for each folder how many of them are inside it (badges). */
+  private busy = new Set<string>();
+  private busyBelow = new Map<string, number>();
+  /** The last pass's problem paths and the folders above them (badges). */
+  private problemPaths = new Set<string>();
+  /** The state's paths by the name the filesystem compares (Finder may spell a name differently); built on demand. */
+  private badgeFold: { pass: number; map: Map<string, string> } | null = null;
+  /** Finished passes (sync() calls), so lookups built during one are rebuilt for the next. */
+  private passes = 0;
   /** `excluded` as of the start of the running cycle (see isExcluded). */
   private cycleExcluded: string[] | null = null;
 
@@ -480,6 +496,7 @@ export class SyncEngine extends EventEmitter {
     this.live?.abort();
     this.abort.abort();
     await this.inflight?.catch(() => {});
+    this.clearBusy();
     if (opts.save && this.stateDirty) {
       this.flushForget();
       await this.o.saveState(this.state).catch(() => {});
@@ -545,6 +562,7 @@ export class SyncEngine extends EventEmitter {
         this.problems = [];
         for (let i = 0; i < 5 && !this.paused && !this.stopped && (await this.cycle()); i++);
         this.emit('problems', this.problems);
+        this.problemBadges();
       } while (this.again && !this.paused && !this.stopped);
       if (!this.paused && !this.stopped) this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined, code: undefined });
     } catch (e: any) {
@@ -556,6 +574,8 @@ export class SyncEngine extends EventEmitter {
       else if (isNetworkError(e)) { this.setStatus({ phase: 'offline', current: undefined, error: msg, code: undefined }); this.retryLater(); }
       else { this.setStatus({ phase: 'error', current: undefined, error: msg, code: e instanceof SyncError ? e.code : undefined }); this.retryLater(); }
     } finally {
+      this.clearBusy(); // whatever was left (aborted, offline) waits for the next pass: shown as not yet synced
+      this.passes++;
       this.running = false;
       this.inflight = null;
       finish();
@@ -564,6 +584,77 @@ export class SyncEngine extends EventEmitter {
 
   private retryLater(): void {
     setTimeout(() => this.schedule(0), 30_000).unref?.();
+  }
+
+  // ---------------------------------------------------------------- badges (Finder)
+
+  /**
+   * What the file manager shows on `rel` (a path inside the sync folder, "/"-separated; "" = the folder itself):
+   * "error" for an item that could not be synced (and every folder above it), "syncing" for one the running pass
+   * still works on (and its folders) or a new one not synced yet, "synced" for one in the sync state. null: no badge
+   * (ignored names, excluded folders, items the scan leaves alone).
+   */
+  badge(rel: string): Badge | null {
+    if (rel && (isIgnored(nameOf(rel)) || this.isExcluded(rel))) return null;
+    const key = this.badgeKey(rel);
+    if (this.problemPaths.has(key)) return 'error'; // before "left alone": a name the server refuses is both
+    if (rel && this.isUnknown(rel)) return null;
+    if (this.busy.has(key) || this.busyBelow.has(key)) return 'syncing';
+    if (!key) return this.signedOut || this.status.phase === 'auth' || this.status.phase === 'error' ? 'error' : 'synced';
+    return Object.hasOwn(this.state.base, key) ? 'synced' : 'syncing';
+  }
+
+  /** `rel` as the state spells it: Finder passes the name on disk, which can differ in Unicode form or case. */
+  private badgeKey(rel: string): string {
+    const known = (k: string) => Object.hasOwn(this.state.base, k) || this.busy.has(k) || this.busyBelow.has(k) || this.problemPaths.has(k);
+    if (!rel || known(rel)) return rel;
+    const nfc = rel.normalize('NFC');
+    if (known(nfc)) return nfc;
+    if (!this.caseInsensitive) return rel;
+    if (this.badgeFold?.pass !== this.passes) {
+      const map = new Map<string, string>();
+      for (const k of Object.keys(this.state.base)) map.set(this.foldPath(k), k);
+      this.badgeFold = { pass: this.passes, map };
+    }
+    return this.badgeFold.map.get(this.foldPath(rel)) ?? rel;
+  }
+
+  /** `batch`: collect the changed paths there instead of announcing them (one announcement for a whole pass). */
+  private setBusy(p: string, on: boolean, batch?: Set<string>): void {
+    if (on === this.busy.has(p)) return;
+    if (on) this.busy.add(p);
+    else this.busy.delete(p);
+    const changed = [p];
+    for (let d = parentOf(p); ; d = parentOf(d)) {
+      const n = (this.busyBelow.get(d) ?? 0) + (on ? 1 : -1);
+      if (n > 0) this.busyBelow.set(d, n);
+      else this.busyBelow.delete(d);
+      changed.push(d);
+      if (!d) break;
+    }
+    if (batch) for (const c of changed) batch.add(c);
+    else this.emit('badges', changed);
+  }
+
+  private clearBusy(): void {
+    if (!this.busy.size) return;
+    const changed = [...this.busy, ...this.busyBelow.keys()];
+    this.busy.clear();
+    this.busyBelow.clear();
+    this.emit('badges', changed);
+  }
+
+  /** After a pass: the items with problems (and their folders) show it; those fixed since show their state again. */
+  private problemBadges(): void {
+    const next = new Set<string>();
+    for (const { path: p } of this.problems) {
+      next.add(p);
+      addAncestors(next, p);
+      next.add('');
+    }
+    const changed = [...next].filter((p) => !this.problemPaths.has(p)).concat([...this.problemPaths].filter((p) => !next.has(p)));
+    this.problemPaths = next;
+    if (changed.length) this.emit('badges', changed);
   }
 
   private setStatus(s: Partial<Status>): void {
@@ -610,7 +701,12 @@ export class SyncEngine extends EventEmitter {
     const base = this.state.base;
     this.stateDirty = true;
     const e = base[from];
-    if (e && !e.dir) { delete base[from]; base[to] = e; return; } // a file: nothing below it (many files moved at once)
+    if (e && !e.dir) {
+      delete base[from]; base[to] = e; // a file: nothing below it (many files moved at once)
+      this.emit('badges', [from, to, ...ancestorsOf(to)]); // Finder asked for the new name before it was synced
+      return;
+    }
+    this.emit('badges', null); // a folder: everything below it has a new path
     for (const k of Object.keys(base)) {
       if (k === from || under(k, from)) {
         const v = base[k];
@@ -1286,6 +1382,9 @@ export class SyncEngine extends EventEmitter {
     let again = false;
     let fatal: unknown = null; // signed out / offline: stop every worker
     this.setStatus({ phase: 'syncing', done, total: work.length });
+    const marked = new Set<string>();
+    for (const o of work) this.setBusy(o.p, true, marked); // also `record`: a folder not in the state yet answered "syncing"
+    if (marked.size) this.emit('badges', [...marked]);
     const run = async (o: { op: Op; p: string }) => {
       if (this.paused || this.stopped || fatal) return;
       this.setStatus({ current: o.p });
@@ -1299,6 +1398,7 @@ export class SyncEngine extends EventEmitter {
         this.problem(o.p, e?.code === 'EBUSY' || e?.code === 'EPERM' ? this.msg('locked') : e?.message ?? String(e));
       } finally {
         if (writes) await this.endWrite(writes);
+        this.setBusy(o.p, false);
       }
       this.setStatus({ done: ++done });
       await this.save();
