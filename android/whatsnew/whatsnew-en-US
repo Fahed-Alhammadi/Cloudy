@@ -1,2 +1,3 @@
 • Fixed: "Save to device" could create an empty file (0 KB) instead of saving the picture or file. Saving now always writes the whole file, also for folders saved as ZIP.
 • If a save can't finish, no empty file is left behind on your phone.
+• Updated the app's libraries for security and reliability.

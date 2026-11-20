@@ -1,6 +1,6 @@
 {
   "name": "cloudy",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "private": true,
   "type": "module",
   "description": "Self-hosted file cloud with sharing — Node.js server with an HTML5 web app.",

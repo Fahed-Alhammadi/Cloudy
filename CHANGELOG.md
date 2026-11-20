@@ -11,6 +11,12 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.1.2 (2026-11-21)
+
+Maintenance release. Nothing to do before you update.
+
+- Updated the server's libraries to their latest versions, including the email library (nodemailer 10.6.0).
+
 ## 2.1.1 (2026-11-18)
 
 A small fix in the web app. Nothing to do before you update.
