@@ -1,10 +1,12 @@
 // Updates from GitHub releases. Only the desktop app has releases, tagged desktop-X.Y.Z (titled vX.Y.Z). The newest one
 // is looked up first and electron-updater reads its latest*.yml from that release (generic provider).
 // macOS (zip), Windows (NSIS installer) and Linux (AppImage, .deb) download in the background, check the SHA-512 and
-// install on restart or quit. Development builds only report.
-import { existsSync } from 'node:fs';
+// install on restart or quit. Windows and Linux downloads must also match the release's signed update-signatures.json
+// (updateSignature.ts); macOS updates are checked by Squirrel against the Developer ID. Development builds only report.
+import { existsSync, rmSync } from 'node:fs';
 import { app, net } from 'electron';
 import type { AppUpdater } from 'electron-updater';
+import { verifyUpdate } from './updateSignature.ts';
 
 export const REPO = 'Fahed-Alhammadi/Cloudy';
 const TAG = /^desktop-(\d+\.\d+\.\d+)$/;
@@ -59,7 +61,7 @@ export class Updater {
     const { autoUpdater } = await import('electron-updater');
     autoUpdater.autoDownload = true;
     // macOS updates are verified by Squirrel against the running app's signature. Windows builds are unsigned and
-    // Linux has no signature check, so there a downloaded update is installed only when the user asks for it.
+    // Linux has no signature check: there a download is installed only after verifyUpdate() and when the user asks.
     autoUpdater.autoInstallOnAppQuit = process.platform === 'darwin';
     autoUpdater.on('download-progress', (p) => {
       if (this.state.state === 'downloading') this.set({ ...this.state, percent: Math.round(p.percent) });
@@ -98,11 +100,20 @@ export class Updater {
       if (!rel || !newer(rel.version, app.getVersion())) return this.set({ state: 'none', checkedAt: Date.now() });
       if (!this.canInstall) return this.set({ state: 'available', version: rel.version, url: rel.url });
       const autoUpdater = await this.autoUpdater();
-      autoUpdater.setFeedURL({ provider: 'generic', url: `https://github.com/${REPO}/releases/download/${rel.tag}` });
+      const feed = `https://github.com/${REPO}/releases/download/${rel.tag}`;
+      autoUpdater.setFeedURL({ provider: 'generic', url: feed });
       this.set({ state: 'downloading', version: rel.version, percent: 0 });
       const found = await autoUpdater.checkForUpdates();
       if (!found?.isUpdateAvailable || !found.downloadPromise) return this.set({ state: 'none', checkedAt: Date.now() });
-      await found.downloadPromise;
+      const files = await found.downloadPromise;
+      if (process.platform !== 'darwin') {
+        try {
+          await verifyUpdate(feed, found.updateInfo.version, files, (url) => net.fetch(url));
+        } catch (e) {
+          for (const f of files) rmSync(f, { force: true });
+          throw e;
+        }
+      }
       this.set({ state: 'ready', version: rel.version });
     } catch (e: any) {
       await visible;

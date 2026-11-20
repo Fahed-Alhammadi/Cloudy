@@ -256,7 +256,9 @@ version, and anything you need to do before updating, is in [CHANGELOG.md](CHANG
 **Apps.** Android and iPhone update through Google Play and the App Store (TestFlight for the beta). The desktop app
 checks GitHub once a day for a new version and downloads it in the background. On a Mac it's installed when you
 restart or quit Cloudy; on Windows and Linux choose *Restart to update* in the menu (*Settings → Check for updates*
-checks right away).
+checks right away). Every update is checked before it is installed: on a Mac it must be signed with the same
+Apple Developer ID; on Windows and Linux it must match the release's signed list of packages (Ed25519), so a changed or
+swapped download is refused.
 
 ## Two-factor authentication
 

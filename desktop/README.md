@@ -194,3 +194,10 @@ release titled `vX.Y.Z` (the desktop app is the only product with GitHub release
 update files. Installed versions up to 1.2.0 don't find these releases (they looked for an older tag form): install the
 new version by hand once. It updates itself on macOS (from the `.zip`), on Windows, from an AppImage and from a
 `.deb`. The macOS packages are signed with a Developer ID and notarized; the Windows installer is not signed yet.
+
+Updates are checked before they are installed. On macOS, the system checks that the update is signed with the same
+Developer ID as the running app. On Windows and Linux, each release also carries `update-signatures.json` (the SHA-512
+of every package) and its Ed25519 signature `update-signatures.json.sig`, made by the release workflow
+(`scripts/sign-update.mjs`). The app installs a downloaded update only when the signature matches the public key built
+into it (`src/main/updateSignature.ts`) and the download is listed for that version; otherwise it deletes the download
+and shows an error. Versions up to 1.7.0 don't have this check yet.
