@@ -562,17 +562,31 @@ fun NodeActions(node: FileNode, nav: NavController, canModify: Boolean, reload: 
     val me by Services.session.user.collectAsStateWithLifecycle()
     val isOwner = node.owner == me?.id
     var dialog by rememberSaveable { mutableStateOf<String?>(null) }
+    // The sheet stays open while the system "Save" screen is up and closes when it answers: this launcher lives in the
+    // sheet, so closing the sheet first unregistered it and the answer was lost — the picker had already created the
+    // file, which then stayed empty (0 KB).
     val saveAs = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(node.mime.ifEmpty { "application/octet-stream" })) { uri ->
-        if (uri != null) scope.launch {
+        onClose()
+        // App scope, like uploads: leaving the screen mid-download must not leave an empty file behind either.
+        val app = context.applicationContext
+        if (uri != null) Services.appScope.launch {
+            val tmp = File(app.cacheDir, "save-${node.id}")
             try {
-                val tmp = File(context.cacheDir, "save-${node.id}")
                 Services.api.download(node.id, tmp)
                 withContext(Dispatchers.IO) {
-                    context.contentResolver.openOutputStream(uri)?.use { out -> tmp.inputStream().use { it.copyTo(out) } }
-                    tmp.delete()
+                    val out = app.contentResolver.openOutputStream(uri) ?: error(app.getString(R.string.failed))
+                    out.use { o -> tmp.inputStream().use { it.copyTo(o) } }
                 }
-                toast(context, context.getString(R.string.saved))
-            } catch (e: Exception) { toast(context, e.message ?: context.getString(R.string.failed)) }
+                toast(app, app.getString(R.string.saved))
+            } catch (e: Exception) {
+                // Don't leave the empty file the picker created behind.
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    runCatching { android.provider.DocumentsContract.deleteDocument(app.contentResolver, uri) }
+                }
+                if (e !is kotlinx.coroutines.CancellationException) toast(app, e.message ?: app.getString(R.string.failed))
+            } finally {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { tmp.delete() }
+            }
         }
     }
 
@@ -605,7 +619,7 @@ fun NodeActions(node: FileNode, nav: NavController, canModify: Boolean, reload: 
         onSelect?.let { select -> Item(R.string.select, Icons.Outlined.CheckCircle) { onClose(); select() } }
         if (!node.isDir) Item(R.string.send_to, Icons.AutoMirrored.Outlined.Send) { onClose(); scope.launch { runCatching { sendToApp(context, node) }.onFailure { toast(context, it.message ?: failed) } } }
         if (!node.isDir) Item(R.string.open_with, Icons.AutoMirrored.Outlined.OpenInNew) { onClose(); scope.launch { runCatching { openExternally(context, node) }.onFailure { toast(context, it.message ?: failed) } } }
-        Item(if (node.isDir) R.string.save_as_zip else R.string.save_to_device, Icons.Outlined.Download) { onClose(); saveAs.launch(node.name + if (node.isDir) ".zip" else "") }
+        Item(if (node.isDir) R.string.save_as_zip else R.string.save_to_device, Icons.Outlined.Download) { saveAs.launch(node.name + if (node.isDir) ".zip" else "") }
         if (Services.offline.isPinned(node.id)) Item(R.string.remove_offline, Icons.Outlined.CloudOff) { act { Services.offline.unpin(node.id) } }
         else Item(R.string.make_offline, Icons.Outlined.DownloadForOffline) { act { Services.offline.pin(node); toast(context, context.getString(R.string.available_offline)) } }
         if (isOwner) {
