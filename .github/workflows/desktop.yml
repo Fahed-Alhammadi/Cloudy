@@ -5,9 +5,8 @@
 #     certificates and notarized, then the GitHub release titled vX.Y.Z with every package and the latest*.yml files the
 #     installed apps update from (scripts/github-release.sh, desktop/src/main/updater.ts), plus update-signatures.json(.sig)
 #     (scripts/sign-update.mjs): Windows and Linux apps install only updates listed in it (src/main/updateSignature.ts).
-# Release secrets live in the `desktop-release` environment (tags desktop-* only, needs the owner's approval: Actions →
-# the run → Review deployments). Only the mac job uses it, and only for a tag; it signs both the Mac app and the update
-# list, so one approval covers a release:
+# Release secrets live in the `desktop-release` environment (only desktop-* tags may use it; no approval step, owner
+# decision 2026-11-20). Only the mac job uses it, and only for a tag; it signs both the Mac app and the update list:
 #   MACOS_CERTIFICATE_P12 (Developer ID Application, base64 .p12), MACOS_INSTALLER_CERTIFICATE_P12 (Developer ID
 #   Installer, for the .pkg), MACOS_CERTIFICATE_PASSWORD (both .p12 files), UPDATE_SIGNING_KEY (Ed25519, PEM).
 # Repository secrets: the App Store Connect API key APP_STORE_CONNECT_API_KEY_ID / _ISSUER_ID / _KEY_P8 (notarization).
@@ -165,7 +164,7 @@ jobs:
           if-no-files-found: error
 
 
-  # macOS, after Windows and Linux: for a tag it runs in the desktop-release environment (owner approval), signs and
+  # macOS, after Windows and Linux: for a tag it runs in the desktop-release environment, signs and
   # notarizes the Mac packages, then signs the list of every package of the release for the in-app updater.
   mac:
     needs: [test, package]

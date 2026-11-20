@@ -1,6 +1,6 @@
 // Signed updates. Every desktop release carries update-signatures.json (app, version and the SHA-512 of every package)
 // and update-signatures.json.sig (its Ed25519 signature, base64). CI makes them with scripts/sign-update.mjs and the
-// private key UPDATE_SIGNING_KEY, a secret of the `desktop-release` environment (each run needs the owner's approval).
+// private key UPDATE_SIGNING_KEY, a secret of the `desktop-release` environment (release tags only).
 // A downloaded Windows or Linux update is installed only when the signature matches UPDATE_PUBLIC_KEY, the manifest is
 // for the expected version, and the downloaded file's SHA-512 is listed in it. (macOS updates are checked by Squirrel
 // against the running app's Developer ID signature.) No Electron imports: tested in test/updateSignature.test.ts.
