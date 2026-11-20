@@ -1,0 +1,67 @@
+# Dependabot: weekly (Monday) dependency updates, kept quiet on purpose: minor/patch bumps come as ONE grouped PR per
+# folder, major bumps as their own PRs, at most 5 open PRs per folder. Security updates are on in the repo settings.
+# Merging an update only runs CI; nothing is released until a release tag is pushed.
+version: 2
+updates:
+
+  # Server (Node/TypeScript)
+  - package-ecosystem: npm
+    directory: /server
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "Server deps" }
+    ignore:
+      # @types/node follows the Node major the code runs on (Node 24 in the image; Electron 45 ships Node 24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      server-minor:
+        update-types: [minor, patch]
+
+  # Server container base image (node:24-trixie-slim). The Node major is a deliberate choice: no major bumps.
+  - package-ecosystem: docker
+    directory: /server
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "Server image" }
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
+  # Desktop app (Electron)
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "Desktop deps" }
+    ignore:
+      # @types/node follows the Node major the code runs on (Node 24 in the image; Electron 45 ships Node 24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    groups:
+      desktop-minor:
+        update-types: [minor, patch]
+
+  # Android app (Gradle: AGP, Kotlin, Compose, AndroidX, …)
+  - package-ecosystem: gradle
+    directory: /android
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "Android deps" }
+    groups:
+      android-minor:
+        update-types: [minor, patch]
+
+  # GitHub Actions used by the workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "CI" }
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Browser tests (Playwright) for the web app
+  - package-ecosystem: npm
+    directory: /tests/web
+    schedule: { interval: weekly, day: monday }
+    commit-message: { prefix: "Web tests deps" }
+    groups:
+      web-tests:
+        patterns: ["*"]
