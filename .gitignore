@@ -1,5 +1,11 @@
 # Secrets & local config
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.p8
 *.keystore
 *.jks
 keystore.properties

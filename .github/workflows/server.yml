@@ -37,11 +37,11 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Release tag matches the version in the files
         if: github.ref_type == 'tag'
         run: python3 scripts/version.py check "$GITHUB_REF_NAME"
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: npm
@@ -86,7 +86,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: v
         run: |
           echo "version=$(scripts/version.py get server)" >> "$GITHUB_OUTPUT"
@@ -97,17 +97,17 @@ jobs:
           rc=0; GHCR_IMAGE="${GITHUB_REPOSITORY_OWNER,,}/cloudy" node scripts/published.mjs server "${{ steps.v.outputs.version }}" || rc=$?
           [ $rc != 2 ] || exit 1
           [ $rc != 0 ] || echo "skip=true" >> "$GITHUB_OUTPUT"
-      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         if: steps.done.outputs.skip != 'true'
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         if: steps.done.outputs.skip != 'true'
-      - uses: docker/login-action@v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         if: steps.done.outputs.skip != 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v7
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         if: steps.done.outputs.skip != 'true'
         with:
           context: server
