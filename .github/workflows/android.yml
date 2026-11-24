@@ -43,7 +43,7 @@ jobs:
           java-version: 21
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
-          packages: platform-tools platforms;android-37.0 build-tools;36.0.0
+          packages: platform-tools platforms;android-37.1 build-tools;36.0.0
       - name: Build debug APK
         working-directory: android
         run: ./gradlew --no-daemon assembleDebug
@@ -79,7 +79,7 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         if: steps.done.outputs.skip != 'true'
         with:
-          packages: platform-tools platforms;android-37.0 build-tools;36.0.0
+          packages: platform-tools platforms;android-37.1 build-tools;36.0.0
       - name: Build signed Play bundle
         if: steps.done.outputs.skip != 'true'
         working-directory: android
