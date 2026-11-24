@@ -18,7 +18,6 @@ struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
     @AppStorage("appLock") private var appLock = false
-    @AppStorage("welcomed") private var welcomed = false
     #if DEBUG
     @State private var locked = UserDefaults.standard.bool(forKey: "appLock") || Screenshots.lock // screenshots
     #else
@@ -29,8 +28,6 @@ struct RootView: View {
         Group {
             if session.isLoggedIn {
                 MainView()
-            } else if !welcomed {
-                WelcomeView { welcomed = true }
             } else {
                 LoginView()
             }

@@ -62,10 +62,10 @@ The iPhone app works like the Android app above, with these differences:
   storage that iOS manages for the Files app and may remove when space is needed; files you save or change there are uploaded to
   your server. Signing out, or turning on the app lock, removes the location and those copies from the iPhone.
 - **Local network:** iOS may ask to allow access to devices on your local network. This is only used to reach a Cloudy server at a local address.
-- **First launch:** a welcome screen lets you answer the iOS permission dialogs (local network, camera, photos, Face ID) before you sign in,
-  so your first sign-in to a server on your network works right away. Each one is optional and can be changed later in the iOS Settings app.
-  To show the local-network dialog the app briefly announces and looks for a Bonjour service named `_cloudy._tcp` on your network; nothing
-  is sent to your server or anyone else.
+- **Permissions:** iOS asks for each permission only when you use the feature that needs it: local network when you sign in to a server
+  at a local address, camera when you scan a document, photos when you save a picture to your library, Face ID when you turn on the app
+  lock. Each one is optional and can be changed later in the iOS Settings app. To show the local-network dialog the app briefly announces
+  and looks for a Bonjour service named `_cloudy._tcp` on your network; nothing is sent to your server or anyone else.
 - The app contains no advertising, analytics or tracking, and does not use Apple's advertising identifier. Apple's privacy policy applies
   to the App Store.
 

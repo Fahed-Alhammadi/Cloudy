@@ -2,8 +2,9 @@ import Foundation
 import Network
 import dnssd
 
-/// Triggers iOS's "Local Network" permission dialog before the first sign-in, so a request to a server on the
-/// home/office network (http://192.168.…) doesn't fail while the dialog is still open.
+/// Triggers iOS's "Local Network" permission dialog when the user signs in to a server on the home/office network
+/// (http://192.168.…), so the sign-in request doesn't fail while the dialog is still open. There is no screen of our
+/// own before the dialog (App Review guideline 5.1.1(iv)): it comes straight from the Sign in button.
 ///
 /// iOS has no API to ask for this permission directly: advertising and browsing a Bonjour service does it.
 /// Browsing a type listed under `NSBonjourServices` (Info.plist) fails with `PolicyDenied` when the user declines;
