@@ -15,7 +15,10 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "io.cloudy.app"
-    compileSdk = 37
+    // 37.1: Compose 1.13 (BOM 2026.11.01) requires it. Only the compile SDK; targetSdk (the behavior) stays 36.
+    compileSdk {
+        version = release(37) { minorApiLevel = 1 }
+    }
 
     defaultConfig {
         applicationId = "io.cloudy.app"
