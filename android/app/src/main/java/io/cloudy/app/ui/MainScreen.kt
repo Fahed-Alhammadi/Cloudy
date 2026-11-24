@@ -473,6 +473,7 @@ fun BackupScreen(nav: NavController) {
     var videos by remember { mutableStateOf(settings.includeVideos) }
     var folder by remember { mutableStateOf(settings.folder) }
     var askExisting by rememberSaveable { mutableStateOf(false) }
+    var permissionDenied by rememberSaveable { mutableStateOf(false) }
 
     fun apply() {
         settings.enabled = enabled; settings.wifiOnly = wifiOnly; settings.includeVideos = videos
@@ -481,7 +482,7 @@ fun BackupScreen(nav: NavController) {
     }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
         if (granted.values.all { it }) askExisting = true
-        else { enabled = false; toast(context, context.getString(R.string.backup_permission_needed)) }
+        else { enabled = false; permissionDenied = true }
     }
 
     Scaffold(topBar = {
@@ -506,6 +507,17 @@ fun BackupScreen(nav: NavController) {
                 Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
     }
+    // Declined (or declined before, so Android no longer shows its dialog): say why and offer the app's settings.
+    if (permissionDenied) AlertDialog(
+        onDismissRequest = { permissionDenied = false },
+        title = { Text(stringResource(R.string.photo_backup)) },
+        text = { Text(stringResource(R.string.backup_permission_needed)) },
+        confirmButton = { TextButton(onClick = {
+            permissionDenied = false
+            runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))) }
+        }) { Text(stringResource(R.string.open_settings)) } },
+        dismissButton = { TextButton(onClick = { permissionDenied = false }) { Text(stringResource(R.string.cancel)) } },
+    )
     if (askExisting) AlertDialog(
         onDismissRequest = {},
         title = { Text(stringResource(R.string.backup_existing_title)) },

@@ -41,7 +41,7 @@ Your files, photos and account live on the Cloudy server you sign in to. The per
 
 The app does **not** request access to your location, camera, microphone, phone calls, SMS or phone contacts (the document scanner uses the camera through Google Play services, as described above), and it does not collect advertising IDs or device identifiers.
 
-When you open the app for the first time, a welcome screen explains these uses and lets you grant the *Photos and videos* permission right away or later; you can change it any time in Android's app settings.
+Android asks for the *Photos and videos* permission only when you turn on photo backup; you can change it any time in Android's app settings.
 
 ## iPhone app
 

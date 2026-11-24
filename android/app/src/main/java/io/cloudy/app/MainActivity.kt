@@ -9,8 +9,6 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.core.content.IntentCompat
 import androidx.core.os.BundleCompat
 import androidx.core.view.WindowCompat
@@ -21,7 +19,6 @@ import io.cloudy.app.ui.CloudyTheme
 import io.cloudy.app.ui.LockScreen
 import io.cloudy.app.ui.LoginScreen
 import io.cloudy.app.ui.MainScreen
-import io.cloudy.app.ui.WelcomeScreen
 
 // FragmentActivity (a ComponentActivity) because the app lock's BiometricPrompt needs one.
 class MainActivity : FragmentActivity() {
@@ -41,9 +38,8 @@ class MainActivity : FragmentActivity() {
             CloudyTheme {
                 val user by Services.session.user.collectAsStateWithLifecycle()
                 val locked by AppLock.locked.collectAsStateWithLifecycle()
-                var welcomed by remember { mutableStateOf(Services.session.welcomed) }
                 when {
-                    user == null || Services.session.token == null -> if (welcomed) LoginScreen() else WelcomeScreen { welcomed = true }
+                    user == null || Services.session.token == null -> LoginScreen()
                     locked -> LockScreen()
                     else -> MainScreen(sharedUris)
                 }
