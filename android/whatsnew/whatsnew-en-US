@@ -1,3 +1,2 @@
-• Fixed: "Save to device" could create an empty file (0 KB) instead of saving the picture or file. Saving now always writes the whole file, also for folders saved as ZIP.
-• If a save can't finish, no empty file is left behind on your phone.
-• Updated the app's libraries for security and reliability.
+• The welcome screen is gone: Cloudy opens straight on sign-in.
+• Android now asks for photo access only when you turn on photo backup. If you decline, Cloudy explains why and offers a button to open the app's settings.

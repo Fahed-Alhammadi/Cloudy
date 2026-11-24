@@ -70,9 +70,4 @@ class Session(context: Context) {
 
     /** Last server address, pre-filled on the login screen. */
     val lastServer: String get() = prefs.getString("server", "") ?: ""
-
-    /** Whether the first-launch screen (permissions) was shown. Existing signed-in installs never need it. */
-    var welcomed: Boolean
-        get() = prefs.getBoolean("welcomed", false) || isLoggedIn
-        set(v) { prefs.edit().putBoolean("welcomed", v).apply() }
 }

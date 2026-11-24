@@ -12,6 +12,8 @@ struct LoginView: View {
     @State private var needsCode = false
     @State private var busy = false
     @State private var error: String?
+    /// The user declined the Local Network permission: sign-in to a local server can't work until it is turned on.
+    @State private var networkDenied = false
     @FocusState private var focus: Field?
 
     private enum Field { case server, user, password, code }
@@ -47,7 +49,14 @@ struct LoginView: View {
                     Text("Use the address of your server, e.g. https://cloud.example.com. Plain http:// only works on your local network.")
                 }
                 if let error {
-                    Section { Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red) }
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        if networkDenied {
+                            Button("Open Settings") {
+                                if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
+                            }
+                        }
+                    }
                 }
                 Section {
                     Button(action: signIn) {
@@ -109,7 +118,20 @@ struct LoginView: View {
         server = address
         busy = true
         error = nil
+        networkDenied = false
         Task {
+            // A server on the local network needs iOS's Local Network permission: its dialog appears now, right from
+            // the Sign in button (no screen of our own before it, App Review 5.1.1(iv)). Internet servers skip this.
+            // The simulator has no such permission and never answers the probe, so it is skipped there.
+            #if !targetEnvironment(simulator)
+            if let host = URL(string: address)?.host(), LocalNetwork.isLocal(host), host != "localhost", host != "::1",
+               !host.hasPrefix("127."), await LocalNetwork.request() == false {
+                error = String(localized: "Cloudy isn't allowed to use your local network, so it can't reach this server. Turn on Local Network for Cloudy in the Settings app.")
+                networkDenied = true
+                busy = false
+                return
+            }
+            #endif
             do {
                 let r = try await retryingConnection {
                     try await API.shared.login(server: address, user: user.trimmingCharacters(in: .whitespaces),
@@ -128,7 +150,7 @@ struct LoginView: View {
     }
 }
 
-/// Logo, name and one line of text at the top of the sign-in and welcome screens. `compact` (landscape): the logo moves
+/// Logo, name and one line of text at the top of the sign-in screen. `compact` (landscape): the logo moves
 /// beside the text, so the form below starts on the first screen.
 struct BrandHeader: View {
     let title: LocalizedStringKey

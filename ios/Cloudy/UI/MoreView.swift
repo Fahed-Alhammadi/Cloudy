@@ -113,7 +113,6 @@ extension MoreView {
 
 /// Settings app tones: fixed, deep and solid in light and dark mode (the dynamic system colors are paler since iOS 26).
 /// Orange, green and teal are a shade deeper than Apple's so the white symbol keeps ~3:1 contrast.
-/// Also used by the welcome screen's permission rows.
 extension Color {
     static let settingsBlue = Color(red: 0x00 / 255, green: 0x7A / 255, blue: 0xFF / 255)
     static let settingsOrange = Color(red: 0xF0 / 255, green: 0x82 / 255, blue: 0x00 / 255)
