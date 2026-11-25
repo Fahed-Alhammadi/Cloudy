@@ -2,7 +2,10 @@
 // Sets the release notes of an uploaded iOS build through the App Store Connect API (no dependencies):
 //   - TestFlight "What to Test" of the build (betaBuildLocalizations), and
 //   - App Store "What's New in This Version" of the matching App Store version, if it exists and can still be edited
-//     (Apple has no such field for an app's first version, so that part is skipped then).
+//     (Apple has no such field for an app's first version, so that part is skipped then),
+// then, once the build is processed, adds it to the external TestFlight group (EXTERNAL_GROUP, the public link) and
+// sends it to Beta App Review. Each step is skipped when it is already done, so the script can be run again.
+// Export compliance needs no step: Info.plist sets ITSAppUsesNonExemptEncryption = NO.
 // Usage: node scripts/appstore-whatsnew.mjs <bundle id> <version> <build number> <notes file>
 // Env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (the AuthKey_<id>.p8 file). Locale: en-US.
 import { createPrivateKey, sign } from 'node:crypto';
@@ -35,6 +38,8 @@ async function asc(method, path, data) {
   if (!res.ok) throw new Error(`${method} ${path}: HTTP ${res.status} ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : {};
 }
+// External TestFlight group with the public link (https://testflight.apple.com/join/X1M6sYZm).
+const EXTERNAL_GROUP = process.env.TESTFLIGHT_EXTERNAL_GROUP ?? 'Testing';
 const q = (params) => new URLSearchParams(params).toString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,3 +80,24 @@ if (!asv) {
     console.log(`"What's New" not set for ${version}: ${e.message}`);
   }
 }
+
+// External testers: wait (up to 30 minutes) for processing, add the build to the group, send it to Beta App Review.
+let attrs = build.attributes;
+for (let i = 0; i < 60 && attrs.processingState === 'PROCESSING'; i++) {
+  await sleep(30_000);
+  attrs = (await asc('GET', `/v1/builds/${build.id}`)).data.attributes;
+}
+if (attrs.processingState !== 'VALID') throw new Error(`build ${version} (${buildNumber}) is ${attrs.processingState}: add it to TestFlight testers in App Store Connect`);
+const group = ((await asc('GET', `/v1/apps/${app.id}/betaGroups?limit=200`)).data ?? [])
+  .find((g) => g.attributes.name === EXTERNAL_GROUP && !g.attributes.isInternalGroup);
+if (!group) throw new Error(`no external TestFlight group named "${EXTERNAL_GROUP}"`);
+const inGroup = ((await asc('GET', `/v1/betaGroups/${group.id}/builds?limit=200`)).data ?? []).some((b) => b.id === build.id);
+if (!inGroup) await asc('POST', `/v1/betaGroups/${group.id}/relationships/builds`, [{ type: 'builds', id: build.id }]);
+console.log(`Added ${version} (${buildNumber}) to the TestFlight group "${EXTERNAL_GROUP}"`);
+const externalState = async () => (await asc('GET', `/v1/builds/${build.id}/buildBetaDetail`)).data.attributes.externalBuildState;
+let state = await externalState();
+if (state === 'READY_FOR_BETA_SUBMISSION') {
+  await asc('POST', '/v1/betaAppReviewSubmissions', { type: 'betaAppReviewSubmissions', relationships: { build: { data: { type: 'builds', id: build.id } } } });
+  state = await externalState();
+}
+console.log(`External testing for ${version} (${buildNumber}): ${state}`);
