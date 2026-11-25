@@ -10,7 +10,8 @@
 #   every runner (Apple limits those: "Your account has reached the maximum number of certificates").
 # Without them the publish job fails.
 # Release notes: ios/whatsnew/en-US.txt (update it with each version bump) → TestFlight "What to Test" and, from the second
-#   App Store version on, "What's New" if that version already exists in App Store Connect (scripts/appstore-whatsnew.mjs).
+#   App Store version on, "What's New" if that version already exists in App Store Connect (scripts/appstore-whatsnew.mjs),
+#   which then adds the build to the external TestFlight group "Testing" (public link) and sends it to Beta App Review.
 # Xcode 27 (iOS 27 SDK), as App Store Connect asks for: GitHub's `xcode-27` runner (macOS 27; public preview at the time
 #   of writing, see actions/runner-images). Its default is 27.1, so DEVELOPER_DIR picks 27.2 = the Mac's Xcode.
 #   When that version leaves the image, point DEVELOPER_DIR at a newer /Applications/Xcode_27.x.app.
@@ -109,7 +110,7 @@ jobs:
           export ASC_KEY_PATH="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
           printf '%s\n' "$ASC_PRIVATE_KEY" > "$ASC_KEY_PATH"
           ios/build.sh upload
-      - name: Release notes (TestFlight "What to Test", App Store "What's New")
+      - name: Release notes + external TestFlight testers
         if: steps.done.outputs.skip != 'true'
         continue-on-error: true # optional: the build is already uploaded
         env:
