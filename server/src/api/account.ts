@@ -148,6 +148,9 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     await requirePassword(req, user.id, b.current, 'Current password is wrong');
     await q(`UPDATE users SET password_hash = $2 WHERE id = $1`, [user.id, await hashPassword(checkPasswordStrength(b.password))]);
     await dropOtherSessions(req, user.id); // a stolen browser session dies with the old password
+    // Device tokens too (a stolen laptop or phone keeps syncing otherwise), except the device making this change.
+    const bearer = bearerToken(req);
+    await q(`DELETE FROM app_passwords WHERE user_id = $1 AND token_hash <> $2`, [user.id, bearer ? sha256(bearer) : '']);
     await notifyPasswordChanged(req, user.id);
     noContent(res);
   }));

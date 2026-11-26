@@ -158,10 +158,13 @@ export async function login(req: IncomingMessage, id: string, password: string, 
   // A name that cannot be an account is answered like an unknown user (same scrypt time), without a database lookup.
   const known = ACCOUNT_RE.test(id);
   const guess = attempt(req, known ? id : undefined);
-  const row = known ? await one<User & { password_hash: string; totp_secret: string | null; totp_last_step: number }>(
-    `SELECT ${USER_COLS}, password_hash, totp_secret, totp_last_step FROM users WHERE id = $1`,
+  // Names are unique whatever their case, so "Sarah" signs in as "sarah" (phone keyboards capitalise the first letter).
+  // Accounts made before that rule may differ only in case: then the exact spelling is needed.
+  const rows = known ? await q<User & { password_hash: string; totp_secret: string | null; totp_last_step: number }>(
+    `SELECT ${USER_COLS}, password_hash, totp_secret, totp_last_step FROM users WHERE lower(id) = lower($1)`,
     [id],
-  ) : undefined;
+  ) : [];
+  const row = rows.find((r) => r.id === id) ?? (rows.length === 1 ? rows[0] : undefined);
   const ok = row && !row.disabled ? await verifyPassword(password, row.password_hash) : await burnPasswordCheck(password);
   if (!row || !ok) throw new HttpError(401, 'Invalid username or password'); // the guess stays counted
   if (row.totp_enabled) await checkSecondFactor(row, code, guess);

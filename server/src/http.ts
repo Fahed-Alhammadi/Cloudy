@@ -350,5 +350,9 @@ export function checkName(name: unknown): string {
   if (n !== name) throw new HttpError(400, 'Names cannot start or end with a space');
   // One Unicode form for every name (NFC): a Mac sends "é" as "e" + accent, a phone as one character; both were
   // stored as typed, so search missed one of them and two identical-looking files could share a folder.
-  return n.normalize('NFC');
+  const nfc = n.normalize('NFC');
+  // File systems allow 255 bytes per name, not 255 characters: a longer name (200 Arabic letters = 400 bytes) could
+  // be stored here but not saved by the desktop sync app or on a phone.
+  if (Buffer.byteLength(nfc, 'utf8') > 255) throw new HttpError(400, 'This name is too long (at most 255 bytes; letters outside A–Z take 2–4 each)');
+  return nfc;
 }

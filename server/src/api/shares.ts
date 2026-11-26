@@ -131,7 +131,11 @@ export function registerShares(r: Router, authed: Wrap) {
   r.patch('/api/shares/:id', authed(async ({ req, res, params }, user) => {
     const s = await ownShare(user, params.id);
     const b = await readJson(req);
-    if (typeof b.canEdit === 'boolean') await q(`UPDATE shares SET can_edit = $2 WHERE id = $1`, [s.id, b.canEdit]);
+    if (typeof b.canEdit === 'boolean') {
+      // Same rule as when the share is created: a link to a single file is always read-only (nothing to upload into).
+      const allowed = s.type !== 'link' || !!(await F.getNode(s.node_id))?.is_dir;
+      await q(`UPDATE shares SET can_edit = $2 WHERE id = $1`, [s.id, b.canEdit && allowed]);
+    }
     if ('expiresAt' in b && s.type === 'link') await q(`UPDATE shares SET expires_at = $2 WHERE id = $1`, [s.id, parseExpiry(b.expiresAt, user.timezone)]);
     if (typeof b.label === 'string') await q(`UPDATE shares SET label = $2 WHERE id = $1`, [s.id, b.label.trim().slice(0, 100)]);
     if ('password' in b && s.type === 'link') {

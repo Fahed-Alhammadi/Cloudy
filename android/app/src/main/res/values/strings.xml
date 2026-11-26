@@ -210,7 +210,7 @@
     <string name="current_password_wrong">Current password is wrong</string>
     <string name="too_many_attempts">Too many failed attempts, try again later</string>
     <string name="password_changed">Password changed</string>
-    <string name="change_password_note">Web browsers signed in to your account are signed out. This phone and your other devices stay signed in.</string>
+    <string name="change_password_note">Web browsers and your other devices are signed out. This phone stays signed in.</string>
     <!-- Profile picture (More screen); same words as the web's Settings → Profile picture. -->
     <string name="profile_picture">Profile picture</string>
     <string name="upload_picture">Upload picture</string>

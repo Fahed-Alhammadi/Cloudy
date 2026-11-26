@@ -210,7 +210,7 @@ struct ChangePasswordView: View {
                 }
                 .disabled(!canSave)
             } footer: {
-                Text("Web browsers signed in to your account are signed out. This iPhone and your other devices stay signed in.")
+                Text("Web browsers and your other devices are signed out. This iPhone stays signed in.")
             }
         }
         .disabled(saving)

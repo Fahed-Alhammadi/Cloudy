@@ -357,6 +357,8 @@ export async function access(userId: string, node: Node): Promise<Access | null>
   const shares = await q<{ node_id: number; can_edit: boolean }>(
     `SELECT node_id, can_edit FROM shares
       WHERE node_id = ANY($1)
+        -- A disabled account's shares stop working, like its public links (loadLink).
+        AND NOT EXISTS (SELECT 1 FROM users o WHERE o.id = shares.owner AND o.disabled)
         AND ((type = 'user' AND share_with = $2)
           OR (type = 'group' AND share_with IN (SELECT group_id FROM group_members WHERE user_id = $2)))`,
     [chain.map((n) => n.id), userId],
