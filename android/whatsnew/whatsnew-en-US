@@ -1,2 +1,3 @@
+• Changing your password now signs out your other devices too; this phone stays signed in (needs server 2.1.3).
 • The welcome screen is gone: Cloudy opens straight on sign-in.
-• Android now asks for photo access only when you turn on photo backup. If you decline, Cloudy explains why and offers a button to open the app's settings.
+• Cloudy asks for photo access only when you turn on photo backup. If you decline, it explains why and offers a button to open the app's settings.

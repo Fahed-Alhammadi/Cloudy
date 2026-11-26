@@ -11,6 +11,20 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.1.3 (2026-11-26)
+
+Fixes from a security review. Nothing to do before you update.
+
+- Changing your own password now also signs out your other devices (the phone and desktop apps), not only other
+  web browsers. The device you change it from stays signed in. Before, a lost phone or laptop stayed signed in.
+- When an administrator disables an account, the files it shared with other people and groups are no longer
+  available to them (its public links already stopped working). They come back if the account is enabled again.
+- A public link to a single file can no longer be switched to "can edit" afterwards; only folder links take uploads.
+- Sign-in no longer cares about upper and lower case in the username: "Sarah" signs in as `sarah`.
+- File and folder names are limited to 255 bytes, what computers and phones can store (about 127 letters outside
+  A–Z). Before, longer names were accepted but could not be synced to a computer or saved on a phone. Existing
+  names are not changed.
+
 ## 2.1.2 (2026-11-21)
 
 Maintenance release. Nothing to do before you update.
