@@ -42,6 +42,20 @@ async function asc(method, path, data) {
 const EXTERNAL_GROUP = process.env.TESTFLIGHT_EXTERNAL_GROUP ?? 'Testing';
 const q = (params) => new URLSearchParams(params).toString();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Right after processing ends, App Store Connect can still answer 404 "no resource of type 'builds'" for a build it
+// just reported VALID (ios-1.20.2: the group POST failed, the same call worked minutes later). Retry such answers for
+// up to 10 minutes; any other error fails at once.
+async function untilFound(what, fn) {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= 20 || !/: HTTP 404 /.test(e.message)) throw e;
+      console.log(`${what}: App Store Connect does not know the build yet (404), trying again in 30 s…`);
+      await sleep(30_000);
+    }
+  }
+}
 
 const app = (await asc('GET', `/v1/apps?${q({ 'filter[bundleId]': bundleId })}`)).data?.[0];
 if (!app) throw new Error(`no app with bundle id ${bundleId}`);
@@ -92,12 +106,12 @@ const group = ((await asc('GET', `/v1/apps/${app.id}/betaGroups?limit=200`)).dat
   .find((g) => g.attributes.name === EXTERNAL_GROUP && !g.attributes.isInternalGroup);
 if (!group) throw new Error(`no external TestFlight group named "${EXTERNAL_GROUP}"`);
 const inGroup = ((await asc('GET', `/v1/betaGroups/${group.id}/builds?limit=200`)).data ?? []).some((b) => b.id === build.id);
-if (!inGroup) await asc('POST', `/v1/betaGroups/${group.id}/relationships/builds`, [{ type: 'builds', id: build.id }]);
+if (!inGroup) await untilFound('adding to the group', () => asc('POST', `/v1/betaGroups/${group.id}/relationships/builds`, [{ type: 'builds', id: build.id }]));
 console.log(`Added ${version} (${buildNumber}) to the TestFlight group "${EXTERNAL_GROUP}"`);
 const externalState = async () => (await asc('GET', `/v1/builds/${build.id}/buildBetaDetail`)).data.attributes.externalBuildState;
-let state = await externalState();
+let state = await untilFound('reading the beta state', externalState);
 if (state === 'READY_FOR_BETA_SUBMISSION') {
-  await asc('POST', '/v1/betaAppReviewSubmissions', { type: 'betaAppReviewSubmissions', relationships: { build: { data: { type: 'builds', id: build.id } } } });
+  await untilFound('sending to Beta App Review', () => asc('POST', '/v1/betaAppReviewSubmissions', { type: 'betaAppReviewSubmissions', relationships: { build: { data: { type: 'builds', id: build.id } } } }));
   state = await externalState();
 }
 console.log(`External testing for ${version} (${buildNumber}): ${state}`);
