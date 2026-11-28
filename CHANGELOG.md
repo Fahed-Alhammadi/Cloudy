@@ -11,6 +11,62 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.2.0 (2026-11-28)
+
+The rest of the fixes from the full review: administration changes are confirmed with your password, two new
+limits, and a server that stays reachable when the database or the disk is under pressure.
+
+**Before you update**
+
+- **Unused devices are signed out after 90 days.** A phone or computer whose app has not talked to the server for
+  90 days is signed out within an hour of the update, and has to sign in again. Change the number, or set 0 for
+  never, under *Administration → Limits → Days until an unused device is signed out*, right after updating.
+- **The server keeps 1 GB of its storage free.** Uploads that would use the last 1,024 MB are refused with "Not
+  enough space on the server". If your storage has less than that free, uploads stop until you free space or lower
+  *Administration → Limits → Free space to keep (MB)* (0 switches it off).
+- **Scripts that use the administration API** must send your own password as `adminPassword` for the requests
+  listed below, including `DELETE /api/admin/users/<name>` (as a JSON body). An Administration page that was open
+  during the update needs a reload.
+- A two-factor setup that was started but not finished (QR code shown, no code entered yet) has to be started again.
+
+**Administration**
+
+- Making someone an administrator, setting someone's password or email address, resetting their two-factor
+  authentication, deleting a user and saving the email (SMTP) settings now ask for your own password. A browser left
+  signed in is no longer enough to take over or delete accounts. Ten wrong passwords pause these changes for 15
+  minutes.
+- Two new limits (see above): free space to keep, and days until an unused device is signed out.
+
+**Security**
+
+- Search no longer lists files that were shared by an account that is now disabled.
+- A public upload link takes at most 20 uploads at the same time.
+- Share notification emails and two-factor setup attempts are rate-limited; a started two-factor setup expires
+  after 15 minutes.
+- With `PUBLIC_URL` set to an https address, the server tells browsers to always use HTTPS (HSTS).
+
+**Reliability**
+
+- When the database is busy, requests are answered "The server is busy, try again in a moment" (503) after a
+  short wait instead of hanging; one slow change no longer holds up everyone.
+- A full disk is answered "Not enough space on the server" (507) instead of a server error.
+- Once a day the server looks for stored files that no file or version uses any more (left behind by a crash or
+  an interrupted delete), moves them into `leftover/` in the files volume and deletes them 30 days later. Nothing
+  is moved when more than half of the stored files look unused (a sign of a wrong or restored database). See
+  "Backup, restore and going back a version" in the README.
+- The server stops more gently: `docker compose` now waits 30 seconds for running uploads (in the new
+  `docker-compose.yml`; older files keep working).
+- Fewer database writes: a signed-in app's "last used" time is written at most every five minutes.
+- A picture or PDF whose preview failed only once (a busy moment) gets its preview on the next try.
+
+**Web app**
+
+- Files in the grid always show their checkbox and menu button, not only under the mouse.
+- Text fields have a clearly visible outline in the light and the dark theme.
+- "Can't reach the server" with a *Try again* button while the server restarts, instead of the sign-in form.
+- Shift-click selects a range of files. Back closes an open dialog.
+- A tab left in the background stops listening for changes and catches up when you return to it.
+
 ## 2.1.4 (2026-11-28)
 
 Fixes from a full review: two ways an upload or a save could be lost, and three security fixes. Nothing to do
