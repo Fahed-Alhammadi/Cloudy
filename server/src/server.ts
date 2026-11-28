@@ -15,7 +15,7 @@ import { registerAccount } from './api/account.ts';
 import { registerAvatars } from './api/avatars.ts';
 import { registerInvitations, expireInvitations } from './api/invitations.ts';
 import { registerPasskeys } from './api/passkeys.ts';
-import { registerFiles, registerUploadChunks, expireUploads } from './api/files.ts';
+import { registerFiles, registerUploadChunks, expireUploads, finishStrandedUploads } from './api/files.ts';
 import { registerShares } from './api/shares.ts';
 import { openStream, startLiveUpdates, closeStreams } from './events.ts';
 import { registerOffice, pruneOfficeCache } from './office.ts';
@@ -171,6 +171,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 async function jobs(): Promise<void> {
   const steps: [string, () => Promise<unknown>][] = [
     ['sessions', () => q(`DELETE FROM sessions WHERE expires_at < now()`)],
+    ['unfinished uploads', finishStrandedUploads], // before the next step: a complete upload is stored, not expired
     ['uploads', expireUploads],
     ['storage', cleanStorage],
     ['office previews', pruneOfficeCache],

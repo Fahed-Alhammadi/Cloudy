@@ -2,6 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { writeFile as fsWriteFile, truncate, rm, stat } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import type { Hash } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Router, Ctx } from '../http.ts';
@@ -9,7 +10,7 @@ import { json, noContent, readJson, checkName, numId, HttpError, watchIdle } fro
 import { config } from '../config.ts';
 import { q, one } from '../db.ts';
 import type { User } from '../auth.ts';
-import { newToken, sha256 } from '../auth.ts';
+import { newToken, sha256, bearerUser, sessionUser, getUser } from '../auth.ts';
 import * as F from '../files.ts';
 import { sendNodeFile, sendBlob, sendZip, sendItemsZip } from '../download.ts';
 import { sendThumbnail } from '../thumbs.ts';
@@ -278,6 +279,9 @@ const uploadId = (s: string) => {
 /** The access that started the upload must still exist when the file lands (revoked share, expired link…). */
 async function stillAllowed(u: { parent_id: number; user_id: string | null; share_id: number | null }, parent: F.Node): Promise<boolean> {
   if (u.user_id) {
+    // A disabled account stores nothing more, also not into folders shared with it or its own.
+    const who = await getUser(u.user_id);
+    if (!who || who.disabled) return false;
     const a = await F.access(u.user_id, parent);
     return !!a && a.perm !== 'read';
   }
@@ -297,23 +301,125 @@ async function stillAllowed(u: { parent_id: number; user_id: string | null; shar
 const uploadHashes = new Map<string, { at: number; hash: Hash }>();
 
 /**
- * Upload ids are 192-bit random capabilities issued only after an access
- * check, so the chunk endpoints need no further authentication. This also
- * lets public "upload into link" shares reuse them.
+ * A signed-in user's upload belongs to that user: every request for it (status, chunks, cancel) must be signed in as
+ * them. The id alone used to be enough, so an upload started on a device kept working after that device was signed
+ * out: after a password change, "Sign out" under Devices, or the account being disabled, whoever held the device
+ * could still finish it and replace a file. Uploads through a public link have no account; their 192-bit random id,
+ * issued after the link's own checks, is their only key.
  */
-export function registerUploadChunks(r: Router) {
-  const busy = new Set<string>();
+async function ownUpload(req: IncomingMessage, u: { user_id: string | null }): Promise<void> {
+  if (!u.user_id) return;
+  const user = (await bearerUser(req)) ?? (await sessionUser(req));
+  if (!user) throw new HttpError(401, 'Not logged in');
+  if (user.id !== u.user_id) throw new HttpError(404, 'Upload not found');
+}
 
-  r.get('/api/uploads/:id', async ({ res, params }) => {
-    const u = await one(`SELECT received, size FROM uploads WHERE id = $1`, [uploadId(params.id)]);
+type Upload = { id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null; no_overwrite: boolean };
+const UPLOAD_COLS = 'id, parent_id, name, size, received, user_id, share_id, no_overwrite';
+
+/** Uploads with a chunk being written or the finished file being stored: one at a time each (in memory: one process). */
+const busy = new Set<string>();
+
+/**
+ * Stores a completely received upload as its file. The session row goes in the same transaction as the file, so
+ * "the session is gone" always means "the file is stored" (the apps rely on that when the last answer is lost).
+ * The row used to be deleted first: a stop or crash before the file was saved lost it, and the apps counted it as
+ * uploaded. Now such an upload is still there afterwards and is stored by finishStrandedUploads() or the next request.
+ * A refusal (folder gone, access revoked, quota, a folder of that name) ends the session; any other failure keeps it.
+ */
+async function finishUpload(u: Upload): Promise<F.Node> {
+  if (busy.has(u.id)) throw new HttpError(409, 'Chunk already in progress');
+  busy.add(u.id);
+  const file = F.uploadPath(u.id);
+  const refuse = async (e: HttpError): Promise<never> => {
+    await q(`DELETE FROM uploads WHERE id = $1`, [u.id]);
+    await rm(file, { force: true }).catch(() => {});
+    uploadHashes.delete(u.id);
+    throw e;
+  };
+  try {
+    const parent = await F.getNode(u.parent_id);
+    if (!parent || parent.deleted_at) return await refuse(new HttpError(409, 'Target folder no longer exists'));
+    if (!(await stillAllowed(u, parent))) return await refuse(new HttpError(403, 'No longer allowed to upload here'));
+    const done = uploadHashes.get(u.id);
+    const sha256 = done?.at === u.size ? done.hash.copy().digest('hex') : undefined;
+    let taken = false; // someone else finished or cancelled it first: nothing of it is ours to remove
+    try {
+      const { node } = await F.writeFile(parent, u.name, file, u.size, {
+        noOverwrite: !!u.share_id || u.no_overwrite,
+        sha256,
+        keepSource: true,
+        // Claim it: of two requests finishing the same upload, or one finishing and one cancelling, only one wins.
+        claim: async (db) => {
+          if (await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [u.id], db)) return;
+          taken = true;
+          throw new HttpError(404, 'Upload not found');
+        },
+      });
+      uploadHashes.delete(u.id);
+      await rm(file, { force: true }).catch(() => {});
+      return node;
+    } catch (e: any) {
+      if (taken) throw e;
+      // Its file is gone (only that: a database that cannot be reached also reports ENOENT, for its socket).
+      if (e?.code === 'ENOENT' && e.path === file) return await refuse(new HttpError(404, 'Upload not found'));
+      if (e instanceof HttpError) return await refuse(e); // refused for good: quota, a folder of that name, folder gone…
+      throw e;
+    }
+  } finally {
+    busy.delete(u.id);
+  }
+}
+
+/** Whether every byte of `u` is on disk and nothing is working on it: it only needs to be stored. */
+async function stranded(u: Upload): Promise<boolean> {
+  return u.received >= u.size && !busy.has(u.id) && (await stat(F.uploadPath(u.id)).catch(() => null))?.size === u.size;
+}
+
+/**
+ * At start and hourly: uploads that were received completely but never stored (the server stopped, or the database
+ * failed, between the last chunk and saving the file). A sender that asks again finishes it itself with an empty
+ * chunk; this is for the ones that took the lost answer as "done" or gave up. Empty files only after a minute: they
+ * are "complete" from the moment their upload starts, and their sender is about to finish them.
+ */
+export async function finishStrandedUploads(): Promise<void> {
+  const rows = await q<Upload>(
+    `SELECT ${UPLOAD_COLS} FROM uploads WHERE received >= size AND (size > 0 OR updated_at < now() - interval '1 minute')`);
+  for (const u of rows) {
+    if (!(await stranded(u))) continue;
+    // Its sender has moved on: a file of that name was saved after the last chunk (the app gave up on this upload
+    // and sent the file again, perhaps edited since). Storing these older bytes now would replace the newer file.
+    // "Keep both" and link uploads never replace anything, so they are stored under a free name as usual.
+    if (!u.no_overwrite && !u.share_id && await one(
+      `SELECT 1 FROM uploads u JOIN nodes n ON n.parent_id = u.parent_id AND n.name = u.name AND n.deleted_at IS NULL
+        WHERE u.id = $1 AND n.mtime > u.updated_at`, [u.id])) {
+      if (await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [u.id])) await rm(F.uploadPath(u.id), { force: true }).catch(() => {});
+      uploadHashes.delete(u.id);
+      console.log(`dropped an unfinished upload: a newer "${u.name}" was saved after it`);
+      continue;
+    }
+    try {
+      const node = await finishUpload(u);
+      console.log(`stored an upload that was left unfinished: node ${node.id}`);
+    } catch (e: any) {
+      console.error(`unfinished upload ${u.id.slice(0, 6)}… could not be stored: ${e?.message}`);
+    }
+  }
+}
+
+export function registerUploadChunks(r: Router) {
+  r.get('/api/uploads/:id', async ({ req, res, params }) => {
+    const u = await one<{ received: number; size: number; user_id: string | null }>(
+      `SELECT received, size, user_id FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
-    json(res, u);
+    await ownUpload(req, u);
+    json(res, { received: u.received, size: u.size });
   });
 
   r.put('/api/uploads/:id', async ({ req, res, params }) => {
-    const u = await one<{ id: string; parent_id: number; name: string; size: number; received: number; user_id: string | null; share_id: number | null; no_overwrite: boolean }>(
-      `SELECT id, parent_id, name, size, received, user_id, share_id, no_overwrite FROM uploads WHERE id = $1`, [uploadId(params.id)]);
+    const u = await one<Upload>(`SELECT ${UPLOAD_COLS} FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
+    await ownUpload(req, u);
     const file = F.uploadPath(u.id);
     // After a power cut the part file can be shorter than what was confirmed (writes not yet on disk). Continuing at
     // `received` would fill the gap with zeros; instead the client is told the real offset and sends the rest again.
@@ -366,29 +472,17 @@ export function registerUploadChunks(r: Router) {
     }
 
     if (received < u.size) return json(res, { received, done: false });
-    const parent = await F.getNode(u.parent_id);
-    // Claim it: of two requests finishing the same upload (a retry of the last chunk), only one stores the file.
-    if (!(await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [u.id]))) throw new HttpError(404, 'Upload not found');
-    const done = uploadHashes.get(u.id);
-    uploadHashes.delete(u.id);
-    const sha256 = done?.at === received ? done.hash.digest('hex') : undefined;
-    if (!parent || parent.deleted_at) {
-      await rm(file, { force: true });
-      throw new HttpError(409, 'Target folder no longer exists');
-    }
-    if (!(await stillAllowed(u, parent))) {
-      await rm(file, { force: true });
-      throw new HttpError(403, 'No longer allowed to upload here');
-    }
-    const { node } = await F.writeFile(parent, u.name, file, received, { noOverwrite: !!u.share_id || u.no_overwrite, sha256 });
+    const node = await finishUpload({ ...u, received });
     // A signed-in uploader gets the node exactly as GET /api/nodes/:id lists it (etag, mtime, sha256…), so it needs no
     // extra request; a public-link visitor only what it had before (no owner name, favorites…).
     const full = u.user_id ? (await F.toJson([node], u.user_id))[0] : { id: node.id, name: node.name, size: node.size };
     json(res, { received, done: true, node: full });
   });
 
-  r.delete('/api/uploads/:id', async ({ res, params }) => {
+  r.delete('/api/uploads/:id', async ({ req, res, params }) => {
     const id = uploadId(params.id);
+    const u = await one<{ user_id: string | null }>(`SELECT user_id FROM uploads WHERE id = $1`, [id]);
+    if (u) await ownUpload(req, u);
     const row = await one(`DELETE FROM uploads WHERE id = $1 RETURNING id`, [id]);
     if (row) await rm(F.uploadPath(id), { force: true });
     uploadHashes.delete(id);

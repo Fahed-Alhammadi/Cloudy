@@ -704,6 +704,15 @@ s, up = admin.req('POST', '/api/uploads', {'parentId': rvid, 'name': 'cancelled.
 admin.req('DELETE', f"/api/uploads/{up['id']}")
 s, _ = admin.req('PUT', f"/api/uploads/{up['id']}", b'0123456789', headers={'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'})
 check('chunk for a cancelled upload is 404', s == 404 and not any(c['name'] == 'cancelled.bin' for c in admin.req('GET', f'/api/nodes/{rvid}')[1]['children']))
+# an upload belongs to the signed-in user who started it: its id alone is not enough (it used to be)
+s, up = admin.req('POST', '/api/uploads', {'parentId': rvid, 'name': 'owned.bin', 'size': 4})
+octet = {'Upload-Offset': '0', 'Content-Type': 'application/octet-stream'}
+s, _ = Client().req('PUT', f"/api/uploads/{up['id']}", b'abcd', headers=octet)
+check('upload chunk without the sign-in is refused', s == 401, s)
+check('upload status and cancel without the sign-in are refused',
+      Client().req('GET', f"/api/uploads/{up['id']}")[0] == 401 and Client().req('DELETE', f"/api/uploads/{up['id']}")[0] == 401)
+s, r = admin.req('PUT', f"/api/uploads/{up['id']}", b'abcd', headers=octet)
+check('the user who started the upload finishes it', s == 200 and r.get('done'), r)
 # public upload link: the owner's file made while a visitor uploads is never replaced
 s, ln = admin.req('POST', f'/api/nodes/{rvid}/shares', {'type': 'link', 'canEdit': True, 'expiresAt': '2999-01-01T00:00:00Z'})
 s, up = Client().req('POST', f"/api/public/{ln['token']}/uploads", {'parentId': rvid, 'name': 'race.txt', 'size': 7})

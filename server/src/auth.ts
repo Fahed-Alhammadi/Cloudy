@@ -64,7 +64,9 @@ export function checkPasswordStrength(pw: unknown): string {
 
 // ---- brute-force protection (in memory): per client IP, and per account when one is named ----
 // The account counter stops guessing from many addresses (passwords, 2FA codes, recovery codes); it is
-// looser than the IP one so that a stranger can't lock someone out for long.
+// looser than the IP one. Anyone can feed it wrong passwords for any username, so it must not be able to shut the
+// owner out: a browser that signed in to the account before is counted on its own (`known:`, see knownDevice), and
+// so is a signed-in user re-typing the password (`reauth:`, requirePassword). Passkeys never use it either.
 type Counter = { n: number; first: number };
 const failures = new Map<string, Counter>();
 const WINDOW_MS = 15 * 60 * 1000;
@@ -81,7 +83,7 @@ function keysFor(req: IncomingMessage | null, account?: string): string[] {
   return keys;
 }
 
-/** Account counters allow more than the per-address ones (`ip:…`, and `invite:…` for invitation links). */
+/** Account counters allow more than the others (`ip:…`, `known:…`, `reauth:…`, and `invite:…` for invitation links). */
 function limited(key: string): boolean {
   const f = failures.get(key);
   return !!f && Date.now() - f.first < WINDOW_MS && f.n >= (key.startsWith('acct:') ? MAX_ACCOUNT_FAILURES : MAX_FAILURES);
@@ -148,6 +150,27 @@ export async function sign(value: string): Promise<string> {
   return createHmac('sha256', await getSecret()).update(value).digest('base64url');
 }
 
+// ---- browsers that signed in before ----
+/**
+ * A cookie every browser sign-in leaves behind (a year, HttpOnly): the account's name, signed with the server secret.
+ * It grants nothing by itself. A sign-in that carries it is counted on that account's `known:` counter (ten wrong
+ * passwords in 15 minutes) instead of the shared account and address counters, which strangers can fill: with 30
+ * wrong passwords per quarter of an hour from a few addresses, anyone could keep an account's owner from signing in
+ * at all. A new device can still be held up that way; the owner's own browsers, passkeys and signed-in apps cannot.
+ */
+const DEVICE_COOKIE = 'cloudy_device';
+async function deviceValue(account: string): Promise<string> {
+  const id = account.toLowerCase();
+  return `${Buffer.from(id).toString('base64url')}.${await sign(`device:${id}`)}`;
+}
+
+async function knownDevice(req: IncomingMessage, account: string): Promise<boolean> {
+  const got = Buffer.from(parseCookies(req)[DEVICE_COOKIE] ?? '');
+  if (!got.length) return false;
+  const want = Buffer.from(await deviceValue(account));
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
 // ---- sessions (browser) ----
 /**
  * Password login (browser session or device token). Users with two-factor enabled must also
@@ -157,7 +180,7 @@ export async function sign(value: string): Promise<string> {
 export async function login(req: IncomingMessage, id: string, password: string, code?: string): Promise<User> {
   // A name that cannot be an account is answered like an unknown user (same scrypt time), without a database lookup.
   const known = ACCOUNT_RE.test(id);
-  const guess = attempt(req, known ? id : undefined);
+  const guess = known && (await knownDevice(req, id)) ? attemptKeys([`known:${id.toLowerCase()}`]) : attempt(req, known ? id : undefined);
   // Names are unique whatever their case, so "Sarah" signs in as "sarah" (phone keyboards capitalise the first letter).
   // Accounts made before that rule may differ only in case: then the exact spelling is needed.
   const rows = known ? await q<User & { password_hash: string; totp_secret: string | null; totp_last_step: number }>(
@@ -239,6 +262,7 @@ export async function createSession(req: IncomingMessage, res: ServerResponse, u
     [sha256(token), userId, limits().sessionDays],
   );
   setCookie(req, res, SESSION_COOKIE, token, limits().sessionDays * 86400);
+  setCookie(req, res, DEVICE_COOKIE, await deviceValue(userId), 365 * 86400);
 }
 
 /** Signs the user out everywhere except the browser making this request (after a password change). */
@@ -248,11 +272,13 @@ export async function dropOtherSessions(req: IncomingMessage, userId: string): P
 }
 
 /**
- * The signed-in user's password, before a sensitive change. Counted against the account only: the per-address counter
- * also takes wrong guesses from other devices on the same network, which must not block this step.
+ * The signed-in user's password, before a sensitive change. Counted on a counter of its own (ten wrong ones in 15
+ * minutes): the per-address counter also takes wrong guesses from other devices on the same network, and the
+ * account's sign-in counter those of strangers, who could otherwise keep a signed-in owner from changing the
+ * password, the email address, two-factor sign-in or passkeys. Only someone signed in as this user gets here.
  */
 export async function requirePassword(_req: IncomingMessage, userId: string, password: unknown, message = 'Wrong password'): Promise<void> {
-  const guess = attempt(null, userId);
+  const guess = attemptKeys([`reauth:${userId.toLowerCase()}`]);
   const row = await one<{ password_hash: string }>(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
   if (!row || !(await verifyPassword(String(password ?? ''), row.password_hash))) throw new HttpError(403, message);
   guess.succeeded();

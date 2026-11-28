@@ -63,11 +63,24 @@ export class Router {
   }
 }
 
-/** The compression the client accepts, best first ("br" or "gzip"), or null. */
+/**
+ * The compression the client accepts, best first ("br" or "gzip"), or null. The header is split by hand: one pattern
+ * over the whole value took time that grew with the square of its length (120 ms for a 16 KB header of spaces, sent
+ * without signing in, on the one thread that serves everyone). Browsers send about 30 characters; a long header is
+ * answered uncompressed.
+ */
 export function acceptedEncoding(req: IncomingMessage | undefined): 'br' | 'gzip' | null {
   const h = String(req?.headers['accept-encoding'] ?? '');
-  const ok = (name: string) => new RegExp(`(^|,)\\s*${name}\\s*(;\\s*q=(?!0(\\.0*)?\\s*(,|$))[\\d.]+)?\\s*(,|$)`, 'i').test(h);
-  return ok('br') ? 'br' : ok('gzip') ? 'gzip' : null;
+  if (h.length > 256) return null;
+  const accepted = new Set<string>();
+  for (const part of h.toLowerCase().split(',')) {
+    const [name, ...params] = part.split(';').map((x) => x.trim());
+    // "name" or "name;q=<number above 0>"; anything else (q=0, other parameters) does not count as accepted.
+    if (params.length > 1) continue;
+    if (params.length === 1 && !(/^q=[\d.]+$/.test(params[0]) && Number(params[0].slice(2)) > 0)) continue;
+    accepted.add(name);
+  }
+  return accepted.has('br') ? 'br' : accepted.has('gzip') ? 'gzip' : null;
 }
 
 export function compress(body: Buffer, enc: 'br' | 'gzip'): Buffer {

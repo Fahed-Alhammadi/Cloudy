@@ -90,7 +90,7 @@ The browser and every app use the JSON API (`/api/*`) and live updates (`/api/ev
 
 | Client | How it signs in |
 |---|---|
-| Browser | Password or passkey → session cookie (HttpOnly, SameSite=Lax, Secure behind HTTPS) |
+| Browser | Password or passkey → session cookie (HttpOnly, SameSite=Lax, Secure behind HTTPS), plus a year-long cookie that only says "this browser signed in to this account before" (the account name, signed by the server) |
 | Android, iPhone and desktop apps | `POST /api/auth/token` → device token, sent as `Authorization: Bearer …` (kept in app-private storage, the iOS Keychain, or encrypted with the OS keychain on desktop) |
 
 - **Two-factor authentication** uses TOTP (RFC 6238: SHA-1, 6 digits, 30 s, ±1 step), implemented in `totp.ts`.
@@ -113,7 +113,9 @@ The browser and every app use the JSON API (`/api/*`) and live updates (`/api/ev
   never administrators. Wrong links are rate-limited per client address on their own counter. New usernames start
   with a letter or digit (`.` and `..` collapse in URLs) and may not equal another account's email address.
 - Passwords are hashed with scrypt. Tokens are stored as SHA-256 hashes.
-- Failed sign-ins are rate-limited per client IP. Behind a proxy, `TRUST_PROXY` makes the real client IP
+- Failed sign-ins are rate-limited per client IP and per account. A browser that signed in to the account before
+  and a signed-in user re-typing the password are counted separately, so wrong passwords sent by strangers cannot
+  keep the owner out. Behind a proxy, `TRUST_PROXY` makes the real client IP
   visible. Set to the proxies' addresses or CIDR ranges, forwarded headers count only on connections from them,
   and Cloudy takes the right-most address in `X-Forwarded-For` that is not one of them. `TRUST_PROXY=true`
   believes the headers from any peer and treats every local address as a proxy, so Traefik → nginx → Cloudy

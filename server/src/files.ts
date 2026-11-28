@@ -63,10 +63,23 @@ export async function ensureDirs(): Promise<void> {
   }
 }
 
-async function adoptBlob(file: string): Promise<string> {
+/**
+ * Makes `file` a blob. `keep`: the file stays where it is too, so a caller whose transaction fails or whose process
+ * dies still has it: a hard link, or a copy where the storage has no links (as in duplicateBlob).
+ */
+async function adoptBlob(file: string, keep = false): Promise<string> {
   const id = randomUUID();
   await mkdir(path.dirname(blobPath(id)), { recursive: true });
-  await rename(file, blobPath(id));
+  if (!keep) {
+    await rename(file, blobPath(id));
+    return id;
+  }
+  try {
+    await link(file, blobPath(id));
+  } catch (e: any) {
+    if (e?.code === 'ENOENT') throw e;
+    await copyFile(file, blobPath(id));
+  }
   return id;
 }
 
@@ -88,10 +101,16 @@ async function duplicateBlob(blob: string): Promise<string> {
   return id;
 }
 
+/**
+ * Removes blobs nothing refers to any more. Never throws: every caller runs it after its transaction ended, and a
+ * file that cannot be removed (a permission or network-storage error) is a leftover on disk, not a reason to fail
+ * the request, or to undo the save it follows.
+ */
 export async function dropBlobs(blobs: (string | null)[]): Promise<void> {
   const ids = blobs.filter((b): b is string => !!b);
   if (!ids.length) return;
-  await Promise.all(ids.map((b) => rm(blobPath(b), { force: true })));
+  const failed = (await Promise.allSettled(ids.map((b) => rm(blobPath(b), { force: true })))).filter((r) => r.status === 'rejected');
+  if (failed.length) console.error(`${failed.length} of ${ids.length} unused blob(s) could not be removed:`, (failed[0] as PromiseRejectedResult).reason?.message);
   await q(`DELETE FROM blob_hashes WHERE blob = ANY($1)`, [ids]).catch(() => {}); // leftovers go with gcHashes()
 }
 
@@ -574,15 +593,23 @@ export async function writeFile(
   name: string,
   file: string,
   size: number,
-  opts: { noOverwrite?: boolean; sha256?: string; expectEtag?: string; expectId?: number } = {},
+  opts: {
+    noOverwrite?: boolean; sha256?: string; expectEtag?: string; expectId?: number;
+    /** Leave `file` in place as well (see adoptBlob); the caller removes it once this returns. */
+    keepSource?: boolean;
+    /** Runs in the same transaction as the file, so what it changes is saved with the file or not at all. */
+    claim?: (db: Db) => Promise<void>;
+  } = {},
 ): Promise<{ node: Node; created: boolean }> {
   if (!parent.is_dir) throw new HttpError(400, 'Parent is not a folder');
-  const blob = await adoptBlob(file);
+  const blob = await adoptBlob(file, opts.keepSource);
   let pruned: string[] = [];
+  let out: { node: Node; created: boolean };
   try {
-    const out = await tx(async (db) => {
+    out = await tx(async (db) => {
       await lockChain(db, parent.id); // serializes writes to this folder (same name) without deadlocks
       await assertLive(db, parent.id);
+      await opts.claim?.(db);
       let existing = await childByName(parent.id, name, db);
       // Under the lock, so nothing can take the name in between: a public-link visitor's file never replaces one
       // the owner created while the upload was running.
@@ -619,13 +646,15 @@ export async function writeFile(
       await saveHash(db, blob, opts.sha256);
       return { node, created: true };
     });
-    await dropBlobs(pruned);
-    if (!opts.sha256) queueHash(blob);
-    return out;
   } catch (e) {
     await dropBlobs([blob]);
     throw e;
   }
+  // The file is saved from here on. Nothing below may reach the catch above: it removes the new content, and a
+  // failed clean-up of old versions used to do exactly that to a file that had just been stored.
+  await dropBlobs(pruned);
+  if (!opts.sha256) queueHash(blob);
+  return out;
 }
 
 /** Stores a known hash in the same transaction as the node that uses the blob (so gcHashes never sees it orphaned). */
