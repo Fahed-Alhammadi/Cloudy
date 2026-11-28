@@ -100,7 +100,8 @@ More about each app: [Android](android/README.md) · [iPhone](ios/README.md) · 
 
 ## Install
 
-You need Docker with the Compose plugin. Three steps:
+You need Docker with the Compose plugin, on a 64-bit Intel/AMD or ARM machine (the image is built for `linux/amd64`
+and `linux/arm64`; it is about 1.3 GB, mostly LibreOffice for the document previews). Three steps:
 
 ```sh
 # 1. Get the two files
@@ -180,12 +181,38 @@ location / {
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
     client_max_body_size 0;
     proxy_request_buffering off;
     proxy_buffering off;
     proxy_read_timeout 3600s;
 }
 ```
+
+Caddy needs no more than this (it forwards the three headers, streams uploads and downloads and has no size
+limit by default):
+
+```caddy
+cloud.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+Traefik, as labels on the `cloudy` service (the entry point and certificate resolver names are your own):
+
+```yaml
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.cloudy.rule=Host(`cloud.example.com`)
+      - traefik.http.routers.cloudy.entrypoints=websecure
+      - traefik.http.routers.cloudy.tls.certresolver=letsencrypt
+      - traefik.http.services.cloudy.loadbalancer.server.port=8080
+```
+
+With any of them, `TRUST_PROXY` is the address Cloudy sees the proxy come from: for a proxy on the Docker host or in
+another container that is the Docker network (for example `TRUST_PROXY=172.16.0.0/12`).
+
+### Backup, restore and going back a version
 
 **Back up** the database (the `db-data` volume, or your folder) and your files (`app-data`) together. For a
 consistent database dump
@@ -195,7 +222,33 @@ while Cloudy runs:
 docker exec -u node cloudy pg_dump -h /run/cloudy -U cloudy cloudy > cloudy.sql
 ```
 
-(Use your `PUID` instead of `node` if you changed it, e.g. `-u 1001`.)
+(Use your `PUID` instead of `node` if you changed it, e.g. `-u 1001`.) Take the dump first and copy the files
+right after it, at a quiet time: a file uploaded in between is then in the copy but not in the dump, which only
+costs disk space. The other order leaves the database pointing at files the copy does not have. (Something deleted
+for good in between, such as an emptied trash, is missing from the copy either way; for a copy that matches exactly,
+stop Cloudy first.)
+
+**Restore** the files into the `app-data` volume (or your folder), start Cloudy, then replace its database with
+the dump and restart:
+
+```sh
+docker compose up -d
+docker exec -u node cloudy psql -h /run/cloudy -U cloudy -d postgres -c 'DROP DATABASE cloudy WITH (FORCE)' -c 'CREATE DATABASE cloudy'
+docker exec -i -u node cloudy psql -h /run/cloudy -U cloudy -d cloudy -1 -q -o /dev/null < cloudy.sql
+docker compose restart
+```
+
+If you copied both volumes while Cloudy was stopped instead, put both back and start it: nothing else is needed.
+
+Once a day Cloudy moves stored files that its database does not know into `leftover/` in the files volume and deletes
+them 30 days later (they are what a crash can leave behind). After restoring an older dump, the files uploaded since
+then are such files: if you then want a newer dump after all, move them back from `leftover/` into `blobs/<first
+two characters of the name>/` before loading it.
+
+**Going back a version.** The database only moves forward: a newer server may add to it, and an older one is not
+tested against that. To go back, set the version in `docker-compose.yml`
+(`image: ghcr.io/fahed-alhammadi/cloudy:2.1.3` instead of `:latest`) and restore the backup you made before the
+update. That is the reason to take one before every update.
 
 ### Storing files on NFS or another disk
 
@@ -344,8 +397,8 @@ Names from older `.env` files still work; see [Moving to the short compose and .
 | Type-check the server | `cd server && npm install && npm run typecheck` |
 | End-to-end tests (stack running) | `python3 tests/e2e.py http://localhost:8080 admin '<admin password>'` |
 | Container smoke test (PUID, capabilities, restart, stop) | `tests/docker_smoke.sh cloudy:local` |
-| Android debug build | `cd android && ./gradlew assembleDebug` (JDK 17+, Android SDK 36) |
-| iOS simulator build | `ios/build.sh` (Xcode 16+, `brew install xcodegen`) |
+| Android debug build | `cd android && ./gradlew assembleDebug` (JDK 17+, Android SDK 37) |
+| iOS simulator build | `ios/build.sh` (Xcode 27, `brew install xcodegen`) |
 | Desktop app | `cd desktop && npm install && npm start` (tests and packages: [desktop/README.md](desktop/README.md)) |
 
 See [Website/ARCHITECTURE.md](Website/ARCHITECTURE.md) for how Cloudy works inside.

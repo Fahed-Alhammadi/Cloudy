@@ -37,6 +37,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30 # a stuck step ends here instead of holding a runner for six hours
     services:
       postgres:
         image: postgres:17
@@ -91,6 +92,7 @@ jobs:
           - os: ubuntu-24.04-arm
             arch: arm64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30 # a stuck step ends here instead of holding a runner for six hours
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: desktop/linux/dolphin/build.sh ${{ matrix.arch }}
@@ -111,6 +113,7 @@ jobs:
           - os: ubuntu-24.04
             target: linux
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45 # a stuck step ends here instead of holding a runner for six hours
     defaults:
       run:
         shell: bash
@@ -169,6 +172,7 @@ jobs:
   mac:
     needs: [test, package]
     runs-on: macos-15
+    timeout-minutes: 90 # a stuck step ends here instead of holding a runner for six hours
     environment: ${{ github.ref_type == 'tag' && 'desktop-release' || '' }}
     defaults:
       run:
@@ -214,20 +218,40 @@ jobs:
           [ -n "$NAME" ] || { security find-identity -p codesigning "$KEYCHAIN"; echo "::error::No valid Developer ID Application identity"; exit 1; }
           echo "CSC_NAME=${NAME#Developer ID Application: }" >> "$GITHUB_ENV"
 
+      # No App Store Connect key here: the build does not notarize (electron-builder.json has "notarize": false), so
+      # the key is given only to the notarize step below. It used to be in this step's environment on every run,
+      # where each build dependency could read it.
       - name: Build packages
         working-directory: desktop
         env:
           RELEASE: ${{ github.ref_type == 'tag' }}
-          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
-          if [ "$RELEASE" = true ]; then
-            printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" # for the notarize step below
-          else
-            export CSC_IDENTITY_AUTO_DISCOVERY=false # unsigned test build
-          fi
+          [ "$RELEASE" = true ] || export CSC_IDENTITY_AUTO_DISCOVERY=false # unsigned test build
           npm run dist:mac -- --publish never
+
+      # The packaged app must start: nothing else in CI runs it, and a packaging mistake (a hardening switch that
+      # stops Electron from loading the app, a file missing from the package) would otherwise first show on people's
+      # computers after an update. Unsigned test builds are signed ad hoc first: Apple Silicon refuses to run
+      # Electron's binary once packaging has changed it and nothing has signed it again.
+      - name: The packaged app starts
+        working-directory: desktop
+        env:
+          RELEASE: ${{ github.ref_type == 'tag' }}
+        run: |
+          app=dist/mac-arm64/Cloudy.app
+          [ "$RELEASE" = true ] || codesign --force --deep --sign - "$app"
+          CLOUDY_USER_DATA="$RUNNER_TEMP/cloudy-data" CLOUDY_HOME="$RUNNER_TEMP/cloudy-home" \
+            "$app/Contents/MacOS/Cloudy" --use-mock-keychain --hidden > "$RUNNER_TEMP/start.log" 2>&1 &
+          pid=$!
+          sleep 20
+          if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            echo "The packaged app started and kept running."
+          else
+            echo "::error::The packaged app stopped right after starting"
+            cat "$RUNNER_TEMP/start.log"
+            exit 1
+          fi
 
       # Notarizing the .dmg and .pkg also notarizes the apps inside (Apple records every nested binary), which covers
       # the .zip used for updates too: it holds the same app as the .dmg of its architecture. Stapling is retried
@@ -238,7 +262,10 @@ jobs:
         env:
           ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
         run: |
+          printf '%s\n' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          trap 'rm -f "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"' EXIT
           for f in *.dmg *.pkg; do
             xcrun notarytool submit "$f" --key "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait \
               | tee notarize.log
@@ -299,6 +326,7 @@ jobs:
     needs: [package, mac]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15 # a stuck step ends here instead of holding a runner for six hours
     permissions:
       contents: write
     steps:

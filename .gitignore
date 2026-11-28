@@ -43,3 +43,6 @@ desktop/linux/dolphin/build/
 
 # Store listing images and videos (App Store, Google Play): large, rendered locally. The website keeps its own copies.
 Store/
+
+# Kotlin compiler session files
+.kotlin/

@@ -6,7 +6,7 @@ description: How the Cloudy apps for Android, iPhone and desktop handle your inf
 
 # Privacy Policy
 
-Last updated: November 17, 2026
+Last updated: November 24, 2026
 
 This privacy policy explains how the **Cloudy** apps for Android (package `io.cloudy.app`), iPhone (bundle ID `io.cloudy.app`) and
 desktop computers (macOS, Windows and Linux, `io.cloudy.desktop`) handle your information.

@@ -32,6 +32,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30 # a stuck step ends here instead of holding a runner for six hours
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Release tag matches the version in the files
@@ -44,29 +45,40 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           packages: platform-tools platforms;android-37.1 build-tools;36.0.0
-      - name: Build debug APK
+      # Keeps Gradle's plugins and libraries between runs (saved from main only, read everywhere else). Without it
+      # every run fetched them again, and now and then failed with "Plugin org.jetbrains.kotlin.android was not found".
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+      # The release build too (minified with R8, unsigned here): it used to be built for the first time after the
+      # release tag was pushed, so a release-only build error stopped a release instead of a pull request.
+      - name: Build debug and release APKs
         working-directory: android
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleDebug assembleRelease
 
   publish:
     needs: build
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45 # a stuck step ends here instead of holding a runner for six hours
     permissions:
       contents: read
-    env:
-      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }} # secrets can't be tested in `if` directly
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The Play key is handed only to the two steps that talk to Google Play. It used to be in the environment of
+      # the whole job, where the Gradle build (and every plugin and library it runs) could read it. Secrets can't be
+      # tested in `if` directly, so this step only notes whether the key exists.
       - id: v
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          HAS_PLAY_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
         run: |
           echo "version=$(scripts/version.py get android)" >> "$GITHUB_OUTPUT"
+          echo "play=$HAS_PLAY_KEY" >> "$GITHUB_OUTPUT"
           [ -n "$KEYSTORE" ] || { echo "::error::No signing secrets: Android $(scripts/version.py get android) can't be published."; exit 1; }
       - name: Already published? (a re-run after a partly failed release)
         id: done
-        if: env.PLAY_JSON != ''
+        if: steps.v.outputs.play == 'true'
+        env:
+          PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
           rc=0; node scripts/published.mjs android "$(scripts/version.py build android)" || rc=$?
           [ $rc != 2 ] || exit 1
@@ -80,6 +92,8 @@ jobs:
         if: steps.done.outputs.skip != 'true'
         with:
           packages: platform-tools platforms;android-37.1 build-tools;36.0.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        if: steps.done.outputs.skip != 'true'
       - name: Build signed Play bundle
         if: steps.done.outputs.skip != 'true'
         working-directory: android
@@ -101,7 +115,7 @@ jobs:
             android/Cloudy-*.aab
             android/app/build/outputs/mapping/release/mapping.txt
       - name: Upload to Google Play
-        if: steps.done.outputs.skip != 'true' && (env.PLAY_JSON != '')
+        if: steps.done.outputs.skip != 'true' && steps.v.outputs.play == 'true'
         uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -112,7 +126,7 @@ jobs:
           tracks: ${{ vars.PLAY_TRACK || 'alpha' }}
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
       - name: Not uploaded
-        if: steps.done.outputs.skip != 'true' && (env.PLAY_JSON == '')
+        if: steps.done.outputs.skip != 'true' && steps.v.outputs.play != 'true'
         run: |
           echo "::error::PLAY_SERVICE_ACCOUNT_JSON not set. The bundle is in the workflow artifacts; upload it in Play Console."
           exit 1
