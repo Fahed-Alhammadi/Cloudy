@@ -3,13 +3,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { stat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { config } from './config.ts';
-import { migrate, q } from './db.ts';
+import { migrate, q, isBusy, BUSY_MESSAGE } from './db.ts';
 import { Router, HttpError, json, requestUrl, acceptedEncoding, compress } from './http.ts';
 import type { Ctx } from './http.ts';
-import { sessionUser, bearerUser } from './auth.ts';
+import { sessionUser, bearerUser, expireDevices } from './auth.ts';
 import type { User } from './auth.ts';
 import { ensureAdmin } from './users.ts';
-import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes, repairNamesAndTypes } from './files.ts';
+import { ensureDirs, expireTrash, cleanStorage, gcHashes, backfillHashes, repairNamesAndTypes, sweepBlobsDaily, isDiskFull, NO_SPACE } from './files.ts';
 import { sendFile } from './download.ts';
 import { registerAccount } from './api/account.ts';
 import { registerAvatars } from './api/avatars.ts';
@@ -131,7 +131,11 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, url: URL, 
 
 // ---------------------------------------------------------------- dispatch
 
+/** Sent with every answer when the address users open is https: browsers then never try this site over plain http. */
+const HSTS = config.publicUrl.startsWith('https://') ? 'max-age=15552000' : null;
+
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (HSTS) res.setHeader('Strict-Transport-Security', HSTS);
   const url = requestUrl(req.url ?? '/');
   if (!url) {
     res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8', Connection: 'close' });
@@ -155,10 +159,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         && (await serveStatic(req, res, new URL('http://localhost/index.html'), 404))) return;
     throw new HttpError(404, 'Not found');
   } catch (e: any) {
-    const status = e instanceof HttpError ? e.status : 500;
+    // Two failures that are no fault of the request get their own answer instead of a bare 500: no database
+    // connection or lock in time (503, the apps try again), and a full disk (507, logged once here).
+    const busy = !(e instanceof HttpError) && isBusy(e);
+    const full = !(e instanceof HttpError) && isDiskFull(e);
+    const status = e instanceof HttpError ? e.status : busy ? 503 : full ? 507 : 500;
     if (status === 500) console.error(e);
+    else if (full) console.error(`storage is full (${req.method} ${url.pathname}): ${e.message}`);
+    else if (busy) console.warn(`busy (${req.method} ${url.pathname}): ${e.message}`);
     if (res.headersSent) return void res.destroy();
-    const message = status === 500 ? 'Internal server error' : e.message;
+    const message = status === 500 ? 'Internal server error' : busy ? BUSY_MESSAGE : full ? NO_SPACE : e.message;
     if (url.pathname.startsWith('/api/') || url.pathname === '/status') json(res, { error: message, ...(e instanceof HttpError ? e.data : {}) }, status);
     else {
       res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -171,6 +181,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 async function jobs(): Promise<void> {
   const steps: [string, () => Promise<unknown>][] = [
     ['sessions', () => q(`DELETE FROM sessions WHERE expires_at < now()`)],
+    ['devices', async () => { const n = await expireDevices(); if (n) console.log(`signed out ${n} device(s) not used for a long time`); }],
     ['unfinished uploads', finishStrandedUploads], // before the next step: a complete upload is stored, not expired
     ['uploads', expireUploads],
     ['storage', cleanStorage],
@@ -180,6 +191,7 @@ async function jobs(): Promise<void> {
     ['invitations', expireInvitations],
     ['trash', async () => { const n = await expireTrash(); if (n) console.log(`purged ${n} expired trash item(s)`); }],
     ['hashes', gcHashes],
+    ['leftover blobs', sweepBlobsDaily], // last: once a day it reads the whole blob store
   ];
   for (const [name, step] of steps) {
     try {
@@ -213,7 +225,10 @@ const server = createServer({ keepAlive: true, keepAliveInitialDelay: 30_000 }, 
   });
 });
 server.requestTimeout = 0; // large uploads/downloads (stalled bodies are cut by http.ts watchIdle instead)
-server.headersTimeout = 60_000;
+// Idle connections are kept longer than reverse proxies keep theirs (60 s is usual): with Node's 5 s, a proxy that
+// reused a connection the server was just closing answered the visitor with a 502 now and then.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 70_000; // must stay above keepAliveTimeout
 server.listen(config.port, () => console.log(`Cloudy ${config.version} listening on :${config.port}`));
 setInterval(jobs, 60 * 60 * 1000).unref();
 void jobs();

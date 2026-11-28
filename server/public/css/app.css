@@ -34,6 +34,7 @@
   --border-soft: #e7edf6;
   --border-strong: #b6c5db;
   --check-border: #6b7c99;   /* checkbox outline: 4.2:1 on white, 3.6:1 on a selected row */
+  --field-border: #7a8aa6;   /* outline of text fields and selects: 3.5:1 on white, 3.3:1 on paper (--border-strong was 1.75:1) */
 
   /* One colour for actions and selection. */
   --accent: #0a55c4;       /* 6.8:1 with white */
@@ -117,6 +118,7 @@
     --border-soft: #1b2a41;
     --border-strong: #3a5274;
     --check-border: #8b9cb8;
+    --field-border: #677b9b;   /* 4.3:1 on the page, 3.9:1 on dialogs (--border-strong was 2.3:1) */
 
     --accent: #5aa9ff;
     --accent-hover: #7ab9ff;
@@ -242,12 +244,13 @@ kbd { display: inline-block; min-width: 1.6em; padding: 1px 6px; border-radius: 
 /* ---------------------------------------------------------------- form controls */
 input[type=text], input[type=password], input[type=email], input[type=search], input[type=number],
 input[type=date], input[type=time], input[type=url], input[type=tel], input:not([type]), select, textarea {
-  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  /* The outline is what says "a field is here": at least 3:1 against the page and against dialogs, in both themes. */
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--field-border); border-radius: var(--r-md);
   min-height: 40px; padding: 8px 12px; min-width: 0; width: 100%;
 }
 input::placeholder, textarea::placeholder { color: color-mix(in srgb, var(--muted) 80%, transparent); }
 select { padding-inline-end: 32px; cursor: pointer; }
-input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong)); }
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--field-border)); }
 /* The ring has to be visible against the page, not just tinted (WCAG 2.4.11/2.4.13). */
 input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--ring); }
 input:disabled, select:disabled, textarea:disabled { background: var(--bg-soft); color: var(--muted); cursor: not-allowed; }
@@ -326,13 +329,13 @@ progress { accent-color: var(--accent); }
 .topbar .brand { display: none; }
 .search {
   flex: 1; max-width: 620px; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 14px;
-  background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: 12px; transition: border-color var(--ease), box-shadow var(--ease), background-color var(--ease);
+  background: var(--bg-soft); border: 1px solid var(--field-border); border-radius: 12px; transition: border-color var(--ease), box-shadow var(--ease), background-color var(--ease);
 }
 [dir=rtl] .search { padding: 0 14px 0 8px; }
 .search .icon { color: var(--muted); }
 .search input { border: none; background: transparent; padding: 0; min-height: 0; height: 100%; box-shadow: none; }
 .search input:focus { box-shadow: none; }
-.search:hover { border-color: var(--border); }
+.search:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--field-border)); }
 .search:focus-within { background: var(--bg); border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .search:focus-within kbd { display: none; }
 .topbar-end { margin-inline-start: auto; display: flex; align-items: center; gap: 8px; }
@@ -501,13 +504,14 @@ progress { accent-color: var(--accent); }
 .seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--bg-soft); border: 1px solid var(--border-soft); border-radius: 12px; flex: none; }
 .seg button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 32px; border: none; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; }
 .seg button:hover { color: var(--text); }
-.seg button[aria-pressed=true] { background: var(--bg); color: var(--accent-strong); box-shadow: var(--shadow-lift); }
-@media (prefers-color-scheme: dark) { .seg button[aria-pressed=true] { background: var(--bg-active); box-shadow: none; } }
+/* The chosen view: tinted, with a ring in the action blue (6:1 against the other segment). It was white on the
+   near-white track, told apart by a faint shadow only. */
+.seg button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1.5px var(--accent); }
 
 /* Grid: folders are short tiles, files tall ones with their picture (photos, PDFs) or their type's colour. */
 .file-tiles { display: flex; flex-direction: column; gap: 22px; padding-top: 4px; }
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
-.file-grid.folders { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.file-grid.folders { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
 .tile { position: relative; min-width: 0; padding: 8px 8px 10px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg); cursor: pointer; }
 .tile:hover { border-color: var(--border-strong); background: var(--bg-hover); }
 .tile.selected, .tile.selected:hover { background: var(--accent-soft); border-color: var(--accent); }
@@ -528,14 +532,15 @@ progress { accent-color: var(--accent); }
 .tile-name { margin: 9px 4px 2px; font-weight: 500; line-height: 1.3; min-height: 2.6em; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .tile-meta { margin: 0 4px; display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; }
 .tile-meta .badge { width: 13px; height: 13px; flex: none; }
-.tile-pick, .tile-more { position: absolute; inset-block-start: 14px; opacity: 0; transition: opacity var(--ease); }
+/* A tile's checkbox and ⋯ button are always there, as in the list (they used to appear only under the pointer, so
+   nothing showed that a tile can be ticked). On a picture each sits on a small plate of the page colour: the checkbox
+   outline keeps its contrast (4.2:1 light, 6.6:1 dark) whatever the picture shows. Phones: see the 760 px rules. */
+.tile-pick, .tile-more { position: absolute; inset-block-start: 14px; }
 .tile-pick { inset-inline-start: 14px; display: flex; padding: 6px; border-radius: 8px; background: var(--bg); box-shadow: var(--shadow-lift); }
 .tile-more { inset-inline-end: 12px; border-radius: var(--r-md); background: var(--bg); box-shadow: var(--shadow-lift); }
-.tile.folder .tile-pick { inset-block-start: 14px; inset-inline-start: 14px; }
-.tile.folder .tile-more { position: static; opacity: 1; background: none; box-shadow: none; margin: -4px -4px -4px 0; }
-.tile:hover .tile-pick, .tile:hover .tile-more, .tile:focus-within .tile-pick, .tile:focus-within .tile-more,
-.tile.selected .tile-pick, .file-tiles.selecting .tile-pick { opacity: 1; }
-@media (pointer: coarse) { .tile-more { opacity: 1; } }
+/* Folder tiles have no picture: the checkbox stands before the icon and ⋯ after the name, like a row of the list. */
+.tile.folder .tile-pick { position: static; order: -1; padding: 0; border-radius: 0; background: none; box-shadow: none; }
+.tile.folder .tile-more { position: static; background: none; box-shadow: none; margin-block: -4px; margin-inline: 0 -4px; }
 .tile.drop-target { background: var(--accent-soft); border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -1px; }
 .more-rows { height: 1px; }
 
@@ -611,7 +616,10 @@ dialog.modal footer { display: flex; justify-content: flex-end; gap: 8px; paddin
 .link-opts input[type=password] { width: 160px; }
 .link-opts input[type=date] { width: auto; }
 
-.toasts { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+/* Two lanes inside: messages, then errors (each its own live region for screen readers, ui.js toastRegion). */
+.toasts { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 2000; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.toasts > div { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.toasts > div + div:not(:empty) { margin-top: 8px; }
 .toast {
   display: flex; align-items: center; gap: 16px; background: var(--toast-bg); color: var(--toast-text); padding: 12px 18px; border-radius: 12px;
   box-shadow: var(--shadow-pop); transition: opacity 0.4s; max-width: 90vw; pointer-events: auto; animation: pop 160ms ease-out;
@@ -837,6 +845,9 @@ details.more-options .form-grid { margin-top: 14px; }
   .col-date, .col-extra, .col-check { display: none; }
   .row-meta { display: block; } /* the hidden columns' facts, under the name */
   .file-table.selecting .col-check { display: table-cell; } /* phones: checkboxes only while selecting */
+  /* The grid follows the list: its checkboxes show while selecting (long-press → Select); ⋯ is always there. */
+  .tile-pick { display: none; }
+  .file-tiles.selecting .tile-pick { display: flex; }
   .file-table td { padding: 8px 8px; }
   .name-cell { gap: 12px; }
   .upload-panel { left: 12px; right: 12px; width: auto; bottom: 12px; }
@@ -861,6 +872,8 @@ details.more-options .form-grid { margin-top: 14px; }
   .tile.folder > .icon:first-child { width: 30px; height: 30px; padding: 6px; }
   .tile.folder .tile-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; line-height: 1.25; }
   .tile.folder .tile-more .icon-btn { width: 30px; }
+  /* No room for a checkbox beside a folder's name here: while selecting it lies on the folder's icon, on its plate. */
+  .tile.folder .tile-pick { position: absolute; inset-block-start: 50%; inset-inline-start: 8px; transform: translateY(-50%); padding: 5px; border-radius: 8px; background: var(--bg); box-shadow: var(--shadow-lift); }
   .login-card { padding: 24px 20px 20px; }
   .tabs { margin-top: 12px; }
   .data-table td, .data-table th { padding-inline: 8px; }

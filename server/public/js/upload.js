@@ -80,6 +80,13 @@ export async function filesFromDrop(dataTransfer) {
   return out;
 }
 
+/**
+ * Names as the server stores them (NFC). A Mac hands out file and folder names in decomposed form ("Cafe" + a
+ * combining accent): compared as they came, a folder dropped a second time was not found among the existing ones, so
+ * no question was asked and every file in it failed with "already exists".
+ */
+const nfc = (name) => name.normalize('NFC');
+
 export function filesFromInput(input) {
   return [...input.files].map((file) => ({
     file,
@@ -94,7 +101,7 @@ export function filesFromInput(input) {
  */
 async function askConflicts(items, existing) {
   const taken = new Map(existing.map((c) => [c.name, c]));
-  const names = [...new Set(items.map((it) => it.path[0] ?? it.file?.name).filter((n) => n && taken.has(n)))];
+  const names = [...new Set(items.map((it) => it.path[0] ?? it.name).filter((n) => n && taken.has(n)))];
   if (!names.length) return 'replace';
   const list = h('ul', { class: 'plain-list conflict-list' }, names.slice(0, 6).map((n) => h('li', {}, icon(taken.get(n).isDir ? 'folder' : 'file'), h('span', { class: 'grow', dir: 'auto' }, n))),
     names.length > 6 && h('li', { class: 'muted' }, t('and {n} more', { n: names.length - 6 })));
@@ -131,6 +138,8 @@ function freeName(name, names) {
  */
 export async function uploadAll(items, target, onFinished, info = {}) {
   if (!items.length) return;
+  // From here on every name is in the server's form: `name` for a file, `path` for the folders above it.
+  items = items.map((it) => ({ ...it, path: it.path.map(nfc), name: it.file ? nfc(it.file.name) : undefined }));
   // Same names: ask once (signed-in uploads only; public-link visitors' files are always renamed by the server).
   let onConflict = 'replace';
   const renameTop = new Map();
@@ -140,7 +149,7 @@ export async function uploadAll(items, target, onFinished, info = {}) {
     if (!choice) return;
     onConflict = choice;
     const names = new Set(existing.map((c) => c.name));
-    if (choice === 'skip') items = items.filter((it) => !names.has(it.path[0] ?? it.file?.name));
+    if (choice === 'skip') items = items.filter((it) => !names.has(it.path[0] ?? it.name));
     if (choice === 'keep') {
       // Dropped folders whose name is taken go into a new "Folder (2)"; files get renamed by the server.
       for (const it of items) {
@@ -190,14 +199,14 @@ export async function uploadAll(items, target, onFinished, info = {}) {
   if (info.dest) ul.append(h('li', { class: 'up-dest' }, icon('folder'), h('span', { dir: 'auto' }, t('To {folder}', { folder: info.dest.name }))));
   const rows = items.map((item) => {
     if (item.folder) return { ...item, folderOnly: true };
-    const { file, path } = item;
+    const { file, path, name } = item;
     const bar = h('progress', { max: 100, value: 0 });
     const status = h('span', { class: 'muted' }, formatSize(file.size));
-    const cancel = h('button', { class: 'icon-btn up-cancel', 'aria-label': t('Cancel upload of {name}', { name: file.name }) }, icon('x'));
-    bar.setAttribute('aria-label', file.name);
-    const li = h('li', {}, h('div', { class: 'up-name', title: [...path, file.name].join('/'), dir: 'auto' }, file.name), status, cancel, bar);
+    const cancel = h('button', { class: 'icon-btn up-cancel', 'aria-label': t('Cancel upload of {name}', { name }) }, icon('x'));
+    bar.setAttribute('aria-label', name);
+    const li = h('li', {}, h('div', { class: 'up-name', title: [...path, name].join('/'), dir: 'auto' }, name), status, cancel, bar);
     ul.append(li);
-    return { file, path, li, bar, status, cancel, cancelled: false, current: null };
+    return { file, name, path, li, bar, status, cancel, cancelled: false, current: null };
   });
   const uploads = rows.filter((r) => !r.folderOnly);
 
@@ -265,7 +274,7 @@ export async function uploadAll(items, target, onFinished, info = {}) {
 
 async function uploadOne(row, startUrl, parentId, listChildren, onConflict) {
   const { file } = row;
-  const session = await api('POST', startUrl, { parentId, name: file.name, size: file.size, ...(onConflict ? { onConflict } : {}) });
+  const session = await api('POST', startUrl, { parentId, name: row.name, size: file.size, ...(onConflict ? { onConflict } : {}) });
   let offset = 0;
   let errors = 0;
   for (;;) {
@@ -300,7 +309,7 @@ async function uploadOne(row, startUrl, parentId, listChildren, onConflict) {
         // it, so the file may well be stored. It counts as done only when it is there with its size (a failure
         // that also removes the upload, such as a deleted folder, is not reported as done).
         if (e2.status === 404 && noAnswer && offset + chunk.size >= file.size) {
-          const name = session.name ?? file.name;
+          const name = session.name ?? row.name;
           const there = await listChildren?.(parentId).then((list) => list.some((c) => c.name === name && !c.isDir && c.size === file.size), () => false);
           if (there) return null;
         }

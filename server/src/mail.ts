@@ -9,7 +9,7 @@ import { json, noContent, readJson, HttpError, publicOrigin, clientIp, clientNet
 import { config } from './config.ts';
 import { q, one } from './db.ts';
 import type { User } from './auth.ts';
-import { hashPassword, checkPasswordStrength, newToken, sha256 } from './auth.ts';
+import { hashPassword, checkPasswordStrength, newToken, sha256, requirePassword } from './auth.ts';
 import { mailText } from './mailtext.ts';
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
@@ -128,6 +128,29 @@ export function sendMail(m: Message): void {
 
 // ---------------------------------------------------------------- notifications
 
+// Share notices are limited, in memory: one per sharer, recipient and item an hour, and sixty per sharer an hour.
+// Sharing an item and taking the share back in a loop used to send the other person an email each time, without end,
+// from the server's own address. A group share counts once, whatever the number of members.
+const NOTICE_WINDOW_MS = 3600_000;
+const NOTICES_PER_SHARER = 60;
+const lastNotice = new Map<string, number>();
+const sharerNotices = new Map<string, number[]>();
+
+/** Whether this share may be announced by email now; counts it when it may. `recipient`: "user:<id>" or "group:<id>". */
+export function allowShareNotice(sharer: string, recipient: string, nodeId: number, now = Date.now()): boolean {
+  const key = `${sharer}\n${recipient}\n${nodeId}`;
+  if (now - (lastNotice.get(key) ?? -Infinity) < NOTICE_WINDOW_MS) return false;
+  const recent = (sharerNotices.get(sharer) ?? []).filter((t) => now - t < NOTICE_WINDOW_MS);
+  if (recent.length >= NOTICES_PER_SHARER) return false;
+  recent.push(now);
+  sharerNotices.set(sharer, recent);
+  lastNotice.set(key, now);
+  // Entries are only made for notices that were allowed (sixty an hour per sharer); expired ones go once there are many.
+  if (lastNotice.size > 5000) for (const [k, t] of lastNotice) if (now - t >= NOTICE_WINDOW_MS) lastNotice.delete(k);
+  if (sharerNotices.size > 5000) for (const [k, ts] of sharerNotices) if (now - ts[ts.length - 1] >= NOTICE_WINDOW_MS) sharerNotices.delete(k);
+  return true;
+}
+
 /** Something was shared with a user or a group: tell each recipient who wants to know. */
 export async function notifyShare(req: IncomingMessage, sharer: User, nodeId: number, type: string, shareWith: string): Promise<void> {
   if (!(await mailEnabled())) return;
@@ -140,6 +163,8 @@ export async function notifyShare(req: IncomingMessage, sharer: User, nodeId: nu
       : `SELECT email, display_name FROM users WHERE id = $1 AND id <> $2 AND NOT disabled AND notify_shares AND email <> ''`,
     [shareWith, sharer.id],
   );
+  // After the lookup: a share nobody is told about (no address, notices turned off) uses up nothing.
+  if (!recipients.length || !allowShareNotice(sharer.id, `${type}:${shareWith}`, nodeId)) return;
   const who = sharer.display_name || sharer.id;
   for (const r of recipients) {
     const vars = { who, name: node.name, user: r.display_name || '', group: type === 'group' ? mailText('shareGroup', { group: shareWith }) : '' };
@@ -257,10 +282,13 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
   }));
 
   // Empty host turns email off. An empty password keeps the stored one (it is never sent back).
-  r.put('/api/admin/mail', admin(async ({ req, res }) => {
+  // Confirmed with the administrator's own password (`adminPassword`): password reset links go out through this
+  // server and carry the address saved here, so whoever may change it can read everyone's reset link.
+  r.put('/api/admin/mail', admin(async ({ req, res }, me) => {
     const b = await readJson(req);
     const host = String(b.host ?? '').trim();
     if (!host) {
+      await requirePassword(req, me.id, b.adminPassword);
       await saveConfig(null);
       return noContent(res);
     }
@@ -269,6 +297,7 @@ export function registerMail(r: Router, authed: Wrap, admin: Wrap) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new HttpError(400, 'Invalid port');
     const fromEmail = String(b.fromEmail ?? '').trim();
     if (!validEmail(fromEmail)) throw new HttpError(400, 'Enter the sender address (From email)');
+    await requirePassword(req, me.id, b.adminPassword); // after the checks above: a form with a mistake is not a wrong password
     const prev = await mailConfig();
     await saveConfig({
       host, port, security,

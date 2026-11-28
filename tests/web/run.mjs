@@ -1,7 +1,8 @@
 // Browser tests of the web app (Playwright, Chromium), run in CI against the running container:
 //   cd tests/web && npm ci && npx playwright install --with-deps chromium && node run.mjs http://localhost:8080 admin <password>
 // They drive the real pages the way people use them: upload by button and by dropping files, dropping onto a folder,
-// moving with Undo, the Move dialog, selection, sorting, list/grid, the editor, sharing, the trash, right-to-left.
+// moving with Undo, the Move dialog, selection, sorting, list/grid, the editor, sharing, the trash, right-to-left,
+// and Administration (confirming with the administrator's password, the limits).
 import { chromium } from 'playwright';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -214,8 +215,37 @@ console.log('== list and grid');
   await page.waitForSelector('.tile');
   await page.reload(); await page.waitForSelector('.tile');
   check('grid is remembered after a reload', (await page.locator('.tile').count()) > 0);
+  // A tile's checkbox and ⋯ are there without the pointer on the tile (they used to appear on hover only).
+  await page.mouse.move(5, 5);
+  await sleep(200);
+  const plain = await page.evaluate(() => {
+    const seen = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return s.opacity === '1' && s.visibility === 'visible' && s.display !== 'none' && r.width > 0 && r.height > 0; };
+    const box = document.querySelector('.tile .tile-pick input[type=checkbox]');
+    const r = box?.getBoundingClientRect();
+    return {
+      controls: [...document.querySelectorAll('.tile .tile-pick, .tile .tile-more')].map(seen),
+      onTop: !!box && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === box,
+    };
+  });
+  check('a tile shows its checkbox and ⋯ without hovering', plain.controls.length >= 2 && plain.controls.every(Boolean) && plain.onTop, plain);
   await page.getByRole('button', { name: 'List' }).click();
   await page.waitForSelector('table .file-row');
+}
+
+console.log('== Back with a dialog open');
+{
+  // Into a folder by a click (so Back stays inside the app), a dialog opened there, then Back.
+  await page.goto(`${BASE}/files`); await page.waitForSelector('.file-row');
+  await page.locator('.file-row', { hasText: 'Invoices' }).locator('.name').click();
+  await page.waitForSelector('.file-row:has-text("Invoice 1.txt")');
+  await page.locator('.file-row', { hasText: 'Invoice 1.txt' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Rename' }).click();
+  await page.waitForSelector('dialog.modal[open]');
+  await page.goBack();
+  await page.waitForSelector('.file-row:has-text("Work")', { timeout: 5000 }).catch(() => {});
+  check('Back with a dialog open closes it and shows the page before',
+    (await page.locator('dialog[open]').count()) === 0 && !new URL(page.url()).pathname.endsWith(`/${invoices.id}`) && (await page.locator('.file-row', { hasText: 'Work' }).count()) === 1,
+    { dialogs: await page.locator('dialog[open]').count(), url: page.url() });
 }
 
 console.log('== selection bar');
@@ -228,6 +258,20 @@ console.log('== selection bar');
   check('no "false" in the bar', !/false/.test(await page.locator('.selection-bar').innerText()));
   await page.keyboard.press('Escape');
   check('Escape clears the selection', await page.locator('.selection-bar').isHidden());
+  // Shift-click on a checkbox ticks the range, and every box in it shows its tick (the clicked one used to stay empty).
+  const boxes = page.locator('.file-row input[type=checkbox]');
+  await boxes.nth(0).check();
+  await boxes.nth(2).click({ modifiers: ['Shift'] });
+  const ticked = await page.evaluate(() => [...document.querySelectorAll('.file-row')].slice(0, 3).map((r) => r.querySelector('input[type=checkbox]').checked && r.classList.contains('selected')));
+  const said = await page.locator('.selection-bar').innerText();
+  check('Shift-click on a checkbox ticks the range, the clicked box included', ticked.length === 3 && ticked.every(Boolean) && /3 selected/.test(said), { ticked, said });
+  // "Select all" pressed by keyboard: the focus stays in the bar (the bar used to be rebuilt under it).
+  await page.locator('.selection-bar button', { hasText: 'Select all' }).focus();
+  await page.keyboard.press('Enter');
+  const kept = await page.evaluate(() => ({ inBar: !!document.activeElement?.closest('.selection-bar'), all: [...document.querySelectorAll('.file-row input[type=checkbox]')].every((b) => b.checked) }));
+  check('Select all by keyboard ticks everything and keeps the focus in the bar', kept.inBar && kept.all, kept);
+  await page.locator('.file-row').first().focus();
+  await page.keyboard.press('Escape');
 }
 
 console.log('== editor');
@@ -511,8 +555,91 @@ console.log('== invitations');
   check('an invitation link works only once', (await p2.locator('.card-title').innerText()).includes('can'), await p2.locator('.card-title').innerText());
   await ap.reload(); await ap.waitForSelector('.admin-view');
   check('a used invitation leaves the list', (await ap.locator('.invites li', { hasText: address }).count()) === 0);
+
+  console.log('== administration: confirm with your password');
+  // A new password for someone (here the person just invited) is confirmed with the administrator's own password.
+  await ap.getByRole('button', { name: `Edit ${invited}`, exact: true }).click();
+  await ap.locator('dialog[open] input[autocomplete=new-password]').fill('changed-pass-456');
+  await ap.locator('dialog[open] footer button[type=submit]').click();
+  const confirm = ap.locator('dialog[open]').filter({ has: ap.locator('input[autocomplete=current-password]') });
+  const asked = await confirm.waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check('setting someone\'s password asks for the administrator\'s own password', asked);
+  if (asked) {
+    await confirm.locator('input[autocomplete=current-password]').fill('not-the-password');
+    await confirm.locator('footer button[type=submit]').click();
+    await ap.waitForFunction(() => [...document.querySelectorAll('dialog[open] .error')].some((e) => e.textContent.trim()), null, { timeout: 5000 }).catch(() => {});
+    const refused = (await confirm.count()) === 1 ? (await confirm.locator('.error').innerText()).trim() : '';
+    check('a wrong password is refused, and the question stays open', refused.length > 0, refused);
+    await confirm.locator('input[autocomplete=current-password]').fill(ADMIN_PW);
+    await confirm.locator('footer button[type=submit]').click();
+    await ap.waitForFunction(() => !document.querySelector('dialog[open]'), null, { timeout: 8000 }).catch(() => {});
+    const login = await fetch(`${BASE}/api/login`, { method: 'POST', headers: H, body: JSON.stringify({ user: invited, password: 'changed-pass-456' }) });
+    check('with the right one the new password is set', login.status === 200 && (await ap.locator('dialog[open]').count()) === 0, login.status);
+  }
+
+  console.log('== administration: limits');
+  {
+    const before = (await admin('GET', '/api/admin/limits')).body;
+    await ap.goto(`${BASE}/admin/limits`); await ap.waitForSelector('.admin-view input[name=trashDays]');
+    const devices = ap.locator('input[name=deviceDays]');
+    const reserve = ap.locator('input[name=diskReserveMb]');
+    const there = (await devices.count()) === 1 && (await reserve.count()) === 1;
+    check('Limits shows the days for unused devices and the free space to keep', there, before);
+    if (there) {
+      // A little more of each: lower numbers ask first (fewer days sign devices out).
+      const want = { deviceDays: before.deviceDays ? before.deviceDays + 1 : 0, diskReserveMb: before.diskReserveMb + 1 };
+      await devices.fill(String(want.deviceDays));
+      await reserve.fill(String(want.diskReserveMb));
+      await ap.locator('.admin-view form button[type=submit]').click();
+      await ap.waitForFunction(() => [...document.querySelectorAll('.toasts .toast')].some((x) => /Limits saved/.test(x.textContent)), null, { timeout: 5000 }).catch(() => {});
+      const after = (await admin('GET', '/api/admin/limits')).body;
+      check('both are saved', after.deviceDays === want.deviceDays && after.diskReserveMb === want.diskReserveMb, after);
+      await admin('PUT', '/api/admin/limits', before); // as it was
+    }
+  }
+  console.log('== administration: email settings are confirmed with your password');
+  {
+    await ap.goto(`${BASE}/admin/email`); await ap.waitForSelector('.admin-view input[type=email]');
+    const form = ap.locator('.admin-view form');
+    await form.locator('label.field', { hasText: 'SMTP server' }).locator('input').fill('smtp.invalid');
+    await form.locator('input[type=email]').fill('cloudy@example.com');
+    await form.locator('button[type=submit]').click();
+    const confirm = ap.locator('dialog[open]').filter({ has: ap.locator('input[autocomplete=current-password]') });
+    const asked = await confirm.waitFor({ timeout: 5000 }).then(() => true, () => false);
+    check('saving the email settings asks for the administrator\'s own password', asked);
+    if (asked) {
+      await confirm.locator('input[autocomplete=current-password]').fill(ADMIN_PW);
+      await confirm.locator('footer button[type=submit]').click();
+      await ap.waitForFunction(() => !document.querySelector('dialog[open]'), null, { timeout: 8000 }).catch(() => {});
+      const saved = (await admin('GET', '/api/admin/mail')).body;
+      check('with it, they are saved', saved?.host === 'smtp.invalid' && saved?.fromEmail === 'cloudy@example.com', saved);
+    }
+    await admin('PUT', '/api/admin/mail', { host: '', adminPassword: ADMIN_PW }); // email off again, as it was
+  }
+  console.log('== administration: deleting a user is confirmed with your password');
+  {
+    const listed = async () => (await admin('GET', '/api/admin/users')).body.some((u) => u.id === invited);
+    await ap.goto(`${BASE}/admin`); await ap.waitForSelector('.admin-view table');
+    await ap.getByRole('button', { name: `Delete ${invited}`, exact: true }).click();
+    const confirm = ap.locator('dialog[open]').filter({ has: ap.locator('input[autocomplete=current-password]') });
+    const asked = await confirm.waitFor({ timeout: 5000 }).then(() => true, () => false);
+    check('Delete asks for the administrator\'s own password, and says what goes', asked && /ALL their files/.test(await confirm.textContent().catch(() => '')));
+    if (asked) {
+      await confirm.locator('input[autocomplete=current-password]').fill('not-the-password');
+      await confirm.locator('footer button[type=submit]').click();
+      await ap.waitForFunction(() => /Wrong password/.test(document.querySelector('dialog[open] .error')?.textContent ?? ''), null, { timeout: 5000 }).catch(() => {});
+      check('a wrong password is shown in the dialog and nothing is deleted',
+        /Wrong password/.test(await confirm.locator('.error').textContent().catch(() => '')) && await listed());
+      await confirm.locator('input[autocomplete=current-password]').fill(ADMIN_PW);
+      await confirm.locator('footer button[type=submit]').click();
+      await ap.waitForFunction(() => !document.querySelector('dialog[open]'), null, { timeout: 8000 }).catch(() => {});
+      await ap.waitForFunction((name) => ![...document.querySelectorAll('.admin-view tbody tr')].some((r) => r.textContent.includes(name)), invited, { timeout: 5000 }).catch(() => {});
+      check('with it, the user is deleted and leaves the list', !(await listed())
+        && !(await ap.getByRole('button', { name: `Delete ${invited}`, exact: true }).count()));
+    }
+  }
   await Promise.all([guest.close(), again.close(), adminCtx.close()]);
-  await admin('DELETE', `/api/admin/users/${invited}`);
+  await admin('DELETE', `/api/admin/users/${invited}`, { adminPassword: ADMIN_PW }); // if the dialog did not
 }
 
 console.log('== log out');
@@ -532,6 +659,6 @@ console.log('== log out');
 
 check('no errors in the page', errors.length === 0, errors);
 await browser.close();
-await admin('DELETE', `/api/admin/users/${USER}`);
+await admin('DELETE', `/api/admin/users/${USER}`, { adminPassword: ADMIN_PW });
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

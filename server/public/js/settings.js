@@ -47,8 +47,8 @@ function inlineError(pw, e) {
  * Dialog that confirms an action with the password: `submit(password)` does the request and returns its result;
  * resolves with that result, or null when cancelled.
  */
-export async function withPasswordDialog({ title, okLabel, danger = false, intro = null, fields = [], submit }) {
-  const pw = passwordInput();
+export async function withPasswordDialog({ title, okLabel, danger = false, intro = null, fields = [], label, submit }) {
+  const pw = passwordInput(label);
   let result = null;
   await modal({
     title,
@@ -450,13 +450,41 @@ async function userDialog(user, groups, rerender) {
     buttons: [{ label: t('Cancel'), value: null }, { label: isNew ? t('Create') : t('Save'), value: 'save', primary: true }],
     onSubmit: async () => {
       const data = {
-        displayName: f.displayName.value, email: f.email.value, isAdmin: f.isAdmin.checked,
+        displayName: f.displayName.value, email: f.email.value,
         quotaBytes: f.quota.value ? Math.round(Number(f.quota.value) * GB) : null,
         groups: [...f.groups.selectedOptions].map((o) => o.value),
       };
+      // Whether someone is an administrator is only sent when it is being changed: the server asks for the acting
+      // administrator's password whenever a request makes an administrator.
+      const madeAdmin = f.isAdmin.checked && !user?.isAdmin;
+      const send = (adminPassword) => (isNew
+        ? post('/api/admin/users', { ...data, isAdmin: f.isAdmin.checked, id: f.id.value.trim(), password: f.password.value, adminPassword })
+        : patch(`/api/admin/users/${encodeURIComponent(user.id)}`, {
+            ...data, isAdmin: f.isAdmin.checked !== !!user.isAdmin ? f.isAdmin.checked : undefined, disabled: f.disabled.checked,
+            password: f.password.value || undefined, resetTwoFactor: f.resetTwoFactor.checked || undefined,
+            removePasskeys: f.removePasskeys.checked || undefined, removeAvatar: f.removeAvatar.checked || undefined, adminPassword,
+          }));
+      // What lets someone into an account, or gives it full rights, is confirmed with the administrator's own password
+      // (an unattended, signed-in browser is not enough): a new administrator, a new password or email address for
+      // someone, switching off their two-factor authentication. Everything else is saved straight away.
+      const newEmail = !isNew && f.email.value.trim() !== (user.email ?? ''); // a password reset link goes to it
+      const sensitive = isNew ? madeAdmin : madeAdmin || !!f.password.value || f.resetTwoFactor.checked || newEmail;
       try {
-        if (isNew) await post('/api/admin/users', { ...data, id: f.id.value.trim(), password: f.password.value });
-        else await patch(`/api/admin/users/${encodeURIComponent(user.id)}`, { ...data, disabled: f.disabled.checked, password: f.password.value || undefined, resetTwoFactor: f.resetTwoFactor.checked || undefined, removePasskeys: f.removePasskeys.checked || undefined, removeAvatar: f.removeAvatar.checked || undefined });
+        if (sensitive) {
+          let failure = null;
+          const confirmed = await withPasswordDialog({
+            title: t('Enter your password to confirm'), okLabel: isNew ? t('Create') : t('Save'), label: t('Your own password'),
+            intro: h('p', {}, isNew ? t('Creating an administrator needs your own password.')
+              : t('Setting someone’s password or email address, resetting their two-factor authentication or making them an administrator needs your own password.')),
+            submit: async (adminPassword) => {
+              // A wrong password is this dialog's to show, next to its field. Anything else (a username that is
+              // taken, an address that is no email) belongs to the form underneath: close and show it there.
+              try { await send(adminPassword); } catch (e) { if (e.status === 403) throw e; failure = e; }
+            },
+          });
+          if (failure) throw failure;
+          if (!confirmed) return false; // cancelled: the form stays as it is
+        } else await send();
         toast(isNew ? t('User created') : f.password.value ? t('User saved, password changed') : t('User saved'));
         rerender();
         return true;
@@ -496,10 +524,14 @@ async function usersTab(ctx, rerender) {
   const [users, groups, invitations, options] = await Promise.all([
     get('/api/admin/users'), get('/api/admin/groups'), get('/api/admin/invitations').catch(() => []), get('/api/auth/options').catch(() => ({}))]);
   const mailOn = !!options.passwordReset;
+  // One dialog: what goes, and the administrator's own password to confirm it (a wrong one is shown next to the field).
   const deleteUser = (u) => async () => {
-    if (await confirmDialog(t('Delete user'), t('Delete {name} and ALL their files? This cannot be undone.', { name: u.id }), t('Delete'), true)) {
-      await del(`/api/admin/users/${encodeURIComponent(u.id)}`).then(rerender, showError);
-    }
+    const deleted = await withPasswordDialog({
+      title: t('Delete user'), okLabel: t('Delete'), danger: true, label: t('Your own password'),
+      intro: h('p', {}, t('Delete {name} and ALL their files? This cannot be undone.', { name: u.id })),
+      submit: (adminPassword) => post(`/api/admin/users/${encodeURIComponent(u.id)}/delete`, { adminPassword }),
+    });
+    if (deleted) { toast(t('User deleted')); rerender(); }
   };
   const roles = (u) => [
     u.isAdmin && h('span', { class: 'pill night' }, t('Administrator')),
@@ -655,21 +687,35 @@ async function showInvitation(r, address) {
   });
 }
 
-// ---------------------------------------------------------------- limits (trash, versions, sign-in)
+// ---------------------------------------------------------------- limits (trash, versions, sign-in, devices, free space)
+
+// [key, smallest, largest, label, explanation]. A limit the server does not send (an older server, while the web app
+// is already the new one) gets no field and is left out of what is saved.
+const LIMIT_FIELDS = [
+  ['trashDays', 0, 3650, 'Days in the trash'],
+  ['maxVersions', 0, 1000, 'Versions kept per file'],
+  ['sessionDays', 1, 365, 'Days a browser sign-in lasts'],
+  ['deviceDays', 0, 3650, 'Days until an unused device is signed out', 'Phones and computers that have not been used for this many days are signed out. 0 = never.'],
+  ['diskReserveMb', 0, 1000000, 'Free space to keep (MB)', 'Free space to keep on the server’s storage. Uploads that would use it are refused.'],
+];
 
 function limitsCard(limits, ctx, rerender) {
-  const num = (value, min, max) => h('input', { type: 'number', min, max, step: 1, required: true, value });
-  const f = {
-    trashDays: num(limits.trashDays, 0, 3650),
-    maxVersions: num(limits.maxVersions, 0, 1000),
-    sessionDays: num(limits.sessionDays, 1, 365),
-  };
+  const shown = LIMIT_FIELDS.filter(([key]) => Number.isFinite(limits[key]));
+  const f = Object.fromEntries(shown.map(([key, min, max]) => [key, h('input', { type: 'number', name: key, min, max, step: 1, required: true, inputmode: 'numeric', value: limits[key] })]));
   return h('form', { class: 'card form-grid first', onsubmit: async (e) => {
     e.preventDefault();
-    const next = { trashDays: Number(f.trashDays.value), maxVersions: Number(f.maxVersions.value), sessionDays: Number(f.sessionDays.value) };
+    const next = Object.fromEntries(shown.map(([key]) => [key, Number(f[key].value)]));
     // Lower limits delete data for good: older trash within the hour, extra versions when a file is next saved.
-    if ((next.trashDays < limits.trashDays || next.maxVersions < limits.maxVersions)
-      && !(await confirmDialog(t('Lower the limits?'), t('Items that have been in the trash longer than the new number of days are deleted within the hour, and versions beyond the new number are deleted when each file is next saved. This cannot be undone.'), t('Save'), true))) return;
+    const losesData = next.trashDays < limits.trashDays || next.maxVersions < limits.maxVersions;
+    // Fewer days for unused devices (0 = never is the most there is): phones and computers get signed out.
+    const signsOut = f.deviceDays && next.deviceDays > 0 && (limits.deviceDays === 0 || next.deviceDays < limits.deviceDays);
+    if (losesData || signsOut) {
+      const what = [
+        losesData && t('Items that have been in the trash longer than the new number of days are deleted within the hour, and versions beyond the new number are deleted when each file is next saved. This cannot be undone.'),
+        signsOut && t('Phones and computers that have not been used for longer than the new number of days are signed out; their owners have to sign in again.'),
+      ].filter(Boolean).join(' ');
+      if (!(await confirmDialog(t('Lower the limits?'), what, t('Save'), losesData))) return;
+    }
     try {
       const saved = await put('/api/admin/limits', next);
       if (ctx.me) ctx.me.trashDays = saved.trashDays;
@@ -679,9 +725,7 @@ function limitsCard(limits, ctx, rerender) {
   } },
     h('h2', { class: 'wide' }, t('Limits')),
     h('p', { class: 'muted wide' }, t('Apply to everyone right away. A new sign-in length applies from the next sign-in.')),
-    h('label', { class: 'field' }, h('span', {}, t('Days in the trash')), f.trashDays),
-    h('label', { class: 'field' }, h('span', {}, t('Versions kept per file')), f.maxVersions),
-    h('label', { class: 'field' }, h('span', {}, t('Days a browser sign-in lasts')), f.sessionDays),
+    shown.map(([key, , , label, help]) => h('label', { class: 'field' }, h('span', {}, t(label)), f[key], help && h('small', {}, t(help)))),
     h('div', { class: 'wide row end' }, h('button', { class: 'btn primary', type: 'submit' }, t('Save'))),
   );
 }
@@ -701,13 +745,36 @@ function mailCard(mail, ctx, rerender) {
   };
   f.security.addEventListener('change', () => { f.port.value = f.security.value === 'tls' ? 465 : f.security.value === 'none' ? 25 : 587; });
   const status = h('span', { class: 'muted' }, mail?.host ? t('Email is on.') : t('Email is off.'));
-  const save = () => put('/api/admin/mail', {
+  const values = () => ({
     host: f.host.value.trim(), port: Number(f.port.value), security: f.security.value, user: f.user.value.trim(),
     password: f.password.value, fromName: f.fromName.value.trim(), fromEmail: f.fromEmail.value.trim(),
   });
+  // Whether the form differs from what is stored ("Send test email" saves first, but only then).
+  const changed = () => {
+    const v = values();
+    if (!mail) return !!v.host;
+    return v.password !== '' || ['host', 'port', 'security', 'user', 'fromName', 'fromEmail'].some((k) => String(v[k]) !== String(mail[k] ?? ''));
+  };
+  // Saved with the administrator's own password: password reset links go out through this server, so whoever may
+  // change it can read them. False: cancelled. Mistakes in the form itself come back as errors to show under it.
+  const save = async () => {
+    let failure = null;
+    const confirmed = await withPasswordDialog({
+      title: t('Enter your password to confirm'), okLabel: t('Save'), label: t('Your own password'),
+      intro: h('p', {}, t('Changing the email settings needs your own password.')),
+      submit: async (adminPassword) => {
+        try { await put('/api/admin/mail', { ...values(), adminPassword }); } catch (e) { if (e.status === 403) throw e; failure = e; }
+      },
+    });
+    if (failure) throw failure;
+    return confirmed;
+  };
   return h('form', { class: 'card form-grid first', onsubmit: async (e) => {
     e.preventDefault();
-    try { await save(); toast(f.host.value.trim() ? t('Email settings saved') : t('Email turned off')); rerender(); } catch (err) { showError(err); }
+    try {
+      if (!(await save())) return;
+      toast(f.host.value.trim() ? t('Email settings saved') : t('Email turned off')); rerender();
+    } catch (err) { showError(err); }
   } },
     h('h2', { class: 'wide' }, t('Email (SMTP)')),
     h('p', { class: 'muted wide' }, t("Lets Cloudy send password reset links, share notifications and security notices to the email address in each user's profile. Leave the server empty to turn email off.")),
@@ -723,7 +790,7 @@ function mailCard(mail, ctx, rerender) {
         const to = await promptDialog(t('Send test email'), t('Send to'), ctx.me.email || '', t('Send'));
         if (!to) return;
         try {
-          await save();
+          if (changed() && !(await save())) return;
           status.textContent = t('Sending…');
           const r = await post('/api/admin/mail/test', { to });
           status.textContent = t('Test email sent to {to}.', { to: r.to });

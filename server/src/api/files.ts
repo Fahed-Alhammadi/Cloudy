@@ -8,7 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import type { Router, Ctx } from '../http.ts';
 import { json, noContent, readJson, checkName, numId, HttpError, watchIdle } from '../http.ts';
 import { config } from '../config.ts';
-import { q, one } from '../db.ts';
+import { q, one, tx, isBusy } from '../db.ts';
 import type { User } from '../auth.ts';
 import { newToken, sha256, bearerUser, sessionUser, getUser } from '../auth.ts';
 import * as F from '../files.ts';
@@ -49,6 +49,7 @@ export function registerFiles(r: Router, authed: Wrap) {
     if (await F.childByName(node.id, name)) throw new HttpError(409, 'An item with that name already exists');
     const file = F.tmpPath(randomUUID());
     const content = Buffer.from(String(b.content ?? ''), 'utf8');
+    if (content.length > (await F.freeSpace())) throw new HttpError(507, F.NO_SPACE);
     await fsWriteFile(file, content, { flush: true });
     const sha256 = createHash('sha256').update(content).digest('hex');
     const { node: created } = await F.writeFile(node, name, file, content.length, { sha256 });
@@ -66,7 +67,7 @@ export function registerFiles(r: Router, authed: Wrap) {
       throw new HttpError(412, 'Someone else changed this file since you opened it');
     }
     const parent = await F.mustNode(node.parent_id!);
-    const { file, size, sha256 } = await F.streamToTemp(req, await F.remainingQuota(node.owner));
+    const { file, size, sha256 } = await F.streamToTemp(req, await F.storageRoom(node.owner));
     const expectEtag = ifMatch && ifMatch !== '*' ? node.etag : undefined;
     // With If-Match the save is for this very file: renamed, moved or deleted meanwhile is a change too (412), not a
     // reason to create a new file under the old name.
@@ -190,17 +191,23 @@ export function registerFiles(r: Router, authed: Wrap) {
   r.get('/api/search', authed(async ({ res, url }, user) => {
     const text = (url.searchParams.get('q') ?? '').replace(/\0/g, '').trim().slice(0, 255);
     if (!text) return json(res, []);
-    const nodes = await F.searchNodes(user.id, text);
-    const out = await F.toJson(nodes, user.id);
+    // Only what the user may open: the search reads the shares itself, and whatever access() would refuse (it is the
+    // one place that decides) is left out. Such results used to be listed, without a location: the names of files
+    // shared by an account that had been disabled since.
+    const found: { node: F.Node; acc: F.Access }[] = [];
+    for (const node of await F.searchNodes(user.id, text)) {
+      const acc = node.owner === user.id ? { perm: 'owner' as const, shareRoot: null } : await F.access(user.id, node);
+      if (acc) found.push({ node, acc });
+    }
+    const out = await F.toJson(found.map((f) => f.node), user.id);
     // The location as the user sees it: from their own top folder, or from the shared folder, never the owner's
     // folders above it. An item shared on its own is at "/" of what was shared, and its folder is not theirs to open.
     for (const [i, item] of out.entries()) {
-      const node = nodes[i];
+      const { node, acc } = found[i];
       const own = node.owner === user.id;
-      const acc = own ? { perm: 'edit' as const, shareRoot: null } : await F.access(user.id, node);
-      const chain = acc ? await F.breadcrumb(node, acc) : [];
-      (item as any).path = acc ? '/' + chain.slice(own ? 1 : 0, -1).map((c) => c.name).join('/') : '';
-      (item as any).parentVisible = own || (!!acc && acc.shareRoot !== node.id);
+      const chain = await F.breadcrumb(node, acc);
+      (item as any).path = '/' + chain.slice(own ? 1 : 0, -1).map((c) => c.name).join('/');
+      (item as any).parentVisible = own || acc.shareRoot !== node.id;
     }
     res.setHeader('X-Cloudy-Limit', String(F.SEARCH_LIMIT));
     json(res, out);
@@ -255,7 +262,8 @@ export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unk
   let name = checkName(rawName);
   const size = Number(rawSize);
   if (!Number.isSafeInteger(size) || size < 0) throw new HttpError(400, 'Invalid size');
-  if (size > (await F.remainingQuota(parent.owner))) throw new HttpError(507, 'Storage quota exceeded');
+  const room = await F.storageRoom(parent.owner);
+  if (size > room.max) throw new HttpError(507, room.message);
   const existing = await F.childByName(parent.id, name);
   // Visitors of an "allow upload" link add files; they never replace (and version away) the owner's files.
   const noOverwrite = keepBoth || 'shareId' in by;
@@ -264,10 +272,31 @@ export async function startUpload(parent: F.Node, rawName: unknown, rawSize: unk
   if (existing && noOverwrite) name = await F.uniqueName(parent.id, name);
   const id = newToken(24);
   await fsWriteFile(F.uploadPath(id), '');
-  await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id, no_overwrite) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null, noOverwrite]);
+  try {
+    await tx(async (db) => {
+      if ('shareId' in by) {
+        // A link has no account to hold to a limit: without one, a visitor could open sessions without end (each a
+        // row and a file, each reserving its size against the owner's quota). The link's row is locked so that
+        // sessions started at the same moment are counted one after the other.
+        if (!(await one(`SELECT id FROM shares WHERE id = $1 FOR UPDATE`, [by.shareId], db))) throw new HttpError(404, 'This link does not exist or has expired');
+        // Only sessions still in use: abandoned ones stay for a day, and twenty of them must not close the link
+        // to everyone until then.
+        const open = await one<{ n: number }>(
+          `SELECT count(*)::int AS n FROM uploads WHERE share_id = $1 AND updated_at > now() - interval '15 minutes'`, [by.shareId], db);
+        if (open!.n >= LINK_UPLOADS) throw new HttpError(429, 'Too many uploads in progress on this link');
+      }
+      await q(`INSERT INTO uploads (id, owner, parent_id, name, size, user_id, share_id, no_overwrite) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [id, parent.owner, parent.id, name, size, 'userId' in by ? by.userId : null, 'shareId' in by ? by.shareId : null, noOverwrite], db);
+    });
+  } catch (e) {
+    await rm(F.uploadPath(id), { force: true }).catch(() => {});
+    throw e;
+  }
   return { id, chunkSize: config.chunkSize, received: 0, size, name };
 }
+
+/** Unfinished uploads one public link may have at a time (a session ends when its file is stored, on cancel, or a day after its last chunk). */
+const LINK_UPLOADS = 20;
 
 // newToken(24) → 32 base64url characters. Anything else never names an upload (and never reaches the file system).
 const UPLOAD_ID_RE = /^[A-Za-z0-9_-]{32}$/;
@@ -417,9 +446,14 @@ export function registerUploadChunks(r: Router) {
   });
 
   r.put('/api/uploads/:id', async ({ req, res, params }) => {
+    // The free space is asked again for every chunk: sessions started while there was room (twenty on a link, each
+    // with its own size) would otherwise fill the disk together, past the reserve. (Asked before the session is
+    // read, so that what is known of it below is as fresh as it was.)
+    const free = await F.freeSpace();
     const u = await one<Upload>(`SELECT ${UPLOAD_COLS} FROM uploads WHERE id = $1`, [uploadId(params.id)]);
     if (!u) throw new HttpError(404, 'Upload not found');
     await ownUpload(req, u);
+    if (free < Math.min(u.size - u.received, config.chunkSize)) throw new HttpError(507, F.NO_SPACE);
     const file = F.uploadPath(u.id);
     // After a power cut the part file can be shorter than what was confirmed (writes not yet on disk). Continuing at
     // `received` would fill the gap with zeros; instead the client is told the real offset and sends the rest again.
@@ -464,7 +498,9 @@ export function registerUploadChunks(r: Router) {
       else uploadHashes.delete(u.id);
     } catch (e) {
       await truncate(file, u.received).catch(() => {});
-      throw e instanceof HttpError ? e : new HttpError(400, 'Upload interrupted');
+      // A full disk and a busy database are said as what they are (507, 503: server.ts), not as "Upload interrupted",
+      // which reads as the sender's connection and made a full disk impossible to find.
+      throw e instanceof HttpError || F.isDiskFull(e) || isBusy(e) ? e : new HttpError(400, 'Upload interrupted');
     } finally {
       stopWatch();
       // Only after `received` is saved: a retried chunk arriving in between would read the old offset and be appended twice.

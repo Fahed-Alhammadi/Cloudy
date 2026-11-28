@@ -39,6 +39,9 @@ let refreshTimer = null;
 let reconnectTimer = null;
 let reconnectDelay = 5000;
 let missedUpdates = false;
+// The views live updates may draw again. Never other pages: the settings forms are not dialogs, and reloading them
+// would throw away what is being typed.
+const LIST_VIEWS = ['files', 'recent', 'favorites', 'shared-in', 'shared-out', 'search', 'trash'];
 
 function startLiveUpdates() {
   events?.close();
@@ -48,16 +51,17 @@ function startLiveUpdates() {
   source.addEventListener('change', (e) => {
     let ev;
     try { ev = JSON.parse(e.data); } catch { return; }
-    if (affectsView(ev)) scheduleRefresh(300);
+    if (affectsView(ev)) scheduleRefresh(liveDelay());
     if (ev.folders.length) refreshUsageSoon();
   });
   source.addEventListener('open', () => {
     reconnectDelay = 5000;
-    // Back after a gap: file lists may have missed changes and are reloaded once. Never other pages: the settings
-    // forms are not dialogs, and reloading them would throw away what is being typed.
+    // Back after a gap (a lost connection, or the tab was in the background): file lists may have missed changes and
+    // are reloaded once.
     if (missedUpdates) {
       missedUpdates = false;
-      if (['files', 'recent', 'favorites', 'shared-in', 'shared-out', 'search', 'trash'].includes(currentView().view)) scheduleRefresh(0);
+      if (LIST_VIEWS.includes(currentView().view)) scheduleRefresh(0);
+      refreshUsageSoon();
     }
   });
   // The browser reconnects by itself after network errors, but gives up for good after an answer other than 200 (a
@@ -73,6 +77,7 @@ function startLiveUpdates() {
     }, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 60_000);
   });
+  if (document.hidden) watchVisibility(); // opened in a background tab: the same half minute applies
 }
 
 function stopLiveUpdates() {
@@ -80,8 +85,36 @@ function stopLiveUpdates() {
   events = null;
   clearTimeout(refreshTimer);
   clearTimeout(reconnectTimer);
+  clearTimeout(hiddenTimer);
   refreshTimer = null;
+  hiddenTimer = null;
 }
+
+// A tab in the background gives its connection back after half a minute and takes it again when it is looked at.
+// Over plain HTTP a browser allows six connections to a server, and every open tab held one for its updates: with six
+// Cloudy tabs open, nothing loaded in any of them any more. (Half a minute, so flicking between tabs does not
+// reconnect each time.) Back in view, the "open" handler above reloads a file list once.
+const HIDDEN_PAUSE_MS = 30_000;
+let hiddenTimer = null;
+function watchVisibility() {
+  clearTimeout(hiddenTimer);
+  hiddenTimer = null;
+  if (!ctx.me) return;
+  if (document.hidden) {
+    hiddenTimer = setTimeout(() => {
+      hiddenTimer = null;
+      if (!document.hidden || !ctx.me || !events) return;
+      events.close();
+      events = null;
+      clearTimeout(reconnectTimer);
+      missedUpdates = true;
+    }, HIDDEN_PAUSE_MS);
+  } else if (!events) {
+    missedUpdates = true;
+    startLiveUpdates();
+  }
+}
+document.addEventListener('visibilitychange', watchVisibility);
 
 function affectsView(ev) {
   if (!ctx.me) return false;
@@ -98,25 +131,50 @@ const userIsBusy = () => !!document.querySelector('dialog[open], .menu') || !!ma
 // kept arriving, e.g. another device uploading many files, the view used to wait for a quiet moment that never came
 // and showed none of them); it only asks for one more pass once the current one is done.
 let refreshAgain = false;
+let refreshRunning = false;
+let lastRefresh = 0;
+
+// How long a live update waits before the view is drawn again. While this tab's own uploads run, every finished file
+// is a change in the open folder: at most one reload every 2.5 seconds then (uploading 2,000 files used to fetch and
+// draw the whole folder over and over, as fast as it could). The reload at the end of the uploads is not held back.
+const UPLOAD_REFRESH_MS = 2500;
+const liveDelay = () => (uploadsRunning() ? Math.max(300, UPLOAD_REFRESH_MS - (Date.now() - lastRefresh)) : 300);
+
 function scheduleRefresh(delay) {
   if (refreshTimer) { refreshAgain = true; return; }
   refreshAgain = false;
   refreshTimer = setTimeout(async () => {
     const done = () => {
       refreshTimer = null;
-      if (refreshAgain && ctx.me) scheduleRefresh(300);
+      refreshRunning = false;
+      if (refreshAgain && ctx.me) scheduleRefresh(liveDelay());
     };
     if (!ctx.me || !main) return done();
-    if (userIsBusy()) {
+    // Not while the user is busy, nor while another page is on its way (the user clicked on; it loads its own fresh
+    // data): wait, then look again.
+    if (userIsBusy() || navigating) {
       refreshTimer = null;
-      return scheduleRefresh(1500);
+      return scheduleRefresh(navigating ? 500 : 1500);
     }
+    // The page on screen is no file list (a refresh asked for before the user went to Settings): nothing to reload.
+    if (!LIST_VIEWS.includes(currentView().view)) return done();
+    refreshRunning = true;
     try {
-      await route({ refresh: true }); // keeps the scroll position and the focused row (route)
+      // Keeps the scroll position and the focused row (route). Quiet: the list is not dimmed for a background reload.
+      await route({ refresh: true, quiet: true });
     } finally {
+      lastRefresh = Date.now();
       done();
     }
   }, delay);
+}
+
+/** The user goes to another page: a reload still waiting was for the page being left. */
+function dropPendingRefresh() {
+  refreshAgain = false;
+  if (refreshRunning) return; // already drawing: route() discards its result (routeSeq)
+  clearTimeout(refreshTimer);
+  refreshTimer = null;
 }
 
 /** Scrolls to `y`, first drawing enough of a long file list for the page to reach it (lists draw 200 rows at first). */
@@ -507,15 +565,28 @@ document.addEventListener('keydown', (e) => {
 // clicked on, or an upload's reload fired after leaving the folder) then writes into a detached element instead of
 // replacing what is on screen.
 let routeSeq = 0;
-async function route({ refresh = false, scrollTo = null } = {}) {
+// The routeSeq of a page on its way (the user went somewhere and its data is still loading), else 0.
+let navigating = 0;
+async function route({ refresh = false, scrollTo = null, quiet = false } = {}) {
   if (!ctx.me || !main) return;
+  // A reload of "the page on screen" while another page is on its way (a live update's timer, or an action that
+  // finished after the user clicked on) would draw the new address with the old page's place: the new folder opened
+  // at the old folder's scroll offset. The page on its way loads fresh data anyway.
+  if (refresh && navigating) return;
   const seq = ++routeSeq;
   const { view, arg } = currentView();
   // A refresh keeps the scroll position (the page, not <main>, scrolls) and the focused row or control, so keyboard
   // users don't lose their place.
   const place = refresh ? placeOf(main) : null;
   let notFound = false;
-  if (!refresh) { setNavOpen(false); closeMenu(); setLeaveGuard(null); shownAt = location.pathname + location.search; } // each page sets its own guard again
+  if (!refresh) {
+    navigating = seq;
+    dropPendingRefresh();
+    setNavOpen(false); closeMenu(); setLeaveGuard(null); shownAt = location.pathname + location.search; // each page sets its own guard again
+    // A dialog of the page being left (Share, Rename, Move…) goes with it: after Back it used to stay open over
+    // another page. The viewer is not one of these: Back closes it by itself (viewer.js).
+    document.querySelectorAll('dialog.modal[open]').forEach((d) => d.close());
+  }
   markNav(view);
   if (search && view !== 'search' && !refresh) search.value = '';
   if (!refresh) setDropTarget(null);
@@ -530,7 +601,7 @@ async function route({ refresh = false, scrollTo = null } = {}) {
   // Views call slot.replaceChildren(...) when ready; that's the moment to put the slot on screen.
   const put = slot.replaceChildren.bind(slot);
   slot.replaceChildren = (...kids) => { put(...kids); shown(); };
-  main.setAttribute('aria-busy', 'true');
+  if (!quiet) main.setAttribute('aria-busy', 'true');
   try {
     switch (view) {
       // Only a numeric id goes into the API path (a crafted "/files/%2e%2e" would otherwise point the request elsewhere).
@@ -581,12 +652,14 @@ async function route({ refresh = false, scrollTo = null } = {}) {
       }
     }
   } finally {
+    if (navigating === seq) navigating = 0;
     if (seq === routeSeq) main.removeAttribute('aria-busy');
   }
 }
 
 // Back/Forward, and moves made by the views (navigate() in ui.js).
-// (Back while the viewer is open closes the viewer: that history entry is the viewer's, not a page.)
+// (Back while the viewer is open closes the viewer: that history entry is the viewer's, not a page. Any other dialog
+// that is open is closed by route(), with the page it belongs to.)
 // Unsaved work asks first; staying puts the page's address back. Back pressed again while the
 // question is open changes nothing more.
 let shownAt = location.pathname + location.search;
@@ -679,9 +752,32 @@ if (resetToken) {
   keepInvite(inviteToken); // a reload of /invite finds it again
   history.replaceState(null, '', '/invite');
   renderInvite(inviteToken);
-} else get('/api/me').then((me) => { ctx.me = me; return startSession(); }, () => {
-  if (location.pathname === '/forgot') return renderForgot();
-  let notice = null;
-  try { notice = sessionStorage.getItem('cloudy-notice'); sessionStorage.removeItem('cloudy-notice'); } catch { /* storage unavailable */ }
-  return notice === 'deleted' ? renderLogin(t('Your account was deleted.'), true) : renderLogin();
-});
+} else start();
+
+function start() {
+  return get('/api/me').then((me) => { ctx.me = me; return startSession(); }, (err) => {
+    // Only "not signed in" (401) leads to the sign-in form. Any other failure (the server restarting, a proxy's 502,
+    // no network) used to show it too, as if the session had ended: say what is wrong and offer to try again.
+    if (err?.status !== 401) return renderUnreachable(err);
+    if (location.pathname === '/forgot') return renderForgot();
+    let notice = null;
+    try { notice = sessionStorage.getItem('cloudy-notice'); sessionStorage.removeItem('cloudy-notice'); } catch { /* storage unavailable */ }
+    return notice === 'deleted' ? renderLogin(t('Your account was deleted.'), true) : renderLogin();
+  });
+}
+
+/** The server did not answer the first request: the address stays, "Try again" starts the app once more. */
+function renderUnreachable(err) {
+  document.title = 'Cloudy';
+  const again = h('button', { class: 'btn primary block', type: 'button', onclick: async () => {
+    again.disabled = true; // until the answer: the page is drawn anew either way
+    await start();
+  } }, icon('restore'), t('Try again'));
+  authCard(
+    h('h2', { class: 'card-title', role: 'alert' }, t('Can’t reach the server')),
+    h('p', { class: 'card-lead' }, t('Cloudy did not answer. It may be restarting, or this device is offline.')),
+    // What the server or a proxy in front of it said, when it said anything ("Bad Gateway").
+    err?.status ? h('p', { class: 'muted small' }, t(err.message || String(err))) : null,
+    again);
+  again.focus();
+}

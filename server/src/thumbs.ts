@@ -78,7 +78,10 @@ function vips(tool: string, args: string[], blockUntrusted: boolean): Promise<vo
     p.on('close', (code) => {
       clearTimeout(timer);
       if (code === 0) return resolve();
-      reject(Object.assign(new Error(timedOut ? 'took too long' : err.trim() || `exit ${code}`), { timedOut }));
+      // refused: the tool ran and said no (it could not read the picture). Not when it was stopped from outside (out
+      // of time, or killed for memory: code is null), and not when what it lacked was room to write the result.
+      const refused = !timedOut && typeof code === 'number' && !/no space left|quota exceeded/i.test(err);
+      reject(Object.assign(new Error(timedOut ? 'took too long' : err.trim() || `exit ${code}`), { timedOut, refused }));
     });
   });
 }
@@ -121,7 +124,10 @@ export async function thumbnail(node: F.Node): Promise<string | null> {
       await rm(tmp, { force: true });
       // Not an image libvips can read, or a broken one: remembered, so it is not tried on every view. One that took
       // too long (a busy server?) is remembered for a day only: the mark is dated so that the hourly prune takes it.
-      await writeFile(failedMark(blob), '').catch(() => {});
+      // Anything else (a full disk, the tool not starting, a file that could not be written or renamed) says nothing
+      // about the picture and leaves no mark: such a failure used to cost every picture viewed meanwhile its
+      // thumbnail for good.
+      if (e?.refused || e?.timedOut) await writeFile(failedMark(blob), '').catch(() => {});
       if (e?.timedOut) {
         const soon = new Date(Date.now() - (CACHE_DAYS - 1) * 86_400_000);
         await utimes(failedMark(blob), soon, soon).catch(() => {});

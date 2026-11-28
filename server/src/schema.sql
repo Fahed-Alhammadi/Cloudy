@@ -67,6 +67,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS nodes_root ON nodes (owner) WHERE parent_id IS
 CREATE INDEX IF NOT EXISTS nodes_parent ON nodes (parent_id);
 CREATE INDEX IF NOT EXISTS nodes_owner_live ON nodes (owner, mtime DESC) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS nodes_trash ON nodes (owner) WHERE trashed_root;
+-- Storage used per account (usage() in files.ts: every upload, every /api/me): an owner's files with their size and
+-- id, read from the index alone. No other index covers trashed files, so the sum used to read every user's rows.
+CREATE INDEX IF NOT EXISTS nodes_owner_files ON nodes (owner) INCLUDE (size, id) WHERE NOT is_dir;
+-- "Does anything refer to this blob?" (the daily sweep of leftover blobs, content hashes).
+CREATE INDEX IF NOT EXISTS nodes_blob ON nodes (blob) WHERE blob IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS versions (
   id bigserial PRIMARY KEY,
@@ -77,6 +82,7 @@ CREATE TABLE IF NOT EXISTS versions (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS versions_node ON versions (node_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS versions_blob ON versions (blob);
 
 CREATE TABLE IF NOT EXISTS favorites (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -128,6 +134,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled boolean NOT NULL DEFAULT false;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_last_step bigint NOT NULL DEFAULT 0;
+-- When the pending secret was made: a setup that is not confirmed within 15 minutes is void (it used to wait for
+-- its code for ever). NULL with a pending secret = started before this column existed: void as well.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_pending_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS recovery_codes (
   user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,

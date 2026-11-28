@@ -1,7 +1,9 @@
-// Limits an administrator sets under Administration → Limits: days in the trash, versions kept per file and how
-// long a browser sign-in lasts. Stored in `settings` ('limits') and applied at once, without a restart.
+// Limits an administrator sets under Administration → Limits: days in the trash, versions kept per file, how long a
+// browser sign-in lasts, how long an unused device stays signed in and how much disk space uploads leave free.
+// Stored in `settings` ('limits') and applied at once, without a restart.
 // TRASH_RETENTION_DAYS / MAX_VERSIONS / SESSION_DAYS from older .env files only give the starting values: the first
-// start stores them, so they stay when an install moves to the short .env without them.
+// start stores them, so they stay when an install moves to the short .env without them. The newer limits have no
+// env name: they start at their default, also on installs whose stored limits predate them.
 import type { Router, Ctx } from './http.ts';
 import { json, readJson, HttpError } from './http.ts';
 import { config } from './config.ts';
@@ -11,14 +13,21 @@ import type { User } from './auth.ts';
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
 type Wrap = (h: Authed) => (ctx: Ctx) => Promise<void>;
 
-export type Limits = { trashDays: number; maxVersions: number; sessionDays: number };
+export type Limits = { trashDays: number; maxVersions: number; sessionDays: number; deviceDays: number; diskReserveMb: number };
 type Key = keyof Limits;
 
-const RULES: Record<Key, { min: number; max: number; fallback: number; env: string; error: string }> = {
-  trashDays: { min: 0, max: 3650, fallback: 30, env: 'TRASH_RETENTION_DAYS', error: 'Days in the trash must be a whole number from 0 to 3650' },
-  maxVersions: { min: 0, max: 1000, fallback: 20, env: 'MAX_VERSIONS', error: 'Versions per file must be a whole number from 0 to 1000' },
-  sessionDays: { min: 1, max: 365, fallback: 14, env: 'SESSION_DAYS', error: 'Sign-in days must be a whole number from 1 to 365' },
+const RULES: Record<Key, { min: number; max: number; fallback: number; env?: 'trashDays' | 'maxVersions' | 'sessionDays'; error: string }> = {
+  trashDays: { min: 0, max: 3650, fallback: 30, env: 'trashDays', error: 'Days in the trash must be a whole number from 0 to 3650' },
+  maxVersions: { min: 0, max: 1000, fallback: 20, env: 'maxVersions', error: 'Versions per file must be a whole number from 0 to 1000' },
+  sessionDays: { min: 1, max: 365, fallback: 14, env: 'sessionDays', error: 'Sign-in days must be a whole number from 1 to 365' },
+  // A phone, tablet or computer that has not connected for this long is signed out (0 = never): a device that was
+  // lost, sold or put in a drawer used to stay signed in for good.
+  deviceDays: { min: 0, max: 3650, fallback: 90, error: 'Days before an unused device is signed out must be a whole number from 0 to 3650' },
+  // Megabytes of DATA_DIR that uploads and saves leave free: a full disk stops every write, and the database too
+  // when it is on the same disk.
+  diskReserveMb: { min: 0, max: 1_000_000, fallback: 1024, error: 'Free space to keep must be a whole number of megabytes from 0 to 1000000' },
 };
+const ENV_NAMES = { trashDays: 'TRASH_RETENTION_DAYS', maxVersions: 'MAX_VERSIONS', sessionDays: 'SESSION_DAYS' };
 const KEYS = Object.keys(RULES) as Key[];
 
 const valid = (k: Key, v: unknown): v is number => Number.isInteger(v) && (v as number) >= RULES[k].min && (v as number) <= RULES[k].max;
@@ -28,9 +37,13 @@ function seeds(warn: boolean): Limits {
   const out = {} as Limits;
   for (const k of KEYS) {
     const { min, max, fallback, env } = RULES[k];
-    const raw = config[k];
+    if (!env) {
+      out[k] = fallback;
+      continue;
+    }
+    const raw = config[env];
     out[k] = Number.isFinite(raw) ? Math.min(max, Math.max(min, Math.round(raw))) : fallback;
-    if (warn && out[k] !== raw) console.warn(`${env}=${process.env[env]} is outside ${min}–${max}: using ${out[k]} (change it under Administration → Limits)`);
+    if (warn && out[k] !== raw) console.warn(`${ENV_NAMES[env]}=${process.env[ENV_NAMES[env]]} is outside ${min}–${max}: using ${out[k]} (change it under Administration → Limits)`);
   }
   return out;
 }

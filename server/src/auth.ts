@@ -83,7 +83,7 @@ function keysFor(req: IncomingMessage | null, account?: string): string[] {
   return keys;
 }
 
-/** Account counters allow more than the others (`ip:…`, `known:…`, `reauth:…`, and `invite:…` for invitation links). */
+/** Account counters allow more than the others (`ip:…`, `known:…`, `reauth:…`, `2fa-setup:…`, and `invite:…` for invitation links). */
 function limited(key: string): boolean {
   const f = failures.get(key);
   return !!f && Date.now() - f.first < WINDOW_MS && f.n >= (key.startsWith('acct:') ? MAX_ACCOUNT_FAILURES : MAX_FAILURES);
@@ -122,6 +122,15 @@ export function attempt(req: IncomingMessage | null, account?: string): { succee
  */
 export function attemptInvitation(req: IncomingMessage): { succeeded(): void } {
   return attemptKeys([`invite:${clientNet(req)}`]);
+}
+
+/**
+ * One guess of the code that confirms a two-factor setup: ten wrong ones in 15 minutes per account, on a counter of
+ * its own. The step had no limit at all; whoever got hold of a signed-in browser in the middle of a setup could try
+ * codes until one fitted and end up with a confirmed authenticator and its recovery codes.
+ */
+export function attemptTotpSetup(userId: string): { succeeded(): void } {
+  return attemptKeys([`2fa-setup:${userId.toLowerCase()}`]);
 }
 
 function attemptKeys(keys: string[]): { succeeded(): void } {
@@ -310,16 +319,40 @@ export function bearerToken(req: IncomingMessage): string | null {
   return h.startsWith('Bearer ') ? h.slice(7).trim() : null;
 }
 
+/** How exact "last used" of a device is: it is written at most this often. */
+const LAST_USED_STEP = `interval '5 minutes'`;
+
 export async function bearerUser(req: IncomingMessage): Promise<User | null> {
   const token = bearerToken(req);
   if (!token) return null;
-  const u = await one<User>(
-    `UPDATE app_passwords a SET last_used_at = now() FROM users u
-      WHERE a.token_hash = $1 AND u.id = a.user_id AND NOT u.disabled
-      RETURNING ${USER_COLS.split(', ').map((c) => 'u.' + c).join(', ')}`,
+  // Read first; "last used" is only written when it is more than five minutes old. It used to be written by every
+  // request: a database commit each time, and the requests of one device waited for each other's row lock (a sync
+  // client lists hundreds of folders in parallel).
+  const row = await one<User & { token_id: number; stale: boolean }>(
+    `SELECT ${USER_COLS.split(', ').map((c) => 'u.' + c).join(', ')}, a.id AS token_id,
+            (a.last_used_at IS NULL OR a.last_used_at < now() - ${LAST_USED_STEP}) AS stale
+       FROM app_passwords a JOIN users u ON u.id = a.user_id
+      WHERE a.token_hash = $1 AND NOT u.disabled`,
     [sha256(token)],
   );
-  return u ?? null;
+  if (!row) return null;
+  const { token_id, stale, ...user } = row;
+  if (stale) {
+    await q(`UPDATE app_passwords SET last_used_at = now() WHERE id = $1 AND (last_used_at IS NULL OR last_used_at < now() - ${LAST_USED_STEP})`, [token_id]);
+  }
+  return user;
+}
+
+/**
+ * Hourly: signs out devices that have not connected for the number of days set under Administration → Limits
+ * (0 = never). A device that never connected after signing in counts from its sign-in. Device tokens used to be
+ * valid for good, also on a phone lost a year ago.
+ */
+export async function expireDevices(): Promise<number> {
+  const days = limits().deviceDays;
+  if (!days) return 0;
+  const gone = await q(`DELETE FROM app_passwords WHERE COALESCE(last_used_at, created_at) < now() - make_interval(days => $1) RETURNING id`, [days]);
+  return gone.length;
 }
 
 export async function createAppToken(userId: string, name: string): Promise<string> {

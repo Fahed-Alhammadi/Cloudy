@@ -72,7 +72,9 @@ export function restorePlace(host, { y, key, index }) {
 async function keepPlace(host, draw) {
   const place = placeOf(host);
   await draw();
-  restorePlace(host, place);
+  // Only while this view is still the one on screen: drawn again after the user went on (an action that ended late),
+  // it used to scroll the page that came after it to its own offset.
+  if (host.isConnected) restorePlace(host, place);
 }
 const NEXT_BATCH = 400;
 
@@ -95,6 +97,9 @@ function fileTable(opts) {
     for (const el of [entry.el, entry.box, entry.more]) el.tabIndex = 0;
   };
   const bar = h('div', { class: 'selection-bar', hidden: true });
+  // "3 selected" for screen readers. It lives outside the bar, which is hidden while nothing is ticked: a message
+  // that appears together with its region is not read out, and the first tick is exactly that moment.
+  const said = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
   const allBox = h('input', { type: 'checkbox', 'aria-label': t('Select all') });
   let host;
   let anchor = null; // last item ticked by itself: Shift-click ticks everything from there
@@ -110,7 +115,14 @@ function fileTable(opts) {
     if (from < 0 || end < 0) return setSelected(to, true);
     for (let i = Math.min(from, end); i <= Math.max(from, end); i++) setSelected(opts.items[i], true);
   };
-  const clearSelection = () => { for (const id of [...selected]) setSelected({ id }, false); anchor = null; updateBar(); };
+  const clearSelection = () => {
+    // The bar goes away: a keyboard user who pressed its ✕ continues on the list's row (focus used to fall to the page).
+    const fromBar = bar.contains(document.activeElement);
+    for (const id of [...selected]) setSelected({ id }, false);
+    anchor = null;
+    updateBar();
+    if (fromBar) current?.el.focus({ preventScroll: true });
+  };
   const menuFor = (item) => [
     { label: t('Select'), icon: 'check', onclick: () => { setSelected(item, true); anchor = item; updateBar(); } },
     '-',
@@ -135,25 +147,35 @@ function fileTable(opts) {
     else if (done) toast(t('{n} item(s) moved to trash', { n: done }), 'info', { label: t('Show'), onclick: () => navigate('/trash') });
     opts.reload();
   };
+  // The bar's buttons are made once and shown or hidden as the selection changes. (The bar used to be built anew on
+  // every tick: "Select all" or ✕ pressed by keyboard was replaced under the focus, which fell back to the page.)
+  const count = h('span', {});
+  const allBtn = h('button', { class: 'btn ghost', onclick: () => { for (const it of opts.items) setSelected(it, true); updateBar(); } }, icon('check'), t('Select all'));
+  const downloadBtn = h('button', { class: 'btn ghost', onclick: busy(() => downloadItems(chosen(), opts)) }, icon('download'), t('Download'));
+  const favoriteBtn = h('button', { class: 'btn ghost', onclick: busy(async () => {
+    for (const it of chosen().filter((i) => !i.favorite)) await post(`/api/nodes/${it.id}/favorite`).catch(showError);
+    opts.reload();
+  }) }, icon('star'), t('Add to favorites'));
+  const moveBtn = h('button', { class: 'btn ghost', onclick: busy(() => moveCopy(chosen().filter((i) => opts.canModify(i)), opts)) }, icon('move'), t('Move or copy'));
+  const deleteBtn = h('button', { class: 'btn ghost danger', onclick: busy(() => deleteChosen()) }, icon('trash'), t('Delete'));
+  bar.append(
+    h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: clearSelection }, icon('x')),
+    count, allBtn, downloadBtn, favoriteBtn, moveBtn, deleteBtn);
   const updateBar = () => {
+    const items = chosen();
+    const editable = items.some((i) => opts.canModify(i));
+    // A button about to go while it has the focus (Select all, once everything is ticked) hands it to Download.
+    const focusLeaves = document.activeElement === allBtn && selected.size >= opts.items.length;
     bar.hidden = selected.size === 0;
     host?.classList.toggle('selecting', selected.size > 0);
     allBox.checked = selected.size > 0 && selected.size === opts.items.length;
     allBox.indeterminate = selected.size > 0 && selected.size < opts.items.length;
-    const items = chosen();
-    const editable = items.some((i) => opts.canModify(i));
-    bar.replaceChildren(...[
-      h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: clearSelection }, icon('x')),
-      h('span', { 'aria-live': 'polite' }, t('{n} selected', { n: selected.size })),
-      selected.size < opts.items.length && h('button', { class: 'btn ghost', onclick: () => { for (const it of opts.items) setSelected(it, true); updateBar(); } }, icon('check'), t('Select all')),
-      h('button', { class: 'btn ghost', onclick: busy(() => downloadItems(items, opts)) }, icon('download'), t('Download')),
-      items.some((i) => !i.favorite) && h('button', { class: 'btn ghost', onclick: busy(async () => {
-        for (const it of items.filter((i) => !i.favorite)) await post(`/api/nodes/${it.id}/favorite`).catch(showError);
-        opts.reload();
-      }) }, icon('star'), t('Add to favorites')),
-      editable && h('button', { class: 'btn ghost', onclick: busy(() => moveCopy(items.filter((i) => opts.canModify(i)), opts)) }, icon('move'), t('Move or copy')),
-      editable && h('button', { class: 'btn ghost danger', onclick: busy(deleteChosen) }, icon('trash'), t('Delete')),
-    ].filter(Boolean));
+    count.textContent = t('{n} selected', { n: selected.size });
+    said.textContent = selected.size ? count.textContent : '';
+    allBtn.hidden = selected.size >= opts.items.length;
+    favoriteBtn.hidden = !items.some((i) => !i.favorite);
+    moveBtn.hidden = deleteBtn.hidden = !editable;
+    if (focusLeaves && !bar.hidden) downloadBtn.focus();
   };
   allBox.addEventListener('change', () => {
     for (const it of opts.items) setSelected(it, allBox.checked);
@@ -161,12 +183,19 @@ function fileTable(opts) {
   });
 
   const makeRow = (item) => {
+    // Shift-click ticks everything from the last ticked row to this one. The click itself is left to the browser and
+    // the range is ticked in "change", which comes after it: cancelling the click (as this did) made the browser put
+    // this box back to unticked, while its row was selected and counted.
+    let ranged = false;
     const box = h('input', { type: 'checkbox', tabindex: -1, 'aria-label': t('Select {name}', { name: item.name }), onclick: (e) => {
       e.stopPropagation();
-      if (e.shiftKey && anchor) { e.preventDefault(); selectRange(item); updateBar(); return; }
+      ranged = e.shiftKey && !!anchor;
     }, onchange: (e) => {
-      setSelected(item, e.target.checked);
-      if (e.target.checked) anchor = item;
+      if (ranged) { ranged = false; selectRange(item); }
+      else {
+        setSelected(item, e.target.checked);
+        if (e.target.checked) anchor = item;
+      }
       updateBar();
     } });
     const more = h('button', { class: 'icon-btn', tabindex: -1, 'aria-haspopup': 'menu', 'aria-label': t('Actions for {name}', { name: item.name }), onclick: (e) => {
@@ -370,7 +399,7 @@ function fileTable(opts) {
       for (const it of opts.items) setSelected(it, true);
       updateBar();
     }
-  } }, bar, host, shown < opts.items.length ? sentinel : null);
+  } }, bar, said, host, shown < opts.items.length ? sentinel : null);
   wrap.clearSelection = clearSelection;
   wrap.hasSelection = () => selected.size > 0;
   /** Draws more rows until the page is `px` tall (or all are drawn): putting back a scroll position far down. */
@@ -709,19 +738,26 @@ function openItem(item, siblings, opts) {
 }
 
 export async function renderFolder(main, id, ctx) {
+  // Whether the address is (still) folder `folderId`'s. This function finishes late when the server is slow, and its
+  // reload runs after uploads and other actions: by then the user may be somewhere else.
+  const isOpen = (folderId) => {
+    const { view, arg } = currentView();
+    return view === 'files' && String(/^\d+$/.test(arg) ? arg : ctx.me.rootId) === String(folderId); // as app.js reads the address
+  };
   const data = await get(`/api/nodes/${id}`);
   if (!data.node.isDir) {
-    navigate(`/files/${data.node.parentId ?? ctx.me.rootId}`, { replace: true });
+    // Not when the user has gone on meanwhile: the late answer used to pull them back, into this file's folder.
+    if (isOpen(id)) navigate(`/files/${data.node.parentId ?? ctx.me.rootId}`, { replace: true });
     return;
   }
   const canEdit = data.perm !== 'read';
-  // Redraws this folder if it is still on screen. Uploads finish late: by then the user may have opened another
+  // Redraws this folder if it is still the one open. Uploads finish late: by then the user may have opened another
   // view (nothing to do) or come back to this folder (a fresh render of the current route).
   const reload = () => {
+    if (!isOpen(id)) return;
     // Own actions (favorite, rename, delete, sort, Undo…) keep the scroll position and the focus, as live updates do.
     if (main.isConnected) return keepPlace(main, () => renderFolder(main, id, ctx)).catch(showError);
-    const { view, arg } = currentView();
-    if (view === 'files' && String(arg || ctx.me.rootId) === String(id)) ctx.rerender();
+    ctx.rerender();
   };
   const look = viewPrefs();
   const items = sortItems(data.children, look);
@@ -732,7 +768,7 @@ export async function renderFolder(main, id, ctx) {
   const afterUpload = () => (list?.isConnected && list.hasSelection?.() ? ctx.refreshWhenFree?.() : reload());
   const uploadTo = (dest, items) => uploadAll(items, userUploadTarget(dest.id), afterUpload, {
     dest,
-    isOnScreen: () => { const { view, arg } = currentView(); return view === 'files' && String(arg || ctx.me.rootId) === String(dest.id); },
+    isOnScreen: () => isOpen(dest.id),
     onShow: () => navigate(`/files/${dest.id}`),
   });
   const opts = {
@@ -752,7 +788,9 @@ export async function renderFolder(main, id, ctx) {
   const path = data.breadcrumb;
   const last = path.length - 1;
   const sharedPath = path[0]?.id !== ctx.me.rootId;
-  if (sharedPath) ctx.markNav?.('shared-in'); // someone else's folder: the sidebar shows where it came from
+  // Someone else's folder: the sidebar shows where it came from. (Only for the folder the address is at: a render
+  // that ended after the user clicked on used to mark "Shared with you" on the page that followed.)
+  if (sharedPath && isOpen(id)) ctx.markNav?.('shared-in');
   const crumbs = h('nav', { class: 'breadcrumb', 'aria-label': t('Folder path') },
     sharedPath && [h('a', { class: 'crumb', href: '/shared-in' }, t('Shared with you')), h('span', { class: 'sep' }, icon('right'))],
     path.map((c, i) => {
@@ -946,29 +984,36 @@ export async function renderTrash(main, ctx) {
     const r = rowOf.get(it.id);
     if (r) { r.box.checked = on; r.tr.classList.toggle('selected', on); }
   };
+  // As in the file lists: the bar's buttons are made once (rebuilt on every tick, a button pressed by keyboard lost
+  // the focus), and "3 selected" is read out from a region that is there before the first tick.
+  const chosen = () => items.filter((it) => selected.has(it.id));
+  const count = h('span', {});
+  const said = h('span', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+  bar.append(
+    h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: () => {
+      for (const it of chosen()) setSelected(it, false);
+      updateBar();
+      allBox.focus({ preventScroll: true }); // the bar is gone: the keyboard continues at the table
+    } }, icon('x')),
+    count,
+    h('button', { class: 'btn ghost', onclick: whileBusy(bar, async () => {
+      let restored = 0;
+      for (const it of chosen()) await post(`/api/trash/${it.id}/restore`).then(() => { restored++; }, showError);
+      if (restored) toast(t('{n} item(s) restored', { n: restored }));
+      reload();
+    }) }, icon('restore'), t('Restore')),
+    h('button', { class: 'btn ghost danger', onclick: whileBusy(bar, async () => {
+      const list = chosen();
+      if (!(await confirmDialog(t('Delete permanently'), t('{n} item(s) will be deleted forever.', { n: list.length }), t('Delete'), true))) return;
+      for (const it of list) await del(`/api/trash/${it.id}`).catch(showError);
+      reload();
+    }) }, icon('trash'), t('Delete permanently')));
   const updateBar = () => {
     bar.hidden = selected.size === 0;
     table?.classList.toggle('selecting', selected.size > 0);
     allBox.checked = selected.size > 0 && selected.size === items.length;
-    const chosen = items.filter((it) => selected.has(it.id));
-    bar.replaceChildren(
-      h('button', { class: 'icon-btn', 'aria-label': t('Clear selection'), title: t('Clear selection'), onclick: () => {
-        for (const it of chosen) setSelected(it, false);
-        updateBar();
-      } }, icon('x')),
-      h('span', { 'aria-live': 'polite' }, t('{n} selected', { n: selected.size })),
-      h('button', { class: 'btn ghost', onclick: whileBusy(bar, async () => {
-        let restored = 0;
-        for (const it of chosen) await post(`/api/trash/${it.id}/restore`).then(() => { restored++; }, showError);
-        if (restored) toast(t('{n} item(s) restored', { n: restored }));
-        reload();
-      }) }, icon('restore'), t('Restore')),
-      h('button', { class: 'btn ghost danger', onclick: whileBusy(bar, async () => {
-        if (!(await confirmDialog(t('Delete permanently'), t('{n} item(s) will be deleted forever.', { n: chosen.length }), t('Delete'), true))) return;
-        for (const it of chosen) await del(`/api/trash/${it.id}`).catch(showError);
-        reload();
-      }) }, icon('trash'), t('Delete permanently')),
-    );
+    count.textContent = t('{n} selected', { n: selected.size });
+    said.textContent = selected.size ? count.textContent : '';
   };
   allBox.addEventListener('change', () => {
     for (const it of items) setSelected(it, allBox.checked);
@@ -1020,7 +1065,7 @@ export async function renderTrash(main, ctx) {
   main.replaceChildren(h('section', { class: 'files-view' },
     toolbar,
     h('p', { class: 'muted small view-lead' }, t('Deleted items are removed permanently after {n} days.', { n: ctx.me?.trashDays ?? 30 })),
-    items.length ? h('div', {}, bar, table) : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
+    items.length ? h('div', {}, bar, said, table) : h('div', { class: 'empty' }, icon('trash'), h('p', {}, t('Trash is empty'))),
   ));
   if (toolbar.isConnected) watchToolbar(toolbar);
 }

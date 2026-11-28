@@ -229,17 +229,57 @@ export function topDialog() {
  * drawn behind it, so "Saved" and, worse, every failed save were invisible.
  */
 export function toast(message, kind = 'info', action) {
-  const parent = topDialog() ?? document.body;
-  let host = parent.querySelector(':scope > .toasts');
-  if (!host) parent.append((host = h('div', { class: 'toasts', id: parent === document.body ? 'toasts' : null, role: 'status', 'aria-live': 'polite' })));
+  const host = toastRegion(topDialog() ?? document.body);
   const el = h('div', { class: `toast ${kind}` }, h('span', {}, message),
     action && h('button', { type: 'button', class: 'toast-action', onclick: () => { el.remove(); action.onclick(); } }, action.label));
-  host.append(el);
+  // Errors are read out at once (they were announced politely, after whatever else was being read).
+  host.querySelector(kind === 'error' ? '[role=alert]' : '[role=status]').append(el);
   // Errors stay a little longer: they usually need reading; a message with a button longer still.
-  const ms = action ? 8000 : kind === 'error' ? 6000 : 3500;
-  setTimeout(() => el.classList.add('hide'), ms);
-  setTimeout(() => el.remove(), ms + 500);
+  // The clock stops while the pointer or the keyboard focus is on the message: "Undo" used to vanish under the pointer
+  // on its way there, or while a keyboard user was reaching it. Afterwards there are at least two more seconds.
+  let left = action ? 8000 : kind === 'error' ? 6000 : 3500;
+  let timer = null;
+  let since = 0;
+  let hovered = false;
+  let focused = false;
+  const run = () => {
+    if (hovered || focused || timer) return;
+    since = Date.now();
+    timer = setTimeout(() => {
+      el.classList.add('hide');
+      setTimeout(() => el.remove(), 500);
+    }, left);
+  };
+  const hold = () => {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    left = Math.max(2000, left - (Date.now() - since));
+  };
+  el.addEventListener('pointerenter', () => { hovered = true; hold(); });
+  el.addEventListener('pointerleave', () => { hovered = false; run(); });
+  el.addEventListener('focusin', () => { focused = true; hold(); });
+  el.addEventListener('focusout', () => { focused = false; run(); });
+  run();
 }
+
+/**
+ * Where messages are shown in `parent` (the page, or a dialog): made when the page or the dialog opens, not with its
+ * first message, because screen readers only read out what is added to a live region they already know. Two regions:
+ * one read when the screen reader is free, one for errors, read at once. (Not atomic: a second message is read by
+ * itself, not together with the one before.)
+ */
+export function toastRegion(parent) {
+  let host = parent.querySelector(':scope > .toasts');
+  if (!host) {
+    host = h('div', { class: 'toasts', id: parent === document.body ? 'toasts' : null },
+      h('div', { role: 'status', 'aria-live': 'polite', 'aria-atomic': 'false' }),
+      h('div', { role: 'alert', 'aria-live': 'assertive', 'aria-atomic': 'false' }));
+    parent.append(host);
+  }
+  return host;
+}
+toastRegion(document.body);
 
 // Server messages are English; the ones in the dictionary are shown translated.
 export function showError(e) {
@@ -304,6 +344,7 @@ export function modal({ title, body, buttons = [{ label: t('Close'), value: null
       dlg.close(String(primary?.value ?? ''));
     });
     dlg.append(form);
+    toastRegion(dlg); // ready before the dialog's first message (see toastRegion)
     // Escape while a request runs would leave it finishing in the background: wait for it.
     dlg.addEventListener('cancel', (e) => { if (busy) e.preventDefault(); });
     dlg.addEventListener('close', () => {

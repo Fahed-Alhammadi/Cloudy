@@ -5,7 +5,7 @@ import { json, noContent, readJson, numId, HttpError } from '../http.ts';
 import { q, one } from '../db.ts';
 import {
   login, createSession, destroySession, hashPassword, checkPasswordStrength,
-  newToken, sha256, createAppToken, bearerToken, requirePassword, dropOtherSessions,
+  newToken, sha256, createAppToken, bearerToken, requirePassword, dropOtherSessions, attemptTotpSetup,
 } from '../auth.ts';
 import type { User } from '../auth.ts';
 import { createUser, deleteUser, setGroups, userJson, quotaValue, USER_ID_RE } from '../users.ts';
@@ -25,11 +25,14 @@ async function replaceRecoveryCodes(userId: string): Promise<string[]> {
 }
 
 async function resetTwoFactor(userId: string): Promise<void> {
-  await q(`UPDATE users SET totp_enabled = false, totp_secret = NULL, totp_pending = NULL, totp_last_step = 0 WHERE id = $1`, [userId]);
+  await q(`UPDATE users SET totp_enabled = false, totp_secret = NULL, totp_pending = NULL, totp_pending_at = NULL, totp_last_step = 0 WHERE id = $1`, [userId]);
   await q(`DELETE FROM recovery_codes WHERE user_id = $1`, [userId]);
 }
 
 type Authed = (ctx: Ctx, user: User) => Promise<void>;
+
+/** How long a two-factor setup waits for its confirming code. */
+const TOTP_SETUP_MINUTES = 15;
 
 /** The signed-in user as GET /api/me answers it (also after accepting an invitation). */
 export async function meJson(user: User) {
@@ -113,21 +116,34 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     await requirePassword(req, user.id, (await readJson(req)).password);
     if (user.totp_enabled) throw new HttpError(409, 'Two-factor authentication is already on');
     const secret = newSecret();
-    await q(`UPDATE users SET totp_pending = $2 WHERE id = $1`, [user.id, secret]);
+    await q(`UPDATE users SET totp_pending = $2, totp_pending_at = now() WHERE id = $1`, [user.id, secret]);
     const uri = otpauthUri('Cloudy', user.id, secret);
     const qrSvg = await QRCode.toString(uri, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
     json(res, { secret, uri, qrSvg });
   }));
 
   // 2. enable: confirm with a code from the app; returns one-time recovery codes (shown once).
+  // Within 15 minutes of step 1 (a setup left open used to wait for its code for ever), and with ten wrong codes at
+  // most in 15 minutes (there was no limit: a million codes can be tried in an afternoon).
   r.post('/api/me/2fa/enable', authed(async ({ req, res }, user) => {
     const code = String((await readJson(req)).code ?? '').replace(/\s/g, '');
-    const row = await one<{ totp_pending: string | null }>(`SELECT totp_pending FROM users WHERE id = $1`, [user.id]);
+    const row = await one<{ totp_pending: string | null; expired: boolean }>(
+      `SELECT totp_pending, (totp_pending_at IS NULL OR totp_pending_at < now() - interval '${TOTP_SETUP_MINUTES} minutes') AS expired
+         FROM users WHERE id = $1`, [user.id]);
     if (!row?.totp_pending) throw new HttpError(400, 'Start the setup first');
+    if (row.expired) {
+      await q(`UPDATE users SET totp_pending = NULL, totp_pending_at = NULL WHERE id = $1 AND totp_pending = $2`, [user.id, row.totp_pending]);
+      throw new HttpError(400, 'This setup has expired. Start it again.');
+    }
+    const guess = attemptTotpSetup(user.id); // 429 after ten wrong codes
     const step = verifyTotp(row.totp_pending, code);
-    if (step === null) throw new HttpError(400, 'That code is not valid — check the time on your phone and try again');
-    await q(`UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_enabled = true, totp_last_step = $2 WHERE id = $1`,
-      [user.id, step]);
+    if (step === null) throw new HttpError(400, 'That code is not valid — check the time on your phone and try again'); // stays counted
+    guess.succeeded();
+    // "AND totp_pending = …": the secret this code was checked against, not one a second setup put there meanwhile.
+    const done = await one(
+      `UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_pending_at = NULL, totp_enabled = true, totp_last_step = $2
+        WHERE id = $1 AND totp_pending = $3 RETURNING id`, [user.id, step, row.totp_pending]);
+    if (!done) throw new HttpError(400, 'Start the setup first');
     json(res, { recoveryCodes: await replaceRecoveryCodes(user.id) });
   }));
 
@@ -184,9 +200,14 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     json(res, await Promise.all(users.map(userJson)));
   }));
 
-  r.post('/api/admin/users', admin(async ({ req, res }) => {
+  // Making an administrator, setting someone's password or email address, turning off someone's two-factor sign-in
+  // and deleting someone need the acting administrator's own password (`adminPassword`), like the sensitive changes to one's own account:
+  // an administrator's browser left open, or a stolen session, could otherwise take over every account on the server
+  // in one request. The email address counts because a password reset link is sent to it.
+  r.post('/api/admin/users', admin(async ({ req, res }, me) => {
     const b = await readJson(req);
     if (typeof b.email === 'string' && b.email.trim() && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    if (b.isAdmin) await requirePassword(req, me.id, b.adminPassword);
     await createUser({
       id: String(b.id ?? '').trim(), password: b.password, displayName: b.displayName, email: b.email,
       isAdmin: !!b.isAdmin, quotaBytes: b.quotaBytes ?? null, groups: Array.isArray(b.groups) ? b.groups : undefined,
@@ -196,13 +217,21 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
 
   r.patch('/api/admin/users/:id', admin(async ({ req, res, params }, me) => {
     const b = await readJson(req);
-    const target = await one<{ id: string; email: string }>(`SELECT id, email FROM users WHERE id = $1`, [params.id]);
+    const target = await one<{ id: string; email: string; is_admin: boolean }>(`SELECT id, email, is_admin FROM users WHERE id = $1`, [params.id]);
     if (!target) throw new HttpError(404, 'No such user');
     if (params.id === me.id && (b.isAdmin === false || b.disabled === true)) {
       throw new HttpError(400, 'You cannot remove your own admin rights or disable yourself');
     }
     if (typeof b.displayName === 'string' && b.displayName.trim().length > 100) throw new HttpError(400, 'Display name is too long (max 100)');
     if (typeof b.email === 'string' && b.email.trim() && b.email.trim() !== target.email && !validEmail(b.email.trim())) throw new HttpError(400, 'Invalid email address');
+    // Before the first change below: a request refused for its password changes nothing.
+    // Only for what actually changes: a page opened before this rule sends `isAdmin` and `email` with every save, and
+    // saving an administrator's display name must not be refused for that.
+    const promotes = b.isAdmin === true && !target.is_admin;
+    const newEmail = typeof b.email === 'string' && b.email.trim() !== (target.email ?? '');
+    if ((typeof b.password === 'string' && b.password) || b.resetTwoFactor === true || promotes || newEmail) {
+      await requirePassword(req, me.id, b.adminPassword);
+    }
     if (typeof b.displayName === 'string') await q(`UPDATE users SET display_name = $2 WHERE id = $1`, [params.id, b.displayName.trim() || params.id]);
     if (typeof b.email === 'string') await q(`UPDATE users SET email = $2 WHERE id = $1`, [params.id, b.email.trim()]);
     if (typeof b.isAdmin === 'boolean') await q(`UPDATE users SET is_admin = $2 WHERE id = $1`, [params.id, b.isAdmin]);
@@ -225,11 +254,19 @@ export function registerAccount(r: Router, authed: (h: Authed) => (ctx: Ctx) => 
     noContent(res);
   }));
 
-  r.delete('/api/admin/users/:id', admin(async ({ res, params }, me) => {
+  // Deleting someone removes all their files for good, so it is confirmed with the acting administrator's own
+  // password too (`adminPassword`): an administrator's browser left open could otherwise empty the server.
+  // POST …/delete is what the web app sends (the same shape as POST /api/me/delete; some proxies drop the body of a
+  // DELETE request); DELETE with the same JSON body does the same.
+  const removeUser = admin(async ({ req, res, params }, me) => {
     if (params.id === me.id) throw new HttpError(400, 'You cannot delete yourself');
+    const b = await readJson(req);
+    await requirePassword(req, me.id, b.adminPassword);
     await deleteUser(params.id);
     noContent(res);
-  }));
+  });
+  r.post('/api/admin/users/:id/delete', removeUser);
+  r.delete('/api/admin/users/:id', removeUser);
 
   r.get('/api/admin/groups', admin(async ({ res }) => {
     json(res, await q(`SELECT g.id, count(m.user_id)::int AS members FROM groups g

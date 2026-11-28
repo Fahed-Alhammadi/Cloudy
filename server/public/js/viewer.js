@@ -1,6 +1,6 @@
 // Full-screen HTML5 viewer: images, video, audio, PDF and an editable text view.
 import { api } from './api.js';
-import { h, icon, formatSize, toast, showError, confirmDialog, modal } from './ui.js';
+import { h, icon, formatSize, toast, toastRegion, showError, confirmDialog, modal } from './ui.js';
 import { t } from './i18n.js';
 
 const TEXT_LIMIT = 2 * 1024 * 1024;
@@ -269,6 +269,7 @@ export function openViewer(files, start, src) {
     window.removeEventListener('beforeunload', beforeUnload);
     dlg.remove();
   });
+  toastRegion(dlg); // "Saved" and failed saves are read out from the first one on (see toastRegion)
   document.body.append(dlg);
   dlg.showModal();
   show().catch(failed);

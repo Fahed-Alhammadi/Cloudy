@@ -74,14 +74,20 @@ window.addEventListener('hashchange', () => {
 /** A request that needs the link's password (it was set while this page was open): ask for it. */
 const needsPassword = (e) => e?.status === 401;
 
+// Only the folder asked for last is drawn. Two folders clicked in quick succession used to end with whichever answer
+// came later: folder A's files under folder B's address, and uploads then went into A.
+let showSeq = 0;
 async function showNode(info, id) {
+  const seq = ++showSeq;
   let data;
   try {
     data = await get(`${base}/nodes/${id}`);
   } catch (e) {
+    if (seq !== showSeq) return;
     if (needsPassword(e)) return passwordForm();
     throw e;
   }
+  if (seq !== showSeq) return;
   const subtitle = t('Shared by {name}', { name: info.ownerName }) + (info.expiresAt ? ' · ' + t('expires {date}', { date: new Date(info.expiresAt).toLocaleDateString(locale()) }) : '');
   const thumb = info.thumbnails ? (c) => `${base}/nodes/${c.id}/thumb?v=${encodeURIComponent(c.etag || c.mtime)}` : null;
   if (!data.node.isDir) {

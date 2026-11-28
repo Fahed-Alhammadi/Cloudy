@@ -1,5 +1,5 @@
 import { createWriteStream, createReadStream } from 'node:fs';
-import { mkdir, rename, rm, copyFile, link, writeFile as fsWriteFile, readdir, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, copyFile, link, writeFile as fsWriteFile, readdir, stat, lstat, statfs, unlink } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { Transform } from 'node:stream';
@@ -67,8 +67,16 @@ export async function ensureDirs(): Promise<void> {
  * Makes `file` a blob. `keep`: the file stays where it is too, so a caller whose transaction fails or whose process
  * dies still has it: a hard link, or a copy where the storage has no links (as in duplicateBlob).
  */
+/**
+ * Blobs this process has put into blobs/ whose transaction has not ended yet. The sweep (sweepBlobs) never takes
+ * them, whatever their dates say: it also judges by the change time, and some network mounts report an old one for
+ * a fresh hard link, while a big folder copy holds thousands of new blobs in one long transaction.
+ */
+const unsettled = new Set<string>();
+
 async function adoptBlob(file: string, keep = false): Promise<string> {
   const id = randomUUID();
+  unsettled.add(id);
   await mkdir(path.dirname(blobPath(id)), { recursive: true });
   if (!keep) {
     await rename(file, blobPath(id));
@@ -91,6 +99,7 @@ async function adoptBlob(file: string, keep = false): Promise<string> {
  */
 async function duplicateBlob(blob: string): Promise<string> {
   const id = randomUUID();
+  unsettled.add(id);
   await mkdir(path.dirname(blobPath(id)), { recursive: true });
   try {
     await link(blobPath(blob), blobPath(id));
@@ -109,23 +118,50 @@ async function duplicateBlob(blob: string): Promise<string> {
 export async function dropBlobs(blobs: (string | null)[]): Promise<void> {
   const ids = blobs.filter((b): b is string => !!b);
   if (!ids.length) return;
-  const failed = (await Promise.allSettled(ids.map((b) => rm(blobPath(b), { force: true })))).filter((r) => r.status === 'rejected');
-  if (failed.length) console.error(`${failed.length} of ${ids.length} unused blob(s) could not be removed:`, (failed[0] as PromiseRejectedResult).reason?.message);
-  await q(`DELETE FROM blob_hashes WHERE blob = ANY($1)`, [ids]).catch(() => {}); // leftovers go with gcHashes()
+  // A few at a time: emptying a trash of 200,000 files used to queue them all at once on the four threads that do
+  // every file operation of the server, and each download and upload waited behind them.
+  let failed = 0;
+  let reason: string | undefined;
+  for (let i = 0; i < ids.length; i += 16) {
+    for (const r of await Promise.allSettled(ids.slice(i, i + 16).map((b) => rm(blobPath(b), { force: true })))) {
+      if (r.status === 'fulfilled') continue;
+      failed++;
+      reason ??= r.reason?.message;
+    }
+  }
+  if (failed) console.error(`${failed} of ${ids.length} unused blob(s) could not be removed:`, reason);
+  for (let i = 0; i < ids.length; i += 10_000) {
+    await q(`DELETE FROM blob_hashes WHERE blob = ANY($1)`, [ids.slice(i, i + 10_000)]).catch(() => {}); // leftovers go with gcHashes()
+  }
 }
 
 /**
- * Spools a request body to DATA_DIR/tmp; `max` (bytes, e.g. the owner's remaining quota) stops it before the disk fills.
- * Also hashes it on the way (SHA-256, hex), so the stored file needs no second read.
+ * Whether a write failed because the storage is full (the disk, or the file system's own quota for the server's
+ * user). The request is answered 507 "Not enough space on the server" (server.ts): it used to be a bare 500, or
+ * "Upload interrupted" for a chunk, and nobody could tell why uploads had stopped working.
  */
-export async function streamToTemp(stream: Readable, max = Infinity): Promise<{ file: string; size: number; sha256: string }> {
+export function isDiskFull(e: any): boolean {
+  return e?.code === 'ENOSPC' || e?.code === 'EDQUOT';
+}
+
+export const NO_SPACE = 'Not enough space on the server';
+export const OVER_QUOTA = 'Storage quota exceeded';
+
+/** How many bytes may still be stored, and what to say (507) to an upload that is bigger. */
+export interface Room { max: number; message: string }
+
+/**
+ * Spools a request body to DATA_DIR/tmp; `room` (see storageRoom: the owner's remaining quota and the free space)
+ * stops it before the disk fills. Also hashes it on the way (SHA-256, hex), so the stored file needs no second read.
+ */
+export async function streamToTemp(stream: Readable, room: Room = { max: Infinity, message: OVER_QUOTA }): Promise<{ file: string; size: number; sha256: string }> {
   const file = tmpPath(randomUUID());
   let size = 0;
   const hash = createHash('sha256');
   const counter = new Transform({
     transform(chunk, _enc, cb) {
       size += chunk.length;
-      if (size > max) return cb(new HttpError(507, 'Storage quota exceeded'));
+      if (size > room.max) return cb(new HttpError(507, room.message));
       hash.update(chunk);
       cb(null, chunk);
     },
@@ -423,6 +459,14 @@ export async function breadcrumb(node: Node, acc: Access): Promise<{ id: number;
  * or the browser). Call it before touching any of these rows in a transaction.
  */
 async function lockChain(db: Db, ...ids: number[]): Promise<void> {
+  // For the rest of this transaction: a write that waits more than half a minute for another one's lock gives up
+  // (55P03, answered 503 "busy", which the apps try again). Without a limit, writers queued behind one long
+  // transaction on a user's tree each held a database connection until none was left for anyone.
+  await q(`SET LOCAL lock_timeout = '30s'`, [], db);
+  await lockRows(db, ids);
+}
+
+async function lockRows(db: Db, ids: number[]): Promise<void> {
   // One statement for every chain involved (a move touches two): the rows come back in id order and are locked in
   // that order, and the owner's root (the smallest id of its tree) is always the first one. So every mutation of a
   // tree starts by waiting for its root, and nothing taken afterwards can be held by another writer.
@@ -469,7 +513,7 @@ async function sizeOf(db: Db, id: number): Promise<number> {
 
 /** Adds `delta` to the size of `startId` and all its ancestors and refreshes their etags. */
 async function propagate(db: Db, startId: number, delta: number): Promise<void> {
-  await lockChain(db, startId);
+  await lockRows(db, [startId]); // (the caller's lockChain already set this transaction's lock timeout)
   await q(
     `WITH RECURSIVE a AS (
        SELECT id, parent_id FROM nodes WHERE id = $1
@@ -487,14 +531,45 @@ function conflict(e: any): never {
   throw e;
 }
 
+/** Bytes the owner's files take, with the ones in the trash and the older versions. */
 export async function usage(owner: string, db: Db = pool): Promise<number> {
+  // Both halves read the index nodes_owner_files (the owner's files with id and size, schema.sql) and nothing else of
+  // `nodes`: this runs for every upload and every /api/me, and used to read every user's rows each time. Only files
+  // have versions, so "NOT is_dir" in the second half changes nothing but lets it use that index too.
   const r = await one<{ used: number }>(
     `SELECT (COALESCE((SELECT sum(size) FROM nodes WHERE owner = $1 AND NOT is_dir), 0)
-           + COALESCE((SELECT sum(v.size) FROM versions v JOIN nodes n ON n.id = v.node_id WHERE n.owner = $1), 0))::bigint AS used`,
+           + COALESCE((SELECT sum(v.size) FROM versions v
+                        WHERE v.node_id IN (SELECT id FROM nodes WHERE owner = $1 AND NOT is_dir)), 0))::bigint AS used`,
     [owner],
     db,
   );
   return r?.used ?? 0;
+}
+
+/**
+ * Bytes that may still be written to DATA_DIR: what is free there minus the reserve set under Administration →
+ * Limits. Infinity when the file system does not say (then nothing is refused on its account).
+ */
+export async function freeSpace(): Promise<number> {
+  try {
+    const s = await statfs(config.dataDir);
+    // Some network and FUSE storage answers with zeros for everything: that is "unknown", not "full".
+    if (!s.blocks) return Infinity;
+    const free = s.bavail * s.bsize;
+    return Number.isFinite(free) ? Math.max(0, free - limits().diskReserveMb * 1024 * 1024) : Infinity;
+  } catch {
+    return Infinity;
+  }
+}
+
+/**
+ * What an upload or a save for `owner` may take: the smaller of the owner's remaining quota and the free space.
+ * Accounts without a quota had no limit at all, so anyone allowed to upload (a visitor of an upload link too) could
+ * fill the disk to the last byte.
+ */
+export async function storageRoom(owner: string): Promise<Room> {
+  const [quota, free] = await Promise.all([remainingQuota(owner), freeSpace()]);
+  return free < quota ? { max: free, message: NO_SPACE } : { max: quota, message: OVER_QUOTA };
 }
 
 /** Bytes the owner may still store (Infinity without a quota); counts uploads in progress as used. */
@@ -649,6 +724,8 @@ export async function writeFile(
   } catch (e) {
     await dropBlobs([blob]);
     throw e;
+  } finally {
+    unsettled.delete(blob);
   }
   // The file is saved from here on. Nothing below may reach the catch above: it removes the new content, and a
   // failed clean-up of old versions used to do exactly that to a file that had just been stored.
@@ -785,6 +862,8 @@ export async function copyNode(node: Node, dest: Node, newName: string): Promise
   } catch (e) {
     await dropBlobs(created);
     throw e;
+  } finally {
+    for (const b of created) unsettled.delete(b);
   }
 }
 
@@ -899,6 +978,137 @@ export async function cleanStorage(): Promise<void> {
   for (const f of files) if (!live.has(f)) await rm(uploadPath(f), { force: true });
 }
 
+const BLOB_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Leftover blobs removed per run (their names are held in memory until then); more wait for the next day. */
+const SWEEP_MAX = 50_000;
+
+/**
+ * Which of these blobs a file or a version refers to. One statement on purpose: restoring a version moves a blob
+ * from one table to the other, and a single statement sees it in one of them, whenever it looks.
+ */
+async function referencedBlobs(blobs: string[]): Promise<Set<string>> {
+  const rows = await q<{ blob: string }>(
+    `SELECT blob FROM nodes WHERE blob = ANY($1::text[]) UNION ALL SELECT blob FROM versions WHERE blob = ANY($1::text[])`, [blobs]);
+  return new Set(rows.map((r) => r.blob));
+}
+
+/**
+ * Sets aside stored files (DATA_DIR/blobs/xx/<uuid>) that no file and no version refers to: what a crash between
+ * storing a file and saving its row leaves behind, and what dropBlobs could not remove. They used to stay for ever.
+ * They are moved to DATA_DIR/leftover, not deleted; purgeLeftovers() deletes them 30 days later. Until then they can
+ * be put back (into blobs/<first two characters>/): after restoring an older database backup, the files uploaded
+ * since that backup are "unknown" too, and whoever then restores the right backup must still find them.
+ *
+ * Careful by design, since a mistake here takes someone's file away:
+ * - never a blob whose save is still in progress in this process (`unsettled`);
+ * - only names this server gives blobs (a UUID, in the folder of its first two characters), only regular files;
+ * - only when both the change time and the modification time are older than `minAgeMs` (two days). A blob gets its
+ *   row seconds after it appears in blobs/, in the transaction that follows; appearing there (a rename, a hard link or
+ *   a copy) sets the change time, so a blob waiting for its transaction is never old. The modification time alone
+ *   would not do: a hard link keeps the one of the file it was made from (a copy of a year-old file, an upload whose
+ *   last chunk arrived yesterday);
+ * - asked in the database for each folder's files, and once more for the single blob right before it is removed. A
+ *   query that fails ends the run: nothing is ever removed on the strength of an answer that did not come;
+ * - nothing at all when more than `maxShare` (half) of the stored files are unknown to the database. That is not what
+ *   crashes leave behind: it is the wrong or an emptied database (a lost database volume, a restore still to come),
+ *   and removing the files would turn that into losing everything.
+ *
+ * One folder at a time, so memory stays flat however many files are stored.
+ */
+export async function sweepBlobs(minAgeMs = 2 * 86400_000, maxShare = 0.5): Promise<{ removed: number; bytes: number }> {
+  const root = path.join(config.dataDir, 'blobs');
+  const cutoff = Date.now() - minAgeMs;
+  const aged = async (blob: string) => {
+    const st = await lstat(blobPath(blob)).catch(() => null);
+    return st && st.isFile() && st.ctimeMs < cutoff && st.mtimeMs < cutoff ? st : null;
+  };
+  let stored = 0;
+  let unknown = 0;
+  const leftovers: string[] = [];
+  for (const dir of (await readdir(root).catch(() => [] as string[])).sort()) {
+    if (!/^[0-9a-f]{2}$/.test(dir)) continue;
+    const names = (await readdir(path.join(root, dir)).catch(() => [] as string[])).filter((f) => BLOB_NAME.test(f) && f.startsWith(dir));
+    stored += names.length;
+    const old: string[] = [];
+    for (let i = 0; i < names.length; i += 16) {
+      const batch = names.slice(i, i + 16);
+      const stats = await Promise.all(batch.map(aged));
+      for (const [j, st] of stats.entries()) if (st) old.push(batch[j]);
+    }
+    for (let i = 0; i < old.length; i += 1000) {
+      const batch = old.slice(i, i + 1000);
+      const known = await referencedBlobs(batch);
+      for (const blob of batch) {
+        if (known.has(blob) || unsettled.has(blob)) continue;
+        unknown++;
+        if (leftovers.length < SWEEP_MAX) leftovers.push(blob);
+      }
+    }
+  }
+  if (!unknown) return { removed: 0, bytes: 0 };
+  if (unknown > stored * maxShare) {
+    console.warn(`${unknown} of ${stored} stored file(s) are unknown to the database: none was removed. A few leftovers are normal; `
+      + `this many means the server is running on another database than the one these files belong to.`);
+    return { removed: 0, bytes: 0 };
+  }
+  let removed = 0;
+  let bytes = 0;
+  const aside = path.join(config.dataDir, 'leftover');
+  await mkdir(aside, { recursive: true });
+  for (const blob of leftovers) {
+    const st = await aged(blob);
+    if (!st || unsettled.has(blob) || (await referencedBlobs([blob])).size) continue;
+    try {
+      await rename(blobPath(blob), path.join(aside, blob)); // all of /data is one filesystem; the move restarts its change time
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') console.error(`leftover blob ${blob} could not be set aside:`, e?.message);
+      continue;
+    }
+    removed++;
+    if (st.nlink <= 1) bytes += st.size; // another name of the same bytes (a copy's hard link) keeps them on disk
+  }
+  if (removed) {
+    console.log(`set aside ${removed} stored file(s) that nothing refers to (${bytes} bytes), in ${aside}. They are deleted after `
+      + `${LEFTOVER_DAYS} days; if you restore an older or newer database backup before that, move them back into blobs/ first.`);
+  }
+  return { removed, bytes };
+}
+
+const LEFTOVER_DAYS = 30;
+
+/** Deletes what sweepBlobs set aside more than `maxAgeMs` (30 days) ago; the move into leftover/ started that clock. */
+export async function purgeLeftovers(maxAgeMs = LEFTOVER_DAYS * 86400_000): Promise<number> {
+  const aside = path.join(config.dataDir, 'leftover');
+  const cutoff = Date.now() - maxAgeMs;
+  let n = 0;
+  for (const f of await readdir(aside).catch(() => [] as string[])) {
+    if (!BLOB_NAME.test(f)) continue;
+    const st = await lstat(path.join(aside, f)).catch(() => null);
+    if (!st || !st.isFile() || st.ctimeMs >= cutoff) continue;
+    if (await unlink(path.join(aside, f)).then(() => true, () => false)) n++;
+  }
+  return n;
+}
+
+/**
+ * Hourly job: the sweep above, once a day (it reads the whole blob store). The time of the last run is a file next to
+ * the blobs, not a row in the database: a restored database backup would bring back an old time with it, and the
+ * sweep would run the moment the server starts on the restored data. For the same reason the first run on a storage
+ * is a day after the server first saw it, never at once.
+ */
+export async function sweepBlobsDaily(): Promise<void> {
+  const aside = path.join(config.dataDir, 'leftover');
+  const mark = path.join(aside, '.swept');
+  await mkdir(aside, { recursive: true });
+  const last = await stat(mark).catch(() => null);
+  if (!last) return void (await fsWriteFile(mark, ''));
+  if (Date.now() - last.mtimeMs < 86400_000) return;
+  await fsWriteFile(mark, new Date().toISOString());
+  await sweepBlobs();
+  const gone = await purgeLeftovers();
+  if (gone) console.log(`deleted ${gone} leftover file(s) set aside more than ${LEFTOVER_DAYS} days ago`);
+}
+
 export async function listTrash(owner: string): Promise<Node[]> {
   return q<Node>(`SELECT ${COLS} FROM nodes WHERE owner = $1 AND trashed_root ORDER BY deleted_at DESC`, [owner]);
 }
@@ -972,6 +1182,8 @@ export async function searchNodes(user: string, text: string): Promise<Node[]> {
         `WITH RECURSIVE shared AS (
            SELECT n.id FROM nodes n JOIN shares s ON s.node_id = n.id
             WHERE n.deleted_at IS NULL AND n.owner <> $1
+              -- A disabled account's shares stop working (as in access()): its files are not found either.
+              AND NOT EXISTS (SELECT 1 FROM users o WHERE o.id = s.owner AND o.disabled)
               AND ((s.type = 'user' AND s.share_with = $1)
                 OR (s.type = 'group' AND s.share_with IN (SELECT group_id FROM group_members WHERE user_id = $1)))
            UNION
