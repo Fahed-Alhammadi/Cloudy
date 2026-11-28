@@ -11,6 +11,12 @@
     "package.json"
   ],
   "asar": true,
+  "electronFuses": {
+    "runAsNode": false,
+    "enableNodeOptionsEnvironmentVariable": false,
+    "enableNodeCliInspectArguments": false,
+    "onlyLoadAppFromAsar": true
+  },
   "npmRebuild": false,
   "electronLanguages": [
     "en",

@@ -43,6 +43,7 @@ Each side "changed" if it differs from base. Here is what each case does:
 |---|---|
 | One side changed | The change is copied to the other side. Uploads are chunked; downloads go to a temp file first. |
 | Both sides changed | `name (conflicted copy <date>).ext` is kept next to the server version. |
+| Only the time of a file changed (touch, restored from a backup) | With a SHA-256 from the server the file is hashed first: same content → only the new time is noted, nothing is uploaded (no new server version). Without the hash it is uploaded. |
 | Same size, no history | The content is compared first, so a first sync into a folder that already has the files doesn't duplicate them. Servers from 1.16 list a SHA-256 per file: the local file is hashed and nothing is downloaded when they match. |
 | Renamed or moved | Detected by inode (local) or node id (server) and repeated on the other side, not transferred again. |
 | Deleted | Goes to the server trash or the computer's trash. |
@@ -79,13 +80,23 @@ files are still read).
 Downloads go to a temp file and replace the local file only when complete (size checked). Upload chunks that fail on
 the way are retried from the offset the server stored. Requests time out instead of hanging (downloads and live events
 after a silence). Pausing, signing out and quitting abort running transfers; quitting saves what the cycle finished.
+A pause while a pass is still reading the folders ends that pass there: nothing is renamed or deleted and no question
+is asked until syncing is resumed.
+
+When a pass fails (offline, the server restarting: no answer, 401, 502/503/504) it stops as a whole and is tried
+again after 30 s, then 1, 2, 4 and 5 minutes (one timer; a pass that works starts over; waking up, "Sync now" and
+changes still sync at once). Any other 5xx answered for one file is that file's problem: it is listed under "Not
+synced" with its path and tried again by the next pass, while the other files go on. Five files in a row answered
+like that stop the pass as a failing server does.
 Each account's sync state is written atomically (temp file, fsync, rename), one write at a time, and records the folder it
 belongs to: a state from another folder or account is never applied (an empty state only compares, never deletes).
 After the server signs the app out, "Sign in again" keeps the folder and its state (it must be the same account;
 another one is added with "+ Add account").
 
 Sign-in uses `POST /api/auth/token` (a device token named "Desktop (<hostname>)"). The token is encrypted with
-`safeStorage` (the OS keychain).
+`safeStorage` (the OS keychain). Linux without a keyring (no GNOME Keyring or KWallet in the session): the token is
+kept in `settings.json` (readable by this user only) without real encryption; the app logs that once at start and
+says it under the account's name.
 
 ## File manager badges (1.7+)
 
@@ -185,6 +196,18 @@ npm run typecheck
 CLOUDY_TEST_URL=http://localhost:8080 CLOUDY_TEST_USER=admin CLOUDY_TEST_PASSWORD=… npm test
 npm run dist:mac | dist:win | dist:linux    # packages in dist/ (unsigned locally: CSC_IDENTITY_AUTO_DISCOVERY=false)
 ```
+
+Packaged builds have Electron's fuses set (`electronFuses` in `electron-builder.json`): `ELECTRON_RUN_AS_NODE`,
+`NODE_OPTIONS` and `--inspect` do nothing, and the app is loaded only from `app.asar`, so another program on the
+computer cannot run its own code as Cloudy (and so read the sign-in or use Cloudy's folder permissions). `npm start`
+is not affected. A packaged build can therefore not be driven through the Node inspector (Playwright's `_electron`
+needs it): drive `npm start` instead. electron-builder sets the fuses after `scripts/after-pack.cjs` and right before
+it signs, which changes the Electron Framework binary. An **unsigned** Mac build (nothing signs it afterwards) is
+left with a framework whose ad hoc signature no longer matches, and Apple Silicon refuses to run that: sign it once
+by hand before starting it,
+`codesign --force --sign - "dist/mac-arm64/Cloudy.app/Contents/Frameworks/Electron Framework.framework"`.
+(`resetAdHocDarwinSignature` is not used: it signs the whole app `--deep` and would replace the Finder extension's
+Developer ID signature in release builds.)
 
 ## Updates
 

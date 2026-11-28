@@ -3,7 +3,7 @@
 // Without CLOUDY_TEST_URL the tests are skipped.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, rm, symlink, chmod, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rename, rm, symlink, chmod, lstat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Api, ApiError } from '../src/main/api.ts';
@@ -1017,4 +1017,165 @@ test('badges: a renamed file and a folder already on both sides are announced on
   assert.ok(seenB.has('Empty'), 'the recorded folder is announced');
   await a.engine.stop();
   await b.engine.stop();
+});
+
+// ---------------------------------------------------------------- retries, server errors, touched files, pausing
+
+test('failed passes leave one retry pending and wait longer each time; a pass that works starts over', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'cloudy-retry-'));
+  let online = false;
+  const fetchImpl = async () => {
+    if (!online) throw new Error('net::ERR_INTERNET_DISCONNECTED');
+    return Response.json({ node: { id: 1, name: 'root', isDir: true, size: 0, etag: 'e', mtime: '', parentId: null }, children: [] });
+  };
+  const engine = new SyncEngine({
+    api: new Api('https://cloud.example', 'token', 'test', fetchImpl), root: dir, rootId: 1, live: false,
+    saveState: async () => {}, trash: async () => { throw new Error('must not delete'); },
+  });
+  // Long timers (the retry waits 30 s to 5 min) that are still pending, with their delay.
+  const pending = new Map<unknown, number>();
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    const timer = realSet(() => { pending.delete(timer); fn(...args); }, ms);
+    if ((ms ?? 0) >= 30_000) pending.set(timer, ms!);
+    return timer;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((timer?: NodeJS.Timeout) => { pending.delete(timer); realClear(timer); }) as typeof clearTimeout;
+  try {
+    // Offline: the periodic check, every reconnect of the live events and every file event fail one after the other.
+    for (const wait of [30_000, 60_000, 120_000, 240_000, 300_000, 300_000]) {
+      await engine.sync();
+      assert.equal(engine.status.phase, 'offline');
+      assert.deepEqual([...pending.values()], [wait], 'one retry, not one more per failed pass');
+    }
+    online = true;
+    await engine.sync(); // "Sync now", waking up, a change: not held back by the wait
+    assert.equal(engine.status.phase, 'idle', engine.status.error);
+    assert.deepEqual([...pending.values()], [], 'nothing to retry after a pass that worked');
+    online = false;
+    await engine.sync();
+    assert.deepEqual([...pending.values()], [30_000], 'the next failure starts with the short wait');
+    await engine.stop();
+    assert.deepEqual([...pending.values()], [], 'stop() leaves no retry behind');
+  } finally {
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+    await engine.stop();
+  }
+});
+
+test('a server error (500) for one file is that file\'s problem: the others are synced and it is tried again', { skip }, async () => {
+  const { a, b } = await setup('one-500');
+  for (const n of ['one.txt', 'bad.txt', 'two.txt']) await writeFile(path.join(a.dir, n), n);
+  const upload = a.engine.api.upload.bind(a.engine.api);
+  a.engine.api.upload = async (parentId, name, ...rest) => {
+    if (name === 'bad.txt') throw new ApiError(500, 'Internal error');
+    return upload(parentId, name, ...rest);
+  };
+  const problems = await a.sync(); // asserts phase idle: the cycle was not stopped
+  assert.deepEqual(problems, [{ path: 'bad.txt', message: 'Internal error' }], 'listed with its path');
+  await b.sync();
+  assert.deepEqual(await tree(b.dir), { 'one.txt': 'one.txt', 'two.txt': 'two.txt' }, 'the other files went up');
+  a.engine.api.upload = upload;
+  assert.deepEqual(await a.sync(), [], 'tried again by the next pass');
+  await b.sync();
+  assert.equal(await readFile(path.join(b.dir, 'bad.txt'), 'utf8'), 'bad.txt');
+
+  // File after file answered like that: the server is unwell, and the pass stops as it does for a restarting one (503).
+  for (let i = 0; i < 30; i++) await writeFile(path.join(a.dir, `more${i}.txt`), String(i));
+  let tried = 0;
+  a.engine.api.upload = async () => { tried++; throw new ApiError(500, 'Internal error'); };
+  await a.engine.sync();
+  assert.equal(a.engine.status.phase, 'error');
+  assert.ok(tried >= 5 && tried < 30, `stopped after ${tried} files`);
+  tried = 0;
+  a.engine.api.upload = async () => { tried++; throw new ApiError(503, 'Service unavailable'); };
+  await a.engine.sync();
+  assert.equal(a.engine.status.phase, 'error');
+  assert.ok(tried <= 6, `a 503 stops at once (${tried} uploads were running)`);
+  a.engine.api.upload = upload;
+  assert.deepEqual(await a.sync(), []);
+  await a.engine.stop();
+});
+
+test('a file whose time alone changed is not uploaded again when the server knows its hash', { skip }, async () => {
+  const { a } = await setup('touch');
+  const file = path.join(a.dir, 'doc.txt');
+  await writeFile(file, 'the same content');
+  await a.sync();
+  const listed = (await api.node(a.engine.rootId)).children!;
+  if (!listed.some((c) => c.sha256)) return; // a server before 1.16: nothing to test
+  const etag = a.state!.base['doc.txt'].etag;
+  let uploads = 0;
+  const upload = a.engine.api.upload.bind(a.engine.api);
+  a.engine.api.upload = async (...args) => { uploads++; return upload(...args); };
+
+  const when = new Date(Date.now() - 86_400_000); // touched, or restored from a backup with another time
+  await utimes(file, when, when);
+  assert.deepEqual(await a.sync(), []);
+  assert.equal(uploads, 0, 'nothing uploaded: no new version on the server');
+  assert.equal(a.state!.base['doc.txt'].mtime, Math.floor((await lstat(file)).mtimeMs), 'the new time is noted');
+  assert.equal(a.state!.base['doc.txt'].etag, etag);
+  assert.equal((await api.node(a.engine.rootId)).children!.find((c) => c.name === 'doc.txt')!.etag, etag, 'the server file is untouched');
+  await a.sync();
+  assert.equal(uploads, 0, 'and it is not looked at again');
+
+  // Other content of the same size is an edit like any other.
+  await writeFile(file, 'THE SAME CONTENT');
+  await utimes(file, new Date(), new Date());
+  assert.deepEqual(await a.sync(), []);
+  assert.equal(uploads, 1);
+});
+
+test('pausing while the folders are read: nothing is renamed, deleted or asked in that cycle, and the status says paused', { skip }, async () => {
+  const { a, b, folder } = await setup('pause-scan');
+  for (const n of ['old.txt', 'mine.txt', 'keep.txt']) await writeFile(path.join(a.dir, n), n);
+  await a.sync();
+  await b.sync();
+  const after: string[] = []; // status changes after the pause
+  a.engine.on('status', (s: { phase: string }) => after.push(s.phase));
+  const scan = a.engine.scanLocal.bind(a.engine);
+  const pauseAfterScan = () => {
+    a.engine.scanLocal = async (full) => {
+      const out = await scan(full);
+      a.engine.scanLocal = scan;
+      a.engine.pause(); // the user chooses Pause right now
+      after.length = 0;
+      return out;
+    };
+  };
+
+  // Renamed on the server (by b) and another file renamed here: this cycle would repeat both on the other side.
+  await rename(path.join(b.dir, 'old.txt'), path.join(b.dir, 'new.txt'));
+  await b.sync();
+  await rename(path.join(a.dir, 'mine.txt'), path.join(a.dir, 'mine2.txt'));
+  pauseAfterScan();
+  await a.engine.sync();
+  assert.equal(a.engine.status.phase, 'paused');
+  assert.deepEqual(after.filter((p) => p !== 'paused'), [], 'the status stays "paused"');
+  assert.deepEqual(Object.keys(await tree(a.dir)).sort(), ['keep.txt', 'mine2.txt', 'old.txt'], 'nothing renamed here');
+  assert.deepEqual(await names(folder.id), ['keep.txt', 'mine.txt', 'new.txt'], 'nothing renamed on the server');
+  a.engine.resume();
+  await a.sync();
+  assert.deepEqual(Object.keys(await tree(a.dir)).sort(), ['keep.txt', 'mine2.txt', 'new.txt'], 'after resuming, both renames are repeated');
+  assert.deepEqual(await names(folder.id), ['keep.txt', 'mine2.txt', 'new.txt']);
+
+  // Everything deleted on the server: this cycle would ask "delete them here too?" and then delete.
+  await b.sync();
+  for (const n of ['keep.txt', 'mine2.txt', 'new.txt']) await rm(path.join(b.dir, n));
+  await b.sync();
+  assert.deepEqual(await names(folder.id), []);
+  pauseAfterScan();
+  await a.engine.sync();
+  assert.equal(a.engine.status.phase, 'paused');
+  assert.deepEqual(after.filter((p) => p !== 'paused'), []);
+  assert.deepEqual(a.confirms, [], 'no question while paused');
+  assert.deepEqual(a.trashed, [], 'nothing deleted');
+  assert.deepEqual(Object.keys(await tree(a.dir)).sort(), ['keep.txt', 'mine2.txt', 'new.txt']);
+  a.engine.resume();
+  await a.sync();
+  assert.deepEqual(a.confirms, [3], 'asked once syncing goes on');
+  assert.deepEqual(a.trashed.sort(), ['keep.txt', 'mine2.txt', 'new.txt']);
+  await a.engine.stop();
 });

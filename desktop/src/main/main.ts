@@ -9,7 +9,7 @@ import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { Api, ApiError, normalizeServer } from './api.ts';
 import { SyncEngine, stateFitsServer, type Status, type Activity, type Problem } from './sync.ts';
-import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveState, clearState, type Account, type Settings } from './store.ts';
+import { loadSettings, saveSettings, encodeToken, decodeToken, loadState, saveState, clearState, weakTokenStorage, type Account, type Settings } from './store.ts';
 import { canonical, defaultFolder, folderIn, folderName, inside, needsMove, overlaps, runMove } from './accounts.ts';
 import { t } from './i18n.ts';
 import { Updater, type UpdateState } from './updater.ts';
@@ -27,6 +27,8 @@ interface Run {
   activityChanged: boolean;
   /** Suggested folder while the account has none yet (setup). */
   defaultFolder?: string;
+  /** What this process's folder dialog answered for the account in this session: `setup` takes no other folder. */
+  offered?: Set<string>;
   /** The profile picture as a data: address for the window (the version it shows). */
   avatar?: { version: string; data: string };
   /** When /api/me was last asked (name and picture changed elsewhere). */
@@ -40,6 +42,8 @@ const runs = new Map<string, Run>();
 let tray: Tray | null = null;
 let win: BrowserWindow | null = null;
 let updater: Updater;
+/** Linux without a keyring: the sign-in is stored without real encryption (see `weakTokenStorage`); the window says so. */
+let weakStore = false;
 
 // Test runs can use a separate profile, also of a packaged build next to an installed Cloudy (each profile is its own
 // single instance): CLOUDY_USER_DATA=/tmp/cloudy-test npm start
@@ -573,6 +577,7 @@ function snapshot() {
       ? { state: badgeState, where: process.platform === 'darwin' ? 'finder' : process.platform === 'win32' ? 'explorer' : 'linux' }
       : null,
     update: updater?.state,
+    weakStore,
     version: app.getVersion(),
   };
 }
@@ -705,7 +710,10 @@ const handlers: Record<string, (...args: any[]) => unknown> = {
       defaultPath: !now ? home : path.basename(path.dirname(now)).toLowerCase() === 'cloudy' ? path.dirname(path.dirname(now)) : path.dirname(now),
       properties: ['openDirectory', 'createDirectory'],
     });
-    return r.canceled ? null : folderIn(r.filePaths[0], a.user);
+    if (r.canceled) return null;
+    const folder = folderIn(r.filePaths[0], a.user);
+    (run(a).offered ??= new Set()).add(folder);
+    return folder;
   },
 
   /** Stores a new profile picture: a JPEG the window made (square, at most 512 pixels, no metadata). */
@@ -860,7 +868,12 @@ async function login(server: unknown, user: unknown, password: unknown, code?: u
     encodeToken(a, r.token);
     run(a).meAt = Date.now();
     void loadAvatar(a);
-    if (!a.folder) run(a).defaultFolder = await defaultFolder(home, a.user, otherFolders(a));
+    if (!a.folder) {
+      const suggested = run(a).defaultFolder = await defaultFolder(home, a.user, otherFolders(a));
+      // The window may still show an earlier suggestion (signing in again while its setup page is open): that one
+      // came from here too and must not be refused as "not offered".
+      (run(a).offered ??= new Set()).add(suggested);
+    }
     await saveSettings(settings);
     if (a.folder) await startEngine(a);
     refresh();
@@ -878,6 +891,10 @@ async function setup(id: unknown, rawFolder: unknown, rawExcluded: unknown) {
   if (!signedIn(a)) return { error: t('Not signed in') };
   const folder = absPath(rawFolder);
   const excluded = folderNames(rawExcluded);
+  // Only a folder this process came up with itself: the account's folder, the suggested one, or an answer of its own
+  // folder dialog. The window used to be able to name any path on the computer as the sync folder.
+  const r = run(a);
+  if (![a.folder, r.defaultFolder, ...(r.offered ?? [])].some((f) => f !== undefined && path.resolve(f) === folder)) throw new Error('bad argument');
   const bad = await badFolder(folder, a);
   if (bad) return { error: bad };
   if (a.folder !== folder) {
@@ -1015,9 +1032,14 @@ app.whenReady().then(async () => {
   const atLogin = process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
   if (process.platform === 'darwin') app.dock?.hide();
   settings = await loadSettings();
+  weakStore = weakTokenStorage();
+  if (weakStore) console.warn('Cloudy: no system keyring: the sign-in is stored without real encryption');
   await moveOldFolders();
   for (const a of settings.accounts) {
-    if (!a.folder) run(a).defaultFolder = await defaultFolder(home, a.user, otherFolders(a)).catch(() => undefined);
+    if (!a.folder) {
+      const suggested = run(a).defaultFolder = await defaultFolder(home, a.user, otherFolders(a)).catch(() => undefined);
+      if (suggested) (run(a).offered ??= new Set()).add(suggested);
+    }
   }
   updater = new Updater((s: UpdateState) => {
     if (s.state === 'ready') notify(t('Cloudy {version} is ready', { version: s.version }),

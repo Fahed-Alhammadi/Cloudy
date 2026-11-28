@@ -67,6 +67,22 @@ export async function loadSettings(): Promise<Settings> {
 
 export const saveSettings = (s: Settings) => writeJson('settings.json', s);
 
+/**
+ * Linux without a keyring (no GNOME Keyring or KWallet for this desktop session): the sign-in cannot really be
+ * protected. Depending on the Electron version safeStorage then refuses to encrypt (the token is stored as it is,
+ * `tokenEncrypted` false) or "encrypts" with a key that is the same on every computer (`basic_text`, marked
+ * encrypted). Both keep working, in a file only this user can read; the app says so instead of pretending.
+ * Only meaningful once the app is ready.
+ */
+export function weakTokenStorage(): boolean {
+  if (process.platform !== 'linux') return false;
+  try {
+    return !safeStorage.isEncryptionAvailable() || safeStorage.getSelectedStorageBackend() === 'basic_text';
+  } catch {
+    return true; // cannot tell: say it rather than promise encryption
+  }
+}
+
 export function encodeToken(a: Account, token: string): void {
   a.tokenEncrypted = safeStorage.isEncryptionAvailable();
   a.token = a.tokenEncrypted ? safeStorage.encryptString(token).toString('base64') : Buffer.from(token).toString('base64');

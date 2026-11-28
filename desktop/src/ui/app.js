@@ -440,9 +440,11 @@ function mainParts() {
   const syncing = s?.phase === 'syncing';
   const paused = a.paused;
 
-  const hero = part('hero', [a.id, a.label, a.avatar, a.user, a.host], () => h('header', { class: 'hero' },
+  const hero = part('hero', [a.id, a.label, a.avatar, a.user, a.host, state.weakStore], () => h('header', { class: 'hero' },
     pictureButton(a),
-    h('div', {}, h('h1', { class: 'ellipsis' }, a.label), h('p', { class: 'muted ellipsis', dir: 'ltr' }, `${a.user} · ${a.host}`))));
+    h('div', {}, h('h1', { class: 'ellipsis' }, a.label), h('p', { class: 'muted ellipsis', dir: 'ltr' }, `${a.user} · ${a.host}`),
+      // Linux without GNOME Keyring or KWallet: said plainly instead of pretending the sign-in is protected.
+      state.weakStore && h('p', { class: 'muted small', 'data-key': 'weak-store' }, t('No system keyring: the sign-in is stored without real encryption.')))));
 
   const st = parts.status;
   const cls = `status ${tone(a)}`;

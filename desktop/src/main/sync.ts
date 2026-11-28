@@ -215,10 +215,21 @@ const addAncestors = (set: Set<string>, p: string) => {
 };
 
 /**
- * Signed out, or the server is failing: stops every worker of the cycle instead of failing file by file. "Storage
- * full" (507) is about one upload: downloads, moves and deletes still go on.
+ * Signed out, no answer, or the server is restarting or unreachable behind its proxy (502/503/504): stops every
+ * worker of the cycle instead of failing file by file.
  */
-const isFatal = (e: any) => (e instanceof ApiError && (e.status === 401 || (e.status >= 500 && e.status !== 507))) || isNetworkError(e);
+const isFatal = (e: any) => (e instanceof ApiError && (e.status === 401 || (e.status >= 502 && e.status <= 504))) || isNetworkError(e);
+/**
+ * Any other 5xx answered for one file's own request (a 500 for a file the server cannot handle) is that file's
+ * problem: every such answer used to stop the whole cycle, so one file that always got a 500 held up all the others
+ * and the status named no file. "Storage full" (507) is about one upload and never counts as the server failing.
+ */
+const isServerError = (e: any) => e instanceof ApiError && e.status >= 500 && e.status !== 507;
+/** This many files in a row answered with such an error: the server is unwell, the cycle stops like for a 503. */
+const SERVER_ERRORS = 5;
+/** After a failed pass the next try comes this much later, doubling up to RETRY_MAX while the failures go on. */
+const RETRY_MS = 30_000;
+const RETRY_MAX = 300_000;
 
 /**
  * A folder's entries as last read from disk: `null` = vanished while reading, 'other' = symlink or special file.
@@ -317,6 +328,9 @@ export class SyncEngine extends EventEmitter {
    */
   private unknown = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
+  /** The one pending retry after a failed pass (see retryLater), and how many passes failed in a row. */
+  private retryTimer: NodeJS.Timeout | null = null;
+  private failures = 0;
   private interval: NodeJS.Timeout | null = null;
   private watcher: FSWatcher | null = null;
   /** Linux: one watcher per folder (Node's recursive watch walks the whole tree synchronously and fails badly at the inotify limit). */
@@ -496,6 +510,7 @@ export class SyncEngine extends EventEmitter {
     this.watching = false;
     if (this.interval) clearInterval(this.interval);
     if (this.timer) clearTimeout(this.timer);
+    this.clearRetry();
     this.live?.abort();
     this.abort.abort();
     await this.inflight?.catch(() => {});
@@ -567,13 +582,16 @@ export class SyncEngine extends EventEmitter {
         this.emit('problems', this.problems);
         this.problemBadges();
       } while (this.again && !this.paused && !this.stopped);
-      if (!this.paused && !this.stopped) this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined, code: undefined });
+      if (!this.paused && !this.stopped) {
+        this.clearRetry(); // it worked: the next failure starts with the short wait again
+        this.setStatus({ phase: 'idle', done: 0, total: 0, current: undefined, lastSync: Date.now(), error: undefined, code: undefined });
+      }
     } catch (e: any) {
       this.fullScan = true; // whatever this cycle had read is not trusted
       await this.save(true).catch(() => {});
       if (this.stopped || this.paused) return; // aborted on purpose
       const msg = e?.message ?? String(e);
-      if (e instanceof ApiError && e.status === 401) { this.signedOut = true; this.setStatus({ phase: 'auth', current: undefined, error: msg, code: undefined }); }
+      if (e instanceof ApiError && e.status === 401) { this.signedOut = true; this.clearRetry(); this.setStatus({ phase: 'auth', current: undefined, error: msg, code: undefined }); }
       else if (isNetworkError(e)) { this.setStatus({ phase: 'offline', current: undefined, error: msg, code: undefined }); this.retryLater(); }
       else { this.setStatus({ phase: 'error', current: undefined, error: msg, code: e instanceof SyncError ? e.code : undefined }); this.retryLater(); }
     } finally {
@@ -585,8 +603,22 @@ export class SyncEngine extends EventEmitter {
     }
   }
 
+  /**
+   * Tries again after a failed pass: 30 s, then 1, 2, 4 and from then on 5 minutes while the failures go on. One timer
+   * only: every failed pass (the periodic check, each reconnect of the live events, each file event while offline)
+   * used to start its own endless 30-second loop, and they piled up. Waking up, "Sync now" and changes still sync at once.
+   */
   private retryLater(): void {
-    setTimeout(() => this.schedule(0), 30_000).unref?.();
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    const wait = Math.min(RETRY_MS * 2 ** Math.min(this.failures++, 10), RETRY_MAX);
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; this.schedule(0); }, wait);
+    this.retryTimer.unref?.();
+  }
+
+  private clearRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.failures = 0;
   }
 
   // ---------------------------------------------------------------- badges (Finder)
@@ -661,6 +693,8 @@ export class SyncEngine extends EventEmitter {
   }
 
   private setStatus(s: Partial<Status>): void {
+    // Paused while a cycle runs: what is still winding down must not put "Syncing 0 of N" back (it stayed until resume).
+    if (this.paused && this.status.phase === 'paused' && s.phase !== 'paused') return;
     this.status = { ...this.status, ...s };
     this.emit('status', this.status);
   }
@@ -843,6 +877,9 @@ export class SyncEngine extends EventEmitter {
     this.fullScan = false; // a request arriving during the scan is for the next one
     const local = await this.scanLocal(full);
     this.syncDirWatchers();
+    // Paused (or stopped) while the folders were read: nothing is renamed, deleted or asked any more. Renames and the
+    // "delete them too?" question used to go ahead with what the scan had found. Resuming reads everything again.
+    if (this.paused || this.stopped) return false;
     if (await this.applyMoves(local, remote)) { await this.save(true); return true; }
     const again = await this.reconcile(local, remote);
     this.noteSpellings(local);
@@ -1254,6 +1291,7 @@ export class SyncEngine extends EventEmitter {
     moves.sort((a, b) => depth(a.from) - depth(b.from));
     const done = new Set<string>();
     for (const m of moves) {
+      if (this.paused || this.stopped) break; // the rest waits for the next cycle
       if (ancestorIn(done, m.from)) continue; // moved along with its folder
       if (this.isUnknown(m.from) || this.isUnknown(m.to)) continue;
       try {
@@ -1354,6 +1392,8 @@ export class SyncEngine extends EventEmitter {
       else if (rc) ops.push({ op: 'download', p });
     }
 
+    if (this.paused || this.stopped) return false; // paused meanwhile: no question, nothing carried out (see cycleInner)
+
     // Many deletions at once usually mean something went wrong (a drive not mounted, a folder emptied by mistake).
     if (ops.some((o) => o.op === 'deleteLocal' || o.op === 'deleteRemote')) {
       let total = 0;
@@ -1383,12 +1423,15 @@ export class SyncEngine extends EventEmitter {
       }
     }
 
+    if (this.paused || this.stopped) return false; // paused while the question was open ("keep the files" is remembered)
+
     const work = ops.filter((o) => o.op !== 'forget');
     for (const o of ops) if (o.op === 'forget') this.forget(o.p);
     this.flushForget();
     let done = 0;
     let again = false;
     let fatal: unknown = null; // signed out / offline: stop every worker
+    let serverErrors = 0; // files in a row that the server answered with a 5xx (see isServerError)
     this.setStatus({ phase: 'syncing', done, total: work.length });
     const marked = new Set<string>();
     for (const o of work) this.setBusy(o.p, true, marked); // also `record`: a folder not in the state yet answered "syncing"
@@ -1400,9 +1443,11 @@ export class SyncEngine extends EventEmitter {
         ? this.beginWrite([o.p]) : null;
       try {
         if (await this.execute(o.op, o.p, local.get(o.p), remote.get(o.p), remote, local)) again = true;
+        if (o.op !== 'record' && o.op !== 'mkdirLocal' && o.op !== 'deleteLocal') serverErrors = 0; // those never ask the server
       } catch (e: any) {
         if (this.paused || this.stopped) return; // aborted on purpose
         if (isFatal(e)) { fatal ??= e; return; }
+        if (isServerError(e) && ++serverErrors >= SERVER_ERRORS) { fatal ??= e; return; }
         this.problem(o.p, e?.code === 'EBUSY' || e?.code === 'EPERM' ? this.msg('locked') : e?.message ?? String(e));
       } finally {
         if (writes) await this.endWrite(writes);
@@ -1526,6 +1571,19 @@ export class SyncEngine extends EventEmitter {
         if (parentId === undefined) { this.problem(p, this.msg('noParent')); return false; }
         const before = await lstat(this.full(p));
         if (!before.isFile()) return false;
+        // Only the time changed (touch, a restore from a backup, FAT/exFAT rounding) and the server still has the
+        // file as last synced: with the server's hash the content is compared first, and when it is the same only
+        // the new time is noted. Each such upload used to make a server version, pushing real ones out of the limit
+        // of versions per file. Without a hash from the server it is uploaded as before.
+        const b = base[p];
+        if (b && !b.dir && r?.sha256 && !r.dir && r.id === b.id && r.etag === b.etag && before.size === b.size && before.size === r.size
+          && (await hashFile(this.full(p))) === r.sha256) {
+          const now = await lstat(this.full(p)).catch(() => null);
+          if (!now || now.size !== before.size || Math.floor(now.mtimeMs) !== Math.floor(before.mtimeMs)) return true; // edited while it was read
+          this.setBase(p, { dir: false, id: r.id, etag: r.etag, rmtime: r.mtime, size: before.size, mtime: Math.floor(before.mtimeMs), ino: before.ino });
+          this.spell(p, l?.name ?? nameOf(p));
+          return false;
+        }
         const up = await this.api.upload(parentId, nameOf(p), this.full(p), before.size, this.abort.signal);
         // Servers from 1.16 answer the last chunk with the whole node; older ones only with its id.
         const n = up.etag && up.mtime ? up : (await this.api.node(up.id)).node;
