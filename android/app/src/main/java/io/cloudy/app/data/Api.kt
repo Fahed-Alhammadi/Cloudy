@@ -181,8 +181,13 @@ class Api(private val session: Session) {
     /** Text files: create and save (the server keeps the previous content as a version). */
     suspend fun createTextFile(parentId: Long, name: String): FileNode =
         decode(sendJson("POST", "/api/nodes/$parentId/files", buildJsonObject { put("name", name); put("content", "") }))
-    suspend fun saveText(id: Long, text: String): FileNode =
-        decode(send("PUT", "/api/nodes/$id/content", text.toRequestBody("text/plain; charset=utf-8".toMediaType())))
+    /**
+     * [etag]: the version the editor opened. The server then refuses the save with 412 when someone saved a newer one
+     * meanwhile (or renamed, moved or deleted the file), instead of replacing it; null saves whatever is there.
+     */
+    suspend fun saveText(id: Long, text: String, etag: String? = null): FileNode =
+        decode(send("PUT", "/api/nodes/$id/content", text.toRequestBody("text/plain; charset=utf-8".toMediaType()),
+            if (etag != null) mapOf("If-Match" to "\"$etag\"") else emptyMap()))
 
     /** Downloads a Cloudy server URL (sends our credentials, so never use it for other hosts). */
     suspend fun downloadUrlTo(absoluteUrl: String, dest: File, onProgress: (Long) -> Unit = {}) = withContext(Dispatchers.IO) {
@@ -250,10 +255,12 @@ class Api(private val session: Session) {
      * big file that outlasts a background job continues where it stopped instead of starting over.
      * When the upload fails or is cancelled, the server's partial upload is deleted, unless [keepOnFailure] (the
      * photo backup keeps it to resume on its next run; the server drops sessions a day after their last chunk).
+     * [keepBoth]: a file that already has this name stays, and the upload is stored as "name (2)". Without it the
+     * upload replaces that file (the old content becomes a version).
      */
     suspend fun upload(
         parentId: Long, name: String, size: Long, open: () -> InputStream, onProgress: (Long) -> Unit = {},
-        resumeId: String? = null, onSession: (String) -> Unit = {}, keepOnFailure: Boolean = false,
+        resumeId: String? = null, onSession: (String) -> Unit = {}, keepOnFailure: Boolean = false, keepBoth: Boolean = false,
     ): Long {
         val resumed = resumeId?.let { id -> runCatching { decode<UploadStatus>(send("GET", "/api/uploads/$id")) }.getOrNull()?.takeIf { it.size == size }?.let { id to it.received } }
         val sessionId: String
@@ -264,6 +271,7 @@ class Api(private val session: Session) {
         } else {
             val s: UploadSession = decode(sendJson("POST", "/api/uploads", buildJsonObject {
                 put("parentId", parentId); put("name", name); put("size", size)
+                if (keepBoth) put("onConflict", "rename")
             }))
             sessionId = s.id; offset = 0; chunkSize = s.chunkSize
             onSession(s.id)

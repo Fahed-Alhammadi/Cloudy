@@ -1,3 +1,4 @@
-• Changing your password now signs out your other devices too; this phone stays signed in (needs server 2.1.3).
-• The welcome screen is gone: Cloudy opens straight on sign-in.
-• Cloudy asks for photo access only when you turn on photo backup. If you decline, it explains why and offers a button to open the app's settings.
+• Offline files stay on your phone when the server answers with an error. Before, they could be removed.
+• Uploading a file whose name already exists keeps both ("name (2)") instead of replacing the first one.
+• The text editor asks before overwriting changes someone else saved after you opened the file.
+• Word, Excel and PowerPoint files no longer open in the text editor.

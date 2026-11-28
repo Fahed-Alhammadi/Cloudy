@@ -78,6 +78,18 @@ class Offline(context: Context, private val api: Api) {
     suspend fun sync(onProgress: (String) -> Unit = {}): Int = io {
         var fetched = 0
         val keep = mutableSetOf<Long>()
+        // False once the server refused something for a reason other than "gone" (a proxy's 502 while the server
+        // restarts, a 500): what is on the server is then not known, and nothing is removed from the device this
+        // time. Every copy that was not reached used to be deleted, so one bad answer emptied a pinned folder.
+        var complete = true
+        /** One item; a failure skips only that item, so one bad file no longer stops the files after it. */
+        suspend fun each(block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (e: ApiException) {
+                if (e.status != 404) complete = false // 404: deleted since the listing, its copy goes with the clean-up
+            }
+        }
         suspend fun visit(id: Long) {
             val listing = api.node(id)
             val n = listing.node
@@ -86,7 +98,7 @@ class Offline(context: Context, private val api: Api) {
             if (n.isDir) {
                 cacheListing(listing)
                 for (c in listing.children.orEmpty()) {
-                    if (c.isDir) visit(c.id) else fetchFile(c, keep)?.let { fetched++; onProgress(c.name) }
+                    each { if (c.isDir) visit(c.id) else fetchFile(c, keep)?.let { fetched++; onProgress(c.name) } }
                 }
             } else if (fetchFile(n, keep) != null) {
                 fetched++
@@ -97,11 +109,11 @@ class Offline(context: Context, private val api: Api) {
             try {
                 visit(id)
             } catch (e: ApiException) {
-                if (e.status == 404) state = state.copy(pinned = state.pinned - id)
+                if (e.status == 404) state = state.copy(pinned = state.pinned - id) else complete = false
             }
         }
         save()
-        cleanup(keep)
+        if (complete) cleanup(keep)
         fetched
     }
 

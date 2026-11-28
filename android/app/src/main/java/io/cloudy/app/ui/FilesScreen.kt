@@ -195,7 +195,9 @@ suspend fun uploadUris(context: Context, parentId: Long, uris: List<Uri>, state:
                 size = withContext(Dispatchers.IO) { open().use { i -> t.outputStream().use { i.copyTo(it) } }; t.length() }
                 source = { t.inputStream() }
             }
-            Services.api.upload(parentId, name, size, source, { sent -> state.progress = if (size > 0) sent.toFloat() / size else 1f })
+            // keepBoth: a second "image.jpg" shared from another app, or a second scan in the same minute, is added
+            // next to the first. It used to replace it without a question.
+            Services.api.upload(parentId, name, size, source, { sent -> state.progress = if (size > 0) sent.toFloat() / size else 1f }, keepBoth = true)
             ok++
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e

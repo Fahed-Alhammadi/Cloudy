@@ -170,6 +170,9 @@
     <string name="page_n">Page %1$d</string>
     <string name="unsaved_changes">Unsaved changes</string>
     <string name="save_failed">Save failed</string>
+    <string name="changed_elsewhere_title">This file was changed</string>
+    <string name="changed_elsewhere_text">Someone else saved “%1$s” after you opened it. Overwriting replaces their changes; the server keeps their version as an older version.</string>
+    <string name="overwrite">Overwrite</string>
     <string name="empty_trash">Empty trash</string>
     <string name="empty_trash_text">All deleted files will be removed permanently.</string>
     <string name="empty">Empty</string>

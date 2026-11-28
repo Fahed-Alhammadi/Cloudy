@@ -91,12 +91,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+/**
+ * Types that are text although they are not "text/…" (the web app's list, viewer.js). Not every type with "xml" in its
+ * name: Word, Excel and PowerPoint files are "…openxmlformats…" ZIP archives. They opened in the text editor whenever
+ * the server's list of office previews was not loaded (offline, or a server without LibreOffice), and Save would have
+ * stored the garbled text over the document.
+ */
+private val TEXT_TYPES = Regex("^application/((.+\\+)?(json|xml)|(x-)?(javascript|yaml|sh)|sql|toml)$")
+
 private fun kindOf(n: FileNode): String = when {
     Office.canPreview(n) -> "office"
     Regex("^image/(png|jpeg|gif|webp|bmp|heic|avif)$").matches(n.mime) -> "image"
     n.mime.startsWith("video/") || n.mime.startsWith("audio/") -> "media"
     n.mime == "application/pdf" -> "pdf"
-    (n.mime.startsWith("text/") || n.mime.contains("json") || n.mime.contains("xml")) && n.size <= 1_000_000 -> "text"
+    (n.mime.startsWith("text/") || TEXT_TYPES.matches(n.mime)) && n.size <= 1_000_000 -> "text"
     else -> "other"
 }
 
@@ -307,11 +315,40 @@ private fun TextView(n: FileNode, canEdit: Boolean, onDirty: (Boolean) -> Unit, 
     val text = draft ?: ""
     var failed by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
+    // The version this text was read from: sent with Save, so a newer save by someone else is not replaced unseen.
+    var etag by rememberSaveable(n.id) { mutableStateOf(n.etag) }
+    var changedElsewhere by rememberSaveable(n.id) { mutableStateOf(false) }
     LaunchedEffect(n.id) {
-        runCatching { withContext(Dispatchers.IO) { Services.offline.localFile(n)?.readText() } ?: Services.api.downloadText(n.id) }
+        runCatching {
+            withContext(Dispatchers.IO) { Services.offline.localFile(n)?.readText() } ?: run {
+                // Read before the text (the listing this screen came from may be old): if the file changes between
+                // the two requests, Save asks; the other order would overwrite that change.
+                val current = runCatching { Services.api.node(n.id).node.etag }.getOrNull()
+                Services.api.downloadText(n.id).also { if (current != null && draft == null) etag = current }
+            }
+        }
             .onSuccess { loaded = it; if (draft == null) draft = it }
             .onFailure { failed = it.message }
     }
+    fun save(overwrite: Boolean) {
+        saving = true
+        scope.launch {
+            runCatching { Services.api.saveText(n.id, text, if (overwrite) null else etag.takeIf { it.isNotEmpty() }) }
+                .onSuccess { loaded = text; etag = it.etag; onSaved(it); toast(context, context.getString(R.string.saved)) }
+                .onFailure {
+                    if (it is io.cloudy.app.data.ApiException && it.status == 412) changedElsewhere = true
+                    else toast(context, it.message ?: context.getString(R.string.save_failed))
+                }
+            saving = false
+        }
+    }
+    if (changedElsewhere) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { changedElsewhere = false },
+        title = { Text(stringResource(R.string.changed_elsewhere_title)) },
+        text = { Text(stringResource(R.string.changed_elsewhere_text, n.name)) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { changedElsewhere = false; save(overwrite = true) }) { Text(stringResource(R.string.overwrite)) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { changedElsewhere = false }) { Text(stringResource(R.string.cancel)) } },
+    )
     val original = loaded
     val changed = canEdit && original != null && text != original
     LaunchedEffect(changed) { onDirty(changed) }
@@ -340,15 +377,7 @@ private fun TextView(n: FileNode, canEdit: Boolean, onDirty: (Boolean) -> Unit, 
                     Box(Modifier.size(8.dp).background(dot, androidx.compose.foundation.shape.CircleShape))
                     Text(stringResource(if (dirty) R.string.unsaved_changes else R.string.saved), Modifier.weight(1f).padding(start = 10.dp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                    Button(enabled = dirty && !saving, onClick = {
-                        saving = true
-                        scope.launch {
-                            runCatching { Services.api.saveText(n.id, text) }
-                                .onSuccess { loaded = text; onSaved(it); toast(context, context.getString(R.string.saved)) }
-                                .onFailure { toast(context, it.message ?: context.getString(R.string.save_failed)) }
-                            saving = false
-                        }
-                    }) {
+                    Button(enabled = dirty && !saving, onClick = { save(overwrite = false) }) {
                         if (saving) androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         else Icon(Icons.Outlined.Save, null, Modifier.size(18.dp))
                         Text(stringResource(R.string.save), Modifier.padding(start = 8.dp))
