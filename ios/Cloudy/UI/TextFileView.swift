@@ -16,6 +16,9 @@ struct TextFileView: View {
     @State private var readOnly = false
     @State private var actions = FileActions()
     @State private var saves = 0 // haptic when a save went through
+    /// The version the text was read from: sent with Save, so a newer save by someone else is not replaced unseen.
+    @State private var etag: String?
+    @State private var changedElsewhere = false
 
     private var dirty: Bool { saved != nil && text != saved }
 
@@ -65,7 +68,7 @@ struct TextFileView: View {
             if saving {
                 ToolbarItem(placement: .confirmationAction) { ProgressView() }
             } else if dirty {
-                ToolbarItem(placement: .confirmationAction) { Button("Save", action: save).bold() }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() }.bold() }
             } else {
                 ToolbarItem(placement: .primaryAction) {
                     Menu { actions.menu(for: node) } label: { Label("Actions", systemImage: "ellipsis") }
@@ -74,6 +77,12 @@ struct TextFileView: View {
         }
         .confirmationDialog("Discard changes?", isPresented: $confirmDiscard, titleVisibility: .visible) {
             Button("Discard", role: .destructive) { dismiss() }
+        }
+        .alert("This file was changed", isPresented: $changedElsewhere) {
+            Button("Overwrite", role: .destructive) { save(overwrite: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Someone else saved “\(node.name)” after you opened it. Overwriting replaces their changes; the server keeps their version as an older version.")
         }
         .interactiveDismissDisabled(dirty)
         .task {
@@ -94,7 +103,11 @@ struct TextFileView: View {
     private func load() async {
         guard saved == nil else { return }
         do {
+            // Read before the text (the listing this screen came from may be old): if the file changes between the
+            // two requests, Save asks; the other order would overwrite that change.
+            let current = (try? await API.shared.node(node.id))?.node.etag
             let (t, utf8) = try await API.shared.downloadText(node.id)
+            etag = current ?? node.etag
             text = t
             saved = t
             readOnly = !utf8
@@ -104,14 +117,16 @@ struct TextFileView: View {
         }
     }
 
-    private func save() {
+    private func save(overwrite: Bool = false) {
         saving = true
         let content = text
         Task {
             do {
-                try await API.shared.saveText(node.id, content)
+                etag = try await API.shared.saveText(node.id, content, etag: overwrite ? nil : etag).etag
                 saved = content
                 saves += 1
+            } catch let e as APIError where e.status == 412 {
+                changedElsewhere = true
             } catch {
                 self.error = errorText(error)
             }

@@ -1,4 +1,3 @@
-• Changing your password now signs out your other devices too; this iPhone stays signed in (needs server 2.1.3).
-• The welcome screen is gone: Cloudy opens straight on sign-in.
-• iOS now asks for each permission only when you use the feature: local network when you sign in to a server at a local address, camera when you scan a document, photos when you save a picture, Face ID when you turn on App lock.
-• If you decline local network access, sign-in explains why it can't reach your server and offers a button to open Settings.
+• Uploads run two at a time and the rest wait their turn, so picking many photos no longer starts them all at once.
+• Uploading a file whose name already exists keeps both ("name (2)") instead of replacing the first one. The same goes for "Share to Cloudy".
+• The text editor asks before overwriting changes someone else saved after you opened the file.

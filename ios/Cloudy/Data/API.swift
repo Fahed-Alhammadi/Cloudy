@@ -169,8 +169,12 @@ final class API: @unchecked Sendable {
         if let s = String(data: data, encoding: .utf8) { return (s, true) }
         return (String(data: data, encoding: .windowsCP1252) ?? String(decoding: data, as: UTF8.self), false)
     }
-    func saveText(_ id: Int64, _ text: String) async throws {
-        try await send("PUT", "/api/nodes/\(id)/content", body: Data(text.utf8), contentType: "text/plain; charset=utf-8")
+    /// `etag`: the version the editor opened. The server then answers 412 when someone saved a newer one meanwhile
+    /// (or renamed, moved or deleted the file) instead of replacing it; nil saves over whatever is there.
+    @discardableResult
+    func saveText(_ id: Int64, _ text: String, etag: String? = nil) async throws -> FileNode {
+        try decode(await send("PUT", "/api/nodes/\(id)/content", body: Data(text.utf8), contentType: "text/plain; charset=utf-8",
+                              headers: (etag ?? "").isEmpty ? [:] : ["If-Match": "\"\(etag!)\""]))
     }
 
     // MARK: shares

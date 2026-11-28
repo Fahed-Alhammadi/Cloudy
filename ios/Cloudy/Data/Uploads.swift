@@ -23,6 +23,25 @@ final class Uploads {
     private(set) var finished = 0
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var quiet: Task<Void, Never>?
+    /// At most this many uploads send at once; the others wait their turn in the list. Every picked item used to
+    /// start at once: 150 photos were 150 uploads, each holding a chunk of up to 8 MiB in memory and sharing the
+    /// connection until requests timed out.
+    private static let limit = 2
+    private var running = 0
+    private var waiting: [(id: UUID, go: CheckedContinuation<Bool, Never>)] = []
+
+    /// Waits for a free slot. False: the upload was dismissed while it waited (it holds no slot).
+    @MainActor
+    private func turn(_ id: UUID) async -> Bool {
+        if running < Self.limit { running += 1; return true }
+        return await withCheckedContinuation { waiting.append((id, $0)) }
+    }
+
+    /// Gives the slot to the next waiting upload, or frees it.
+    @MainActor
+    private func release() {
+        if waiting.isEmpty { running -= 1 } else { waiting.removeFirst().go.resume(returning: true) }
+    }
 
     /// Counts a batch as finished once nothing has been uploading for a moment: the photos of one pick start one
     /// after the other (each after its export), so "no upload running" alone can be true between two of them.
@@ -45,8 +64,11 @@ final class Uploads {
         let bg = BackgroundTask()
         bg.id = UIApplication.shared.beginBackgroundTask(withName: "upload") { bg.end() }
         tasks[job.id] = Task {
+            let slot = await turn(job.id)
             do {
-                try await API.shared.upload(parentId, name: name, file: file) { sent, total in
+                guard slot else { throw CancellationError() }
+                // keepBoth: a file that already has this name stays; the upload used to replace it without a question.
+                try await API.shared.upload(parentId, name: name, file: file, keepBoth: true) { sent, total in
                     DispatchQueue.main.async { self.update(job.id) { $0.sent = sent; $0.total = total } }
                 }
                 jobs.removeAll { $0.id == job.id }
@@ -59,6 +81,7 @@ final class Uploads {
             } catch {
                 update(job.id) { $0.error = errorText(error) }
             }
+            if slot { release() }
             tasks[job.id] = nil
             if deleteAfter { try? FileManager.default.removeItem(at: file) }
             bg.end()
@@ -68,7 +91,10 @@ final class Uploads {
     /// Removes a failed upload from the list, or stops one that is still running.
     @MainActor
     func dismiss(_ id: UUID) {
-        if let task = tasks[id] { task.cancel() } else { jobs.removeAll { $0.id == id } }
+        guard let task = tasks[id] else { jobs.removeAll { $0.id == id }; return }
+        task.cancel()
+        // Still waiting for its turn: let it end now, without a slot.
+        if let i = waiting.firstIndex(where: { $0.id == id }) { waiting.remove(at: i).go.resume(returning: false) }
     }
 
     private func update(_ id: UUID, _ change: (inout Job) -> Void) {

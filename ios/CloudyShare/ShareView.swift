@@ -114,7 +114,7 @@ struct ShareView: View {
                 for (i, item) in items.enumerated() where !uploaded.contains(item.id) {
                     progress = i
                     fraction = Double(i) / count
-                    _ = try await API.shared.upload(target, name: item.name, file: item.url) { sent, total in
+                    _ = try await API.shared.upload(target, name: item.name, file: item.url, keepBoth: true) { sent, total in
                         let part = total > 0 ? Double(sent) / Double(total) : 1
                         DispatchQueue.main.async { fraction = (Double(i) + part) / count }
                     }
