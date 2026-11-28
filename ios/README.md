@@ -13,7 +13,7 @@ A native iPhone app (Swift, SwiftUI) for your Cloudy server. It needs iOS 17 or 
   and the app lock is off.
 - Tabs: Files, Recent, Shared (files shared with you) and More.
 - Live updates: changes from other devices show up immediately.
-- App lock (Face ID / Touch ID / passcode), Devices (revoke sign-ins). The app is in English.
+- App lock (Face ID / Touch ID / passcode; "Share to Cloudy" asks for it too), Devices (revoke sign-ins). The app is in English.
 
 Sign-in works like on Android: the password (plus a two-factor code if needed) is exchanged for a device token stored in
 the Keychain. Each iPhone appears on the web under *Settings → Devices*.
@@ -75,11 +75,11 @@ throwaway server with the demo account, `appstore/render.py` frames the captures
 | `project.yml` | XcodeGen spec (targets, versions, build settings) |
 | `Cloudy/Info.plist` | Permissions texts, ATS (local networking only), export compliance |
 | `Cloudy/Data/API.swift` | JSON API client (URLSession, bearer token, chunked uploads, SSE) |
-| `Cloudy/Data/Session.swift` | Server address (App Group), user; `Keychain.swift` = device token (shared keychain group) |
+| `Cloudy/Data/Session.swift` | Server address (App Group), user; `Keychain.swift` = device token (shared keychain group; a read that fails is not a sign-out); `AppLock.swift` = the App lock switch (App Group, read by the share extension) and its Face ID prompt |
 | `CloudyShare/` | Share extension "Share to Cloudy" (`io.cloudy.app.share`): files from other apps' share sheets → folder picker → chunked upload with the app's token |
 | `CloudyFiles/` | File Provider extension (`io.cloudy.app.files`): "Cloudy" in the Files app. Lists folders on demand, downloads when a file is opened, uploads saves; changes from elsewhere arrive through a working-set walk (`Remote.changes`, folder etags in `Index`) that the app triggers on live events and the extension triggers when a folder is opened (≤ every 15 s). Port of the old macOS Cloudy Drive extension |
 | `Cloudy/Data/FilesDomain.swift` | The Files location: added while signed in, removed (with its copies) on sign-out; `changed()` asks the extension to check for changes |
-| `Cloudy/Data/Live.swift` | Live updates (SSE → `.cloudyChange` notifications), download cache |
+| `Cloudy/Data/Live.swift` | Live updates (SSE → `.cloudyChange` notifications; the Files extension is signalled at most every 5 s), download cache (pruned at launch: 14 days unused, 500 MB) |
 | `Cloudy/Data/Uploads.swift` | Uploads in progress (with background time) |
 | `Cloudy/UI/*.swift` | SwiftUI screens: Files, FileActions (menus, Quick Look), ShareSheet, Lists (favorites, recent, shared, trash), More |
 | `Cloudy/Resources/` | Assets (icon), `Localizable.xcstrings` / `InfoPlist.xcstrings` (English texts), `PrivacyInfo.xcprivacy` |

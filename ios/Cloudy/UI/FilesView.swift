@@ -61,6 +61,27 @@ extension View {
 
 enum SortOrder: String, CaseIterable { case name, date, size }
 
+/// A folder's order: folders first, then by name, date or size.
+struct FolderOrder: Equatable {
+    var by: SortOrder
+    var descending: Bool
+
+    func sorted(_ items: [FileNode]) -> [FileNode] {
+        func order<K>(_ key: (FileNode) -> K, _ ascending: (K, K) -> Bool) -> [FileNode] {
+            // Each file's key is worked out once (a date is parsed from its ISO text), not once per comparison.
+            items.map { ($0, key($0)) }.sorted { a, b in
+                if a.0.isDir != b.0.isDir { return a.0.isDir }
+                return descending ? ascending(b.1, a.1) : ascending(a.1, b.1)
+            }.map(\.0)
+        }
+        switch by {
+        case .name: return order(\.name) { $0.localizedStandardCompare($1) == .orderedAscending }
+        case .date: return order({ $0.modified ?? .distantPast }, <)
+        case .size: return order(\.bytes, <)
+        }
+    }
+}
+
 /// Search filters, the same as Android's TypeFilter.
 enum TypeFilter: String, CaseIterable, Hashable {
     case all, folders, images, videos, audio, documents
@@ -102,6 +123,11 @@ struct FolderView: View {
     @AppStorage("sortDescending") private var descending = false
     @AppStorage("grid") private var grid = false
     @State private var listing: NodeListing?
+    /// The folder's files in the chosen order, and the order they were sorted for. Sorted when the listing or the
+    /// order changes, not on every redraw: an upload's progress redraws the screen many times a second, each of which
+    /// used to sort the folder several times and read every date again for each comparison.
+    @State private var ordered: [FileNode] = []
+    @State private var orderedBy: FolderOrder?
     @State private var settled = true // false for a moment after list ↔ grid, see below
     @State private var lift: CGFloat = 0 // how far the "+" still is from its place after the bottom bar came or went
     @State private var bottomInset: CGFloat?
@@ -133,9 +159,10 @@ struct FolderView: View {
                 settled = false
                 DispatchQueue.main.async { withAnimation(.snappy(duration: 0.3)) { settled = true } }
             }
-            // The sort order lives in UserDefaults, whose changes arrive outside `withAnimation`: animate on the values.
-            .animation(.default, value: sort)
-            .animation(.default, value: descending)
+            // The sort order lives in UserDefaults, whose changes arrive outside `withAnimation`.
+            .onChange(of: FolderOrder(by: sort, descending: descending)) { withAnimation { reorder() } }
+            // Another folder's screen changed the order while this one was underneath.
+            .onAppear { if listing != nil, orderedBy != FolderOrder(by: sort, descending: descending) { reorder() } }
             .overlay {
                 if let loadError, listing == nil {
                     ErrorState(message: loadError) { Task { await load() } }
@@ -308,17 +335,13 @@ struct FolderView: View {
 
     private var shown: [FileNode] {
         if let results { return results.filter(filter.matches) }
-        let items = listing?.children ?? []
-        return items.sorted { a, b in
-            if a.isDir != b.isDir { return a.isDir }
-            let asc: Bool
-            switch sort {
-            case .name: asc = a.name.localizedStandardCompare(b.name) == .orderedAscending
-            case .date: asc = (a.modified ?? .distantPast) < (b.modified ?? .distantPast)
-            case .size: asc = a.bytes < b.bytes
-            }
-            return descending ? !asc : asc
-        }
+        return ordered
+    }
+
+    private func reorder() {
+        let by = FolderOrder(by: sort, descending: descending)
+        ordered = by.sorted(listing?.children ?? [])
+        orderedBy = by
     }
 
     private var addButton: some View {
@@ -362,7 +385,10 @@ struct FolderView: View {
         do {
             let fresh = try await API.shared.node(id)
             // Rows that came or went (upload, delete, a change on another device) slide in and out; the first load just shows.
-            withAnimation(listing == nil ? nil : .default) { listing = fresh }
+            withAnimation(listing == nil ? nil : .default) {
+                listing = fresh
+                reorder()
+            }
             loadError = nil
         } catch is CancellationError {
         } catch let e as URLError where e.code == .cancelled {

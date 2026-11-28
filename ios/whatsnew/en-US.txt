@@ -1,3 +1,8 @@
-• Uploads run two at a time and the rest wait their turn, so picking many photos no longer starts them all at once.
-• Uploading a file whose name already exists keeps both ("name (2)") instead of replacing the first one. The same goes for "Share to Cloudy".
-• The text editor asks before overwriting changes someone else saved after you opened the file.
+• With App lock on, "Share to Cloudy" now asks for Face ID, Touch ID or your passcode before it shows your folders or uploads.
+• Turning on App lock asks for Face ID right away, instead of on your next return to the app.
+• Fixed: Cloudy could show the sign-in screen and drop its files from the Files app although you were still signed in.
+• Fixed: a file renamed or moved on the web and then edited in the Files app no longer becomes a "conflicted copy".
+• Signing in to some internet servers no longer asks for the Local Network permission.
+• Large folders scroll smoothly while files upload.
+• Opened files no longer pile up on your iPhone: copies you haven't used for two weeks are removed.
+• Help now opens the Cloudy support page.

@@ -46,13 +46,33 @@ enum LocalNetwork {
 
     /// Whether `host` is on a local network (private IP ranges, `.local` names, localhost): only then does iOS need
     /// the local network permission and allow plain http://.
+    /// IPv6 is only recognised as a literal address (it contains ":", with or without the URL's brackets): the check
+    /// used to be "starts with fc or fd", which made names such as fdrive.example.com local, so signing in to a
+    /// server on the internet asked for the Local Network permission and a "Don't Allow" blocked the sign-in.
     static func isLocal(_ host: String) -> Bool {
-        let h = host.lowercased()
-        if h == "localhost" || h.hasSuffix(".local") || h == "::1" { return true }
-        let parts = h.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4 else { return h.hasPrefix("fe80:") || h.hasPrefix("fd") || h.hasPrefix("fc") }
-        return parts[0] == 10 || parts[0] == 127 || (parts[0] == 192 && parts[1] == 168)
-            || (parts[0] == 172 && (16...31).contains(parts[1])) || (parts[0] == 169 && parts[1] == 254)
+        var h = host.lowercased()
+        if h.hasPrefix("["), h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
+        if h == "localhost" || h.hasSuffix(".local") { return true }
+        if h.contains(":") {
+            if let zone = h.firstIndex(of: "%") { h = String(h[..<zone]) } // fe80::1%en0
+            if h == "::1" { return true }
+            if h.hasPrefix("::ffff:"), h.contains(".") { return isLocal(String(h.dropFirst(7))) } // IPv4 written as IPv6
+            guard let first = h.split(separator: ":", omittingEmptySubsequences: false).first,
+                  let group = UInt16(first, radix: 16) else { return false }
+            // fc00::/7 = unique local addresses, fe80::/10 = link-local.
+            return group & 0xfe00 == 0xfc00 || group & 0xffc0 == 0xfe80
+        }
+        // Four numbers and nothing else: "10.0.0.1.example.com" is a name on the internet.
+        let parts = h.split(separator: ".", omittingEmptySubsequences: false).map { UInt8($0) }
+        guard parts.count == 4, let a = parts[0], let b = parts[1], parts[2] != nil, parts[3] != nil else { return false }
+        return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && (16...31).contains(b)) || (a == 169 && b == 254)
+    }
+
+    /// This iPhone itself: reached without the local network permission.
+    static func isLoopback(_ host: String) -> Bool {
+        var h = host.lowercased()
+        if h.hasPrefix("["), h.hasSuffix("]") { h = String(h.dropFirst().dropLast()) }
+        return h == "localhost" || h == "::1" || (isLocal(h) && h.hasPrefix("127."))
     }
 }
 

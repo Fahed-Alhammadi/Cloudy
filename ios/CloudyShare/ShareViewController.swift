@@ -5,22 +5,52 @@ import Observation
 
 /// "Share to Cloudy": collects the shared files into a temporary folder, then shows `ShareView`, which uploads
 /// them with the app's device token (shared Keychain) to a folder on the server the app is signed in to.
+/// With the app lock on it first asks for Face ID, Touch ID or the passcode, like the app itself.
 final class ShareViewController: UIViewController {
     private let work = FileManager.default.temporaryDirectory.appendingPathComponent("share-\(UUID().uuidString)")
+    private var finished = false
+    private let model = ShareModel()
+    private var askedToUnlock = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         API.shared.server = UserDefaults(suiteName: appGroup)?.string(forKey: "server") ?? ""
-        API.shared.token = Keychain.get("token")
+        switch Keychain.read("token") {
+        case .value(let token):
+            API.shared.token = token
+            model.account = API.shared.server.isEmpty ? .signedOut : .signedIn
+        case .missing: model.account = .signedOut
+        case .unavailable: model.account = .unreadable // not "signed out": the token may be fine
+        }
+        model.locked = model.account == .signedIn && AppLock.isOn
         // The sheet shows at once ("Preparing…"); copying a long video out of Photos can take a while.
-        let model = ShareModel()
         present(model)
         Task { model.items = await collect() }
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard model.locked, !askedToUnlock else { return }
+        askedToUnlock = true
+        Task { await unlock() }
+    }
+
+    /// The system's Face ID / Touch ID / passcode prompt, straight from the user's tap on "Cloudy" in the share
+    /// sheet. Until it succeeds the sheet shows no folder and uploads nothing; otherwise it says so and closes.
+    private func unlock() async {
+        switch await AppLock.authenticate(reason: String(localized: "Unlock Cloudy")) {
+        case .ok, .notSetUp: // no passcode on this iPhone: nothing to ask for, as in the app
+            model.locked = false
+        case .failed:
+            model.lockFailed = true
+            try? await Task.sleep(for: .seconds(1.8))
+            finish()
+        }
+    }
+
     private func present(_ model: ShareModel) {
-        let host = UIHostingController(rootView: ShareView(model: model, signedIn: API.shared.token != nil && !API.shared.server.isEmpty) { [weak self] in
+        let host = UIHostingController(rootView: ShareView(model: model) { [weak self] in
             self?.finish()
         })
         addChild(host)
@@ -30,7 +60,10 @@ final class ShareViewController: UIViewController {
         host.didMove(toParent: self)
     }
 
+    /// Ends the extension once (Cancel while the "locked" message is still up must not complete the request twice).
     private func finish() {
+        guard !finished else { return }
+        finished = true
         try? FileManager.default.removeItem(at: work)
         extensionContext?.completeRequest(returningItems: nil)
     }
@@ -81,7 +114,14 @@ final class ShareViewController: UIViewController {
 /// The files to upload; nil while they are still being copied out of the sharing app.
 @MainActor @Observable
 final class ShareModel {
+    enum Account { case signedIn, signedOut, unreadable }
+
     var items: [SharedItem]?
+    var account = Account.signedOut
+    /// The app lock is on and hasn't been passed yet: no folders, no upload.
+    var locked = false
+    /// Face ID / Touch ID / the passcode failed or was cancelled; the sheet is about to close.
+    var lockFailed = false
 }
 
 struct SharedItem: Identifiable {

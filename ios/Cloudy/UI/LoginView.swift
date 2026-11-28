@@ -124,8 +124,8 @@ struct LoginView: View {
             // the Sign in button (no screen of our own before it, App Review 5.1.1(iv)). Internet servers skip this.
             // The simulator has no such permission and never answers the probe, so it is skipped there.
             #if !targetEnvironment(simulator)
-            if let host = URL(string: address)?.host(), LocalNetwork.isLocal(host), host != "localhost", host != "::1",
-               !host.hasPrefix("127."), await LocalNetwork.request() == false {
+            if let host = URL(string: address)?.host(), LocalNetwork.isLocal(host), !LocalNetwork.isLoopback(host),
+               await LocalNetwork.request() == false {
                 error = String(localized: "Cloudy isn't allowed to use your local network, so it can't reach this server. Turn on Local Network for Cloudy in the Settings app.")
                 networkDenied = true
                 busy = false
@@ -201,5 +201,6 @@ func retryingConnection<T>(attempts: Int = 4, _ work: () async throws -> T) asyn
 }
 
 let privacyPolicyURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/privacy-policy.html")!
-/// How to run a Cloudy server, for people who don't have one yet.
-let installURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#install")!
+/// For people who don't have a server yet: the support page's "Signing in" section, which says what a Cloudy server
+/// is and leads to the install guide. (Not the GitHub README, which shows other platforms' store badges.)
+let installURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/support.html#signing-in")!

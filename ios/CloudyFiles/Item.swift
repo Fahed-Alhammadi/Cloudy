@@ -11,8 +11,9 @@ extension NSFileProviderItemIdentifier {
     var nodeId: Int64? { self == .rootContainer ? Account.rootId : Int64(rawValue) }
 }
 
-/// A Cloudy node as the Files app sees it. Versions: a file's content version is its etag; a folder's etag changes
-/// with every edit below it, so folders only carry name + parent.
+/// A Cloudy node as the Files app sees it. Versions: a file's content version is the hash of its contents (its etag
+/// when the server hasn't sent one), its metadata version follows the etag; a folder's etag changes with every edit
+/// below it, so folders only carry name + parent.
 final class Item: NSObject, NSFileProviderItem {
     let node: FileNode
     let itemIdentifier: NSFileProviderItemIdentifier
@@ -65,12 +66,25 @@ final class Item: NSObject, NSFileProviderItem {
         return c
     }
 
-    private var contentVersion: String { node.isDir ? "dir" : node.etag ?? "" }
-    private var metadataVersion: String { "\(node.name)|\(parentItemIdentifier.rawValue)|\(canEdit)|\(contentVersion)" }
+    /// The contents' SHA-256 when the server sends it. The etag alone was used before, but the server gives a file a
+    /// new etag when it is only renamed or moved: an edit made here before the next change walk then looked like a
+    /// change on both sides and was uploaded as a "conflicted copy".
+    private var contentVersion: String { node.isDir ? "dir" : node.sha256 ?? node.etag ?? "" }
+    private var metadataVersion: String {
+        "\(node.name)|\(parentItemIdentifier.rawValue)|\(canEdit)|\(node.isDir ? "dir" : node.etag ?? "")"
+    }
     var itemVersion: NSFileProviderItemVersion {
         NSFileProviderItemVersion(contentVersion: Data(contentVersion.utf8), metadataVersion: Data(metadataVersion.utf8))
     }
 
     /// Changes whenever the system needs to hear about this item again (stored in `Index`).
     var versionKey: String { metadataVersion }
+
+    /// Whether `base` (the content version an edit on this iPhone started from) is what the server still has.
+    /// The etag is accepted too: items listed before content hashes were used, or before the server had computed
+    /// the hash, carry it as their content version.
+    static func sameContent(_ base: NSFileProviderItemVersion, as node: FileNode) -> Bool {
+        let v = String(decoding: base.contentVersion, as: UTF8.self)
+        return !v.isEmpty && (v == node.sha256 || v == node.etag)
+    }
 }

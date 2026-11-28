@@ -8,7 +8,8 @@ let appVersion: String = {
 }()
 
 private let websiteURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/")!
-private let helpURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy#readme")!
+/// The website's support page (the GitHub README shows other platforms' store badges, which App Review objects to).
+private let helpURL = URL(string: "https://fahed-alhammadi.github.io/Cloudy/support.html")!
 private let feedbackURL = URL(string: "https://github.com/Fahed-Alhammadi/Cloudy/issues")!
 /// Opens the App Store's review sheet (6826676331 = the app's App Store Connect id for io.cloudy.app).
 private let rateURL = URL(string: "https://apps.apple.com/app/id6826676331?action=write-review")!

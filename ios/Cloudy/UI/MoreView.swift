@@ -2,7 +2,12 @@ import SwiftUI
 
 struct MoreView: View {
     @Environment(Session.self) private var session
-    @AppStorage("appLock") private var appLock = false
+    @Environment(\.openURL) private var openURL
+    @AppStorage(AppLock.key, store: AppLock.defaults) private var appLock = false
+    /// The switch shows "on" while Face ID is being asked for; it only stays on when that worked.
+    @State private var turningOnLock = false
+    /// Turning the lock on failed and Face ID is switched off for Cloudy in the Settings app.
+    @State private var biometryDenied = false
     @State private var confirmSignOut = false
     @State private var confirmDelete = false
     @State private var deletePassword = ""
@@ -36,10 +41,20 @@ struct MoreView: View {
                     NavigationLink(value: Route.password) { SettingsLabel("Change password", icon: "key.fill", color: .settingsOrange) }
                     NavigationLink(value: Route.devices) { SettingsLabel("Devices", icon: "iphone", color: .settingsIndigo) }
                     if canUseAppLock {
-                        Toggle(isOn: $appLock) { SettingsLabel("App lock", icon: "faceid", color: .settingsGreen) }
+                        Toggle(isOn: Binding(get: { appLock || turningOnLock }, set: setAppLock)) {
+                            SettingsLabel("App lock", icon: "faceid", color: .settingsGreen)
+                        }
+                        .disabled(turningOnLock)
+                        if biometryDenied {
+                            Text("Face ID is turned off for Cloudy, so App lock can't use it.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            Button("Open Settings") {
+                                if let u = URL(string: UIApplication.openSettingsURLString) { openURL(u) }
+                            }
+                        }
                     }
                 } footer: {
-                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy. While it is on, Cloudy is not shown in the Files app.")
+                    Text("App lock asks for Face ID, Touch ID or your passcode when you return to Cloudy or share files to it. While it is on, Cloudy is not shown in the Files app.")
                 }
                 // Help, feedback, rating, the website, the privacy policy and the version all live in About.
                 Section {
@@ -95,6 +110,24 @@ struct MoreView: View {
 }
 
 extension MoreView {
+    /// Turning the lock on asks for Face ID, Touch ID or the passcode right away. The switch used to be stored without
+    /// asking, so the system's "allow Face ID?" question came up later, out of nowhere, on the next return to the app.
+    private func setAppLock(_ on: Bool) {
+        biometryDenied = false
+        guard on else { appLock = false; return }
+        guard !turningOnLock else { return }
+        turningOnLock = true
+        Task {
+            let outcome = await AppLock.authenticate(reason: String(localized: "Turn on App lock"))
+            if case .ok = outcome {
+                appLock = true
+            } else {
+                biometryDenied = AppLock.biometryDenied
+            }
+            turningOnLock = false
+        }
+    }
+
     private func deleteAccount() async {
         let password = deletePassword
         deletePassword = ""

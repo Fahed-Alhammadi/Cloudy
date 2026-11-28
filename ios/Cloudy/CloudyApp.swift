@@ -5,6 +5,11 @@ import LocalAuthentication
 struct CloudyApp: App {
     @State private var session = Session.shared
 
+    init() {
+        AppLock.migrate() // before any view reads the switch
+        FileCache.pruneInBackground()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -17,16 +22,18 @@ struct CloudyApp: App {
 struct RootView: View {
     @Environment(Session.self) private var session
     @Environment(\.scenePhase) private var phase
-    @AppStorage("appLock") private var appLock = false
+    @AppStorage(AppLock.key, store: AppLock.defaults) private var appLock = false
     #if DEBUG
-    @State private var locked = UserDefaults.standard.bool(forKey: "appLock") || Screenshots.lock // screenshots
+    @State private var locked = AppLock.isOn || Screenshots.lock // screenshots
     #else
-    @State private var locked = UserDefaults.standard.bool(forKey: "appLock")
+    @State private var locked = AppLock.isOn
     #endif
 
     var body: some View {
         Group {
-            if session.isLoggedIn {
+            if session.waitingForKeychain {
+                KeychainWaitView()
+            } else if session.isLoggedIn {
                 MainView()
             } else {
                 LoginView()
@@ -38,8 +45,18 @@ struct RootView: View {
         .onChange(of: session.isLoggedIn) { _, on in LockWindow.shared.set(visible: locked && on, unlock: unlock) }
         // "Cloudy" in the Files app exists while signed in, except with the app lock on: the Files app would open the
         // same files without Face ID.
-        .onChange(of: session.isLoggedIn && !appLock, initial: true) { _, on in FilesDomain.setAvailable(on) }
+        // While the Keychain can't be read nobody knows whether the account is signed in: the location stays as it is
+        // (removing it here once threw away the downloaded copies of an account that was still signed in).
+        .onChange(of: filesLocation, initial: true) { _, on in if let on { FilesDomain.setAvailable(on) } }
+        // Started before the iPhone's first unlock, the app could not read the lock switch either: it looked off.
+        // Read it again the moment the sign-in becomes readable, before the files are shown.
+        .onChange(of: session.waitingForKeychain) { _, waiting in
+            guard !waiting else { return }
+            AppLock.migrate()
+            if AppLock.isOn && !locked { locked = true; unlock() }
+        }
         .onChange(of: phase) { _, p in
+            if p == .active { session.retryKeychain() }
             // Lock on leaving the app; the lock screen also hides content in the app switcher.
             // Only prompt when coming back from the background: Face ID itself makes the app inactive.
             if p == .background { wasBackground = true; if appLock { locked = true } }
@@ -56,6 +73,9 @@ struct RootView: View {
 
     @State private var unlocking = false
     @State private var wasBackground = false
+
+    /// Whether "Cloudy" belongs in the Files app; nil = not known yet.
+    private var filesLocation: Bool? { session.waitingForKeychain ? nil : session.isLoggedIn && !appLock }
 
     private func unlock() {
         guard !unlocking else { return }
@@ -118,6 +138,37 @@ private struct LockView: View {
         .frame(maxWidth: 440)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemGroupedBackground))
+    }
+}
+
+/// Shown instead of the sign-in screen while the device token can't be read from the Keychain. That normally ends by
+/// itself within a moment; if it doesn't, signing in again is the way out.
+private struct KeychainWaitView: View {
+    @Environment(Session.self) private var session
+    @State private var stuck = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            if stuck {
+                Text("Cloudy can't read your sign-in from this iPhone yet.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button("Sign in again") { session.signOut(revoke: false) }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+        .task {
+            var tries = 0
+            while session.waitingForKeychain {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                session.retryKeychain()
+                tries += 1
+                if tries >= 5 { withAnimation { stuck = true } }
+            }
+        }
     }
 }
 

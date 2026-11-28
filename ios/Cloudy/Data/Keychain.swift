@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// App Group shared by the app and its share extension (settings such as the server address).
+/// App Group shared by the app and its extensions (settings such as the server address and the app lock).
 let appGroup = "group.io.cloudy.app"
 
 /// Minimal generic-password Keychain wrapper (this device only, readable after first unlock).
@@ -12,13 +12,28 @@ enum Keychain {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "io.cloudy.app", kSecAttrAccount as String: key]
     }
 
-    static func get(_ key: String) -> String? {
+    /// What a read found. `unavailable` is neither a token nor "signed out": the Keychain could not be read right
+    /// now (this iPhone hasn't been unlocked since it started, or the system refused for another reason).
+    enum Read: Equatable {
+        case value(String)
+        case missing
+        case unavailable
+    }
+
+    /// Every failed read used to count as "no token": a launch before the first unlock looked like a sign-out, and
+    /// the app then removed the Files location and its downloaded copies although the token was fine.
+    static func read(_ key: String) -> Read {
         var q = query(key)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        switch SecItemCopyMatching(q as CFDictionary, &out) {
+        case errSecSuccess:
+            guard let data = out as? Data, let s = String(data: data, encoding: .utf8) else { return .missing }
+            return .value(s)
+        case errSecItemNotFound: return .missing
+        default: return .unavailable
+        }
     }
 
     static func set(_ key: String, _ value: String) {

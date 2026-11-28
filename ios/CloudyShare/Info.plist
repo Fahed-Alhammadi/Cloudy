@@ -29,6 +29,9 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- With App lock on, "Share to Cloudy" asks before it shows folders or uploads (same text as the app's). -->
+	<key>NSFaceIDUsageDescription</key>
+	<string>Cloudy uses Face ID to unlock the app when App lock is on.</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

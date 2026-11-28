@@ -20,7 +20,17 @@ enum Account {
     /// the app is signed out.
     static func ready() async throws {
         let server = defaults.string(forKey: "server") ?? ""
-        guard !server.isEmpty, let token = Keychain.get("token") else { throw NSFileProviderError(.notAuthenticated) }
+        let token: String
+        // The Keychain first: only "there is no token" means signed out.
+        switch Keychain.read("token") {
+        case .value(let t): token = t
+        case .missing: throw NSFileProviderError(.notAuthenticated)
+        // The Keychain can't be read yet (iOS started the extension before the iPhone's first unlock): that is not
+        // "signed out", which would show "Authentication Required". The system tries again by itself after this.
+        case .unavailable: throw NSFileProviderError(.serverUnreachable)
+        }
+        // A token without a server address: the settings can't be read yet either. Try again later, like above.
+        guard !server.isEmpty else { throw NSFileProviderError(.serverUnreachable) }
         if API.shared.server != server { API.shared.server = server }
         if API.shared.token != token { API.shared.token = token }
         if rootId == 0 {

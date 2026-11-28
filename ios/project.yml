@@ -50,6 +50,7 @@ targets:
       - path: Cloudy/Data/API.swift
       - path: Cloudy/Data/Models.swift
       - path: Cloudy/Data/Keychain.swift
+      - path: Cloudy/Data/AppLock.swift
       - path: Cloudy/Resources/Localizable.xcstrings
     entitlements:
       path: CloudyShare/CloudyShare.entitlements

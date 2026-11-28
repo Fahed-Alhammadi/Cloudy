@@ -3,7 +3,6 @@ import SwiftUI
 /// The sheet shown by "Share to Cloudy": the files, the destination folder (remembered), and Upload.
 struct ShareView: View {
     let model: ShareModel
-    let signedIn: Bool
     let done: () -> Void
 
     @State private var folder = Folder.remembered()
@@ -18,12 +17,20 @@ struct ShareView: View {
     @State private var closed = false
 
     private var items: [SharedItem] { model.items ?? [] }
+    private var signedIn: Bool { model.account == .signedIn }
 
     var body: some View {
         NavigationStack {
             List {
-                if !signedIn {
+                if model.account == .unreadable {
+                    Section { Label("Cloudy can't read your sign-in right now. Unlock this iPhone, then share again.", systemImage: "exclamationmark.triangle") }
+                } else if !signedIn {
                     Section { Label("Sign in to Cloudy first, then share again.", systemImage: "person.crop.circle.badge.exclamationmark") }
+                } else if model.lockFailed {
+                    Section { Label("Cloudy is locked. Nothing was uploaded.", systemImage: "lock.fill") }
+                } else if model.locked {
+                    // App lock: nothing of the account (not even the remembered folder's name) before Face ID.
+                    Section { Label("Cloudy is locked", systemImage: "lock.fill") }
                 } else if model.items == nil {
                     Section {
                         HStack(spacing: 12) {
@@ -67,7 +74,7 @@ struct ShareView: View {
                     if finished {
                         Button("Done", action: close)
                     } else {
-                        Button(action: upload) { Text("Upload").bold() }.disabled(!signedIn || items.isEmpty || uploading)
+                        Button(action: upload) { Text("Upload").bold() }.disabled(!signedIn || model.locked || items.isEmpty || uploading)
                     }
                 }
             }
@@ -105,6 +112,7 @@ struct ShareView: View {
     }
 
     private func upload() {
+        guard signedIn, !model.locked else { return }
         uploading = true
         error = nil
         let count = Double(max(items.count, 1))

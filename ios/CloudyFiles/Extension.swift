@@ -23,7 +23,8 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
     /// per process, before any upload (several domain instances can share the process).
     private static let lowMemoryUploads: Void = { API.shared.chunksFromFile = true }()
 
-    func invalidate() {}
+    /// The system is done with this instance, often shortly before it ends the process: nothing may be left waiting.
+    func invalidate() { Index.shared.flush() }
 
     func item(for identifier: NSFileProviderItemIdentifier, request: NSFileProviderRequest,
               completionHandler: @escaping (NSFileProviderItem?, Error?) -> Void) -> Progress {
@@ -155,13 +156,14 @@ final class FileProviderExtension: NSObject, NSFileProviderReplicatedExtension, 
         guard let id = item.itemIdentifier.nodeId, item.itemIdentifier != .rootContainer, item.itemIdentifier != .shared else {
             throw CocoaError(.fileWriteNoPermission)
         }
-        // Contents first: a rename also changes the etag the conflict check compares.
+        // Contents first: our own rename below gives the file a new etag.
         if changedFields.contains(.contents), let newContents {
             let current = try await API.shared.node(id).node
             guard let parentId = current.parentId else { throw CocoaError(.fileWriteNoPermission) }
-            if current.etag != String(decoding: version.contentVersion, as: UTF8.self) {
-                // Changed on the server since this iPhone last had it: the edit is kept as a conflicted copy next to it,
-                // and the server's version replaces the local one.
+            if !Item.sameContent(version, as: current) {
+                // The contents changed on the server since this iPhone last had them (a rename or move there is not
+                // a change): the edit is kept as a conflicted copy next to it, and the server's version replaces the
+                // local one.
                 _ = try await API.shared.upload(parentId, name: conflictName(item.filename), file: newContents, keepBoth: true,
                                                 progress: { _, _ in })
                 return (try await Remote.item(item.itemIdentifier), true)
