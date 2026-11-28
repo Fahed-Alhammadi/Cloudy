@@ -177,7 +177,10 @@ export function unpackState(raw: any): SyncState | null {
 
 const IGNORED = /^(\.DS_Store|\._.*|Thumbs\.db|desktop\.ini|\.directory|Icon\r|~\$.*|\.~lock\..*#|.*\.swp|\.cloudy-tmp-.*)$/i;
 const WINDOWS_BAD = /[<>:"|?*\x00-\x1f]|[. ]$|^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i;
+/** The "delete them too?" question: from this many files, when they are a tenth of the account's files or more… */
 const MASS_DELETE = 100;
+/** …and from this many whatever the account's size. */
+const MASS_DELETE_ALWAYS = 1000;
 /** Downloads/uploads at once. */
 const TRANSFERS = 6;
 /** Server requests at once for listings, new folders and deletions (small, latency-bound requests). */
@@ -764,7 +767,8 @@ export class SyncEngine extends EventEmitter {
       if (!this.excluded.includes(e) || !Object.keys(this.state.base).some((k) => k === e || under(k, e))) continue;
       if (await this.localTreeUnchanged(e)) {
         const w = this.beginWrite([e]);
-        try { await this.o.trash(this.full(e)).catch(() => {}); } finally { await this.endWrite(w); }
+        // In use, so not removed: say so like a folder with changes ("kept on this computer"), instead of nothing.
+        try { await this.o.trash(this.full(e)).catch(() => this.emit('kept', e)); } finally { await this.endWrite(w); }
       } else this.emit('kept', e);
       this.forget(e);
       this.baseIndex = null;
@@ -1364,11 +1368,15 @@ export class SyncEngine extends EventEmitter {
         const op = where === 'local' ? 'deleteLocal' : 'deleteRemote';
         const del = ops.filter((o) => o.op === op);
         const files = del.reduce((n, o) => n + filesAt(o.p), 0);
-        // Ask for ≥ 100 files, for a small account losing every one of its files, and whenever the side the deletions
-        // come from is now completely empty (an unmounted disk's empty mount point, a server folder emptied by mistake).
+        // Ask for ≥ 100 files that are a tenth of the account or more, for ≥ 1,000 files in any account, for a small
+        // account losing every one of its files, and whenever the side the deletions come from is now completely
+        // empty (an unmounted disk's empty mount point, a server folder emptied by mistake). The question used to
+        // need half of the account: a disk mounted inside the sync folder and then removed could send up to 49 % of
+        // the files to the server's trash, and from there off every other computer, without asking.
         const emptied = files > 0 && (where === 'remote' ? local.size === 0 : remote.size === 0);
-        const suspicious = files >= MASS_DELETE || (files === total && total >= 10) || emptied;
-        if (suspicious && files >= total / 2 && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
+        const many = files >= MASS_DELETE && (files * 10 >= total || files >= MASS_DELETE_ALWAYS);
+        const suspicious = many || (files === total && total >= 10) || emptied;
+        if (suspicious && this.o.confirmDeletes && !(await this.o.confirmDeletes(files, where))) {
           // Keep them: forgetting the base makes the files "new" on the side that still has them, so they are copied back.
           for (const o of del) { this.forget(o.p); o.op = 'forget'; }
         }
@@ -1568,18 +1576,24 @@ export class SyncEngine extends EventEmitter {
 
       case 'conflict': {
         // Changed on both sides (or a file on one side and a folder on the other): keep ours under a new name.
-        await this.keepAside(p);
-        this.forget(p);
-        this.log(p, 'conflict');
         if (r && !r.dir) {
+          // The server's copy is fetched first and ours renamed only once it is here. Renamed first, a program that
+          // saved again while a long download ran wrote a new file under the old name, and the download then
+          // replaced that save without keeping a copy. `place` renames whatever is at `p` at that moment.
           const tmp = await this.fetchTemp(p, r);
           try {
-            await rename(tmp, this.full(p));
+            const { kept } = await this.place(p, tmp, undefined);
+            if (!kept) this.log(p, 'downloaded'); // ours was removed meanwhile: nothing to keep
+            this.forget(p); // only now: if ours could not be renamed (in use), the state stays as it was
             await this.record(p, r);
           } finally {
             await rm(tmp, { force: true });
           }
+          return true;
         }
+        await this.keepAside(p);
+        this.forget(p);
+        this.log(p, 'conflict');
         return true;
       }
 

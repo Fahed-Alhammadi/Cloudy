@@ -46,7 +46,7 @@ Each side "changed" if it differs from base. Here is what each case does:
 | Same size, no history | The content is compared first, so a first sync into a folder that already has the files doesn't duplicate them. Servers from 1.16 list a SHA-256 per file: the local file is hashed and nothing is downloaded when they match. |
 | Renamed or moved | Detected by inode (local) or node id (server) and repeated on the other side, not transferred again. |
 | Deleted | Goes to the server trash or the computer's trash. |
-| ≥ 100 files (or every file of a folder with ≥ 10, or every file on one side) and ≥ half of them deleted at once | The app asks first. "Keep" copies the files back. |
+| ≥ 100 files that are a tenth of the account or more, ≥ 1,000 files, every file of an account with ≥ 10, or every file on one side, deleted at once | The app asks first. "Keep" copies the files back. |
 | A folder deleted on one side, but changed on the other | The changed files are kept and synced; only the unchanged ones are deleted. Checked again just before deleting. |
 | Same name in another case or Unicode form ("Docs"/"docs", "é" composed/decomposed) on a filesystem that treats them as one (probed: APFS, NTFS, exFAT…) | One item: the server's spelling is used, so nothing is duplicated or deleted. Case-only renames are repeated on the other side. |
 | Cannot be read | Unreadable folders, symlinks, names not allowed on this OS and case duplicates are reported and left alone on both sides. They are never treated as deleted. |

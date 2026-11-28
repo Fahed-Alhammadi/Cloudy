@@ -4,7 +4,7 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog, Notification, powerMonitor, net } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import path from 'node:path';
 import { Api, ApiError, normalizeServer } from './api.ts';
@@ -145,7 +145,18 @@ async function startEngine(a: Account): Promise<void> {
       try {
         await shell.trashItem(file);
       } catch {
-        await rm(file, { recursive: true, force: true }); // no trash (some Linux desktops): it is in the server trash
+        // No trash here (some Linux desktops, network drives, a disk without a recycle bin), or the item is in use
+        // or protected. A rename tells the two apart: what cannot be renamed is in use. It stays, the engine lists
+        // it as a problem and tries again in the next pass. What can be renamed is removed: it is in the server's
+        // trash. Removing without that check used to delete the rest of a folder for good because one file in it
+        // was open in a program. (The name is one the engine ignores and clears away after a crash.)
+        const aside = path.join(path.dirname(file), `.cloudy-tmp-${randomBytes(6).toString('hex')}`);
+        try {
+          await rename(file, aside);
+        } catch {
+          throw Object.assign(new Error('Could not move to the trash'), { code: 'EBUSY' });
+        }
+        await rm(aside, { recursive: true, force: true });
       }
     },
     confirmDeletes: async (count, where) => {

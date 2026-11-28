@@ -138,6 +138,29 @@ test('edits on both sides keep both copies', { skip }, async () => {
   assert.ok(copy && tb[copy] === 'from b, longer', 'b’s version kept as a conflicted copy');
 });
 
+test('a save made while the server copy of a conflict downloads is kept as a copy too', { skip }, async () => {
+  const { a, b } = await setup('conflict-save');
+  await writeFile(path.join(a.dir, 'note.txt'), 'base');
+  await a.sync();
+  await b.sync();
+  await later();
+  await writeFile(path.join(a.dir, 'note.txt'), 'from a!');
+  await writeFile(path.join(b.dir, 'note.txt'), 'from b, longer');
+  await a.sync();
+  // The program on b saves once more while the server's copy is on its way (a long download in real life).
+  const real = b.engine.api.download.bind(b.engine.api);
+  b.engine.api.download = async (id, dest, signal) => {
+    await real(id, dest, signal);
+    await writeFile(path.join(b.dir, 'note.txt'), 'saved again on b during the download');
+  };
+  await b.sync();
+  b.engine.api.download = real;
+  const tb = await tree(b.dir);
+  assert.equal(tb['note.txt'], 'from a!');
+  const copies = Object.entries(tb).filter(([k]) => k.startsWith('note (conflicted copy ')).map(([, v]) => v);
+  assert.deepEqual(copies, ['saved again on b during the download'], 'the later save is kept, not replaced by the download');
+});
+
 test('first sync of identical files compares them instead of making copies', { skip }, async () => {
   const { a, b } = await setup('compare');
   await writeFile(path.join(a.dir, 'same.txt'), 'identical');
@@ -176,6 +199,25 @@ test('mass deletions ask first, and "no" puts the files back', { skip }, async (
   assert.equal((await readdir(path.join(b.dir, 'Many'))).length, 120, 'downloaded again');
   await a.sync();
   assert.equal((await readdir(path.join(a.dir, 'Many'))).length, 120);
+});
+
+test('deleting well under half of the files at once asks too', { skip }, async () => {
+  const { a, b } = await setup('mass-part', { confirm: () => false });
+  await mkdir(path.join(a.dir, 'Many'));
+  await mkdir(path.join(a.dir, 'Rest'));
+  for (let i = 0; i < 100; i++) await writeFile(path.join(a.dir, `Many/f${i}.txt`), String(i));
+  for (let i = 0; i < 150; i++) await writeFile(path.join(a.dir, `Rest/f${i}.txt`), String(i));
+  await a.sync();
+  await b.sync();
+  for (let i = 0; i < 5; i++) await rm(path.join(b.dir, `Rest/f${i}.txt`));
+  await b.sync();
+  assert.deepEqual(b.confirms, [], 'a few files: no question');
+  // 100 of 245 files: a folder on a disk that was unplugged looks like this. It used to need half of all files.
+  await rm(path.join(b.dir, 'Many'), { recursive: true });
+  await b.sync();
+  assert.deepEqual(b.confirms, [100]);
+  await b.sync();
+  assert.equal((await readdir(path.join(b.dir, 'Many'))).length, 100, '"Keep the files": downloaded again');
 });
 
 test('server-side rename and selective sync', { skip }, async () => {
