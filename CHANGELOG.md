@@ -11,6 +11,27 @@ Sections marked **Before you update** need an action from you. The apps (Android
 their stores and the [releases page](https://github.com/Fahed-Alhammadi/Cloudy/releases), each with its own notes.
 Newer apps work with older servers and the other way round.
 
+## 2.1.4 (2026-11-28)
+
+Fixes from a full review: two ways an upload or a save could be lost, and three security fixes. Nothing to do
+before you update.
+
+- A save can no longer lose the new content when the server fails to remove an old version of the file
+  afterwards (a permission or network-storage error). Before, the file could be left without content.
+- An upload whose last part arrived just as the server stopped is no longer lost. The server stores it at the
+  next start, or the app finishes it when it asks again. Before, the apps could count such a file as uploaded
+  although it was not stored.
+- An upload that a signed-in person started can only be continued, checked or cancelled by that person. Before,
+  a phone or computer that had been signed out (by a password change, under *Devices*, or because the account was
+  disabled) could still finish an upload it had started and replace a file. Uploads through a public link work as
+  before, and so do all released apps.
+- Wrong passwords sent by strangers no longer keep you out of your own account. A browser that signed in to the
+  account before, and a signed-in person re-typing the password for a sensitive change, are counted on their own.
+  For this, signing in with a browser sets one more cookie, `cloudy_device` (kept for a year; it only says that
+  this browser signed in to this account before). A device that never signed in can still be held up for 15
+  minutes while someone is guessing the password; passkeys and signed-in apps are not affected.
+- A request with a very long `Accept-Encoding` header could keep the server busy without signing in. Fixed.
+
 ## 2.1.3 (2026-11-26)
 
 Fixes from a security review. Nothing to do before you update.

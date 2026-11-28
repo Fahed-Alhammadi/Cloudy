@@ -24,8 +24,8 @@ android {
         applicationId = "io.cloudy.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 42
-        versionName = "1.22.8"
+        versionCode = 43
+        versionName = "1.22.9"
     }
 
     signingConfigs {

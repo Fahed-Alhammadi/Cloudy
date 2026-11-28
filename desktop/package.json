@@ -1,7 +1,7 @@
 {
   "name": "cloudy-desktop",
   "productName": "Cloudy",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "description": "Cloudy desktop sync client: keeps a folder on your computer in sync with your Cloudy server.",
   "license": "MIT",
   "author": "Fahed Alhammadi",
