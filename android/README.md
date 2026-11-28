@@ -27,7 +27,7 @@ works. Use HTTPS in production, and turn off plain HTTP in `res/xml/network_secu
 
 ## Build
 
-You need JDK 17+ (e.g. `brew install openjdk@21`) and the Android SDK (platform 36) with
+You need JDK 17+ (e.g. `brew install openjdk@21`) and the Android SDK (platform 37) with
 `sdk.dir` in `android/local.properties` or `ANDROID_HOME`.
 
 ```sh

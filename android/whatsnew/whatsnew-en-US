@@ -1,4 +1,6 @@
-• Offline files stay on your phone when the server answers with an error. Before, they could be removed.
-• Uploading a file whose name already exists keeps both ("name (2)") instead of replacing the first one.
-• The text editor asks before overwriting changes someone else saved after you opened the file.
-• Word, Excel and PowerPoint files no longer open in the text editor.
+• Photo backup no longer uploads photos twice, and "Back up now" respects "Only on Wi-Fi".
+• A photo that can't be uploaded no longer holds up the others; the backup screen says how many are left.
+• Files shared from other apps keep uploading after you go back.
+• Moving, deleting and "Available offline" carry on when you rotate the phone or leave the folder.
+• Leaving a preview stops its download.
+• Offline folders also open while the server restarts.

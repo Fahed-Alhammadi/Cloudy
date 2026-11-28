@@ -502,7 +502,10 @@ fun BackupScreen(nav: NavController) {
             ListItem(headlineContent = { Text(stringResource(R.string.backup_wifi)) }, modifier = Modifier.toggleRow(wifiOnly) { wifiOnly = it; apply() },
                 trailingContent = { Switch(wifiOnly, onCheckedChange = null) })
             OutlinedTextField(folder, { folder = it; apply() }, label = { Text(stringResource(R.string.backup_folder)) }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
-            Button(enabled = enabled, onClick = { apply(); Jobs.backupNow(context); toast(context, context.getString(R.string.backup_started)) }, modifier = Modifier.padding(16.dp)) { Text(stringResource(R.string.backup_now)) }
+            Button(enabled = enabled, onClick = {
+                apply(); Jobs.backupNow(context)
+                toast(context, context.getString(if (Jobs.waitsForWifi(context)) R.string.backup_waits_wifi else R.string.backup_started))
+            }, modifier = Modifier.padding(16.dp)) { Text(stringResource(R.string.backup_now)) }
             if (settings.lastRun > 0) Text(stringResource(R.string.backup_last_run, DateFormat.getDateTimeInstance().format(Date(settings.lastRun)), settings.lastResult),
                 Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
@@ -522,7 +525,7 @@ fun BackupScreen(nav: NavController) {
         onDismissRequest = {},
         title = { Text(stringResource(R.string.backup_existing_title)) },
         text = { Text(stringResource(R.string.backup_existing_text)) },
-        confirmButton = { TextButton(onClick = { askExisting = false; settings.lastAdded = 0; apply(); Jobs.backupNow(context) }) { Text(stringResource(R.string.backup_upload_all)) } },
-        dismissButton = { TextButton(onClick = { askExisting = false; settings.lastAdded = System.currentTimeMillis() / 1000; apply() }) { Text(stringResource(R.string.backup_only_new)) } },
+        confirmButton = { TextButton(onClick = { askExisting = false; settings.lastAdded = 0; settings.failed = emptyMap(); apply(); Jobs.backupNow(context) }) { Text(stringResource(R.string.backup_upload_all)) } },
+        dismissButton = { TextButton(onClick = { askExisting = false; settings.lastAdded = System.currentTimeMillis() / 1000; settings.failed = emptyMap(); apply() }) { Text(stringResource(R.string.backup_only_new)) } },
     )
 }

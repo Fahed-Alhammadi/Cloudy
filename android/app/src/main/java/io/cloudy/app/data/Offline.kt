@@ -1,7 +1,10 @@
 package io.cloudy.app.data
 
 import android.content.Context
+import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -29,16 +32,33 @@ class Offline(context: Context, private val api: Api) {
     )
 
     private val stateFile = File(root, "state.json")
-    // Read once at startup (a small file); afterwards only the in-memory copy is read on the UI thread.
-    @Volatile private var state: State = runCatching { json.decodeFromString<State>(stateFile.readText()) }.getOrDefault(State())
+    /** The pinned ids once more, as Compose state: lists showing the "available offline" mark redraw when they change. */
+    private val pinnedSeen = mutableStateOf<Set<Long>>(emptySet())
+    @Volatile private var state: State = State()
+        set(v) { field = v; pinnedSeen.value = v.pinned }
+    private val stateLock = Any()
     private val lock = Mutex()
-
-    private fun save() {
-        root.mkdirs()
-        stateFile.writeText(json.encodeToString(state))
+    // state.json grows with the pinned folders (thousands of files), so it is no longer read on the UI thread while
+    // the app starts. Until it is loaded nothing counts as offline; [ready] waits for it.
+    private val loading = CoroutineScope(Dispatchers.IO).launch {
+        runCatching { json.decodeFromString<State>(stateFile.readText()) }.getOrNull()?.let { read -> update { read } }
     }
 
-    fun isPinned(id: Long) = id in state.pinned
+    /** Changes the state in one step: pinning and unpinning don't wait for a running download, and nothing is lost. */
+    private fun update(change: (State) -> State) = synchronized(stateLock) { state = change(state) }
+
+    /** Written next to the file and renamed: a stop in the middle of writing can't leave half a file (and no pins). */
+    private fun save() {
+        root.mkdirs()
+        val tmp = File(root, "state.json.tmp")
+        tmp.writeText(json.encodeToString(state))
+        if (!tmp.renameTo(stateFile)) stateFile.writeText(tmp.readText())
+    }
+
+    /** Returns once the saved state is in memory. */
+    suspend fun ready() = loading.join()
+
+    fun isPinned(id: Long) = id in pinnedSeen.value
     val pinned: Set<Long> get() = state.pinned
 
     // The in-memory check comes first, so files that aren't offline never touch the disk (called while drawing lists).
@@ -59,20 +79,25 @@ class Offline(context: Context, private val api: Api) {
     }
 
     suspend fun pin(node: FileNode) {
-        io {
-            state = state.copy(pinned = state.pinned + node.id)
-            save()
-        }
+        ready()
+        update { it.copy(pinned = it.pinned + node.id) } // marked at once, also while another download is running
+        io { save() }
         sync()
     }
 
-    suspend fun unpin(id: Long) = io {
-        state = state.copy(pinned = state.pinned - id)
-        save()
-        cleanup()
+    suspend fun unpin(id: Long) {
+        ready()
+        update { it.copy(pinned = it.pinned - id) } // at once: a running download of it stops at its next file
+        io {
+            save()
+            cleanup()
+        }
     }
 
-    private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { lock.withLock { block() } }
+    private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) {
+        ready()
+        lock.withLock { block() }
+    }
 
     /** Downloads everything pinned that changed on the server. Returns the number of files fetched. */
     suspend fun sync(onProgress: (String) -> Unit = {}): Int = io {
@@ -82,6 +107,15 @@ class Offline(context: Context, private val api: Api) {
         // restarts, a 500): what is on the server is then not known, and nothing is removed from the device this
         // time. Every copy that was not reached used to be deleted, so one bad answer emptied a pinned folder.
         var complete = true
+        // What has been downloaded is written down every few seconds and when the run is cut short. It used to be
+        // saved only at the very end, so after a stop (the background job's time limit, the app closed) every file
+        // was downloaded again.
+        var savedAt = System.nanoTime()
+        fun fetchedOne(name: String) {
+            fetched++
+            onProgress(name)
+            if (System.nanoTime() - savedAt > 5_000_000_000L) { save(); savedAt = System.nanoTime() }
+        }
         /** One item; a failure skips only that item, so one bad file no longer stops the files after it. */
         suspend fun each(block: suspend () -> Unit) {
             try {
@@ -90,36 +124,42 @@ class Offline(context: Context, private val api: Api) {
                 if (e.status != 404) complete = false // 404: deleted since the listing, its copy goes with the clean-up
             }
         }
-        suspend fun visit(id: Long) {
+        /** [pin]: the pinned item this belongs to. */
+        suspend fun visit(id: Long, pin: Long) {
             val listing = api.node(id)
             val n = listing.node
             keep += n.id
-            state = state.copy(nodes = state.nodes + (n.id to n))
+            update { it.copy(nodes = it.nodes + (n.id to n)) }
             if (n.isDir) {
                 cacheListing(listing)
                 for (c in listing.children.orEmpty()) {
-                    each { if (c.isDir) visit(c.id) else fetchFile(c, keep)?.let { fetched++; onProgress(c.name) } }
+                    // Unpinned meanwhile: leave the rest of it (this run then removes nothing; the next one tidies up).
+                    if (pin !in state.pinned) { complete = false; return }
+                    each { if (c.isDir) visit(c.id, pin) else if (fetchFile(c, keep) != null) fetchedOne(c.name) }
                 }
             } else if (fetchFile(n, keep) != null) {
-                fetched++
-                onProgress(n.name)
+                fetchedOne(n.name)
             }
         }
-        for (id in state.pinned) {
-            try {
-                visit(id)
-            } catch (e: ApiException) {
-                if (e.status == 404) state = state.copy(pinned = state.pinned - id) else complete = false
+        try {
+            for (id in state.pinned) {
+                if (id !in state.pinned) continue // unpinned while the ones before it were fetched
+                try {
+                    visit(id, id)
+                } catch (e: ApiException) {
+                    if (e.status == 404) update { it.copy(pinned = it.pinned - id) } else complete = false
+                }
             }
+        } finally {
+            save() // also when cancelled or the connection is lost
         }
-        save()
         if (complete) cleanup(keep)
         fetched
     }
 
     private suspend fun fetchFile(n: FileNode, keep: MutableSet<Long>): File? {
         keep += n.id
-        state = state.copy(nodes = state.nodes + (n.id to n))
+        update { it.copy(nodes = it.nodes + (n.id to n)) }
         if (localFile(n) != null) return null
         // The new version goes to a side folder first: if the download fails (network lost), the previous copy
         // stays and can still be opened offline.
@@ -130,7 +170,7 @@ class Offline(context: Context, private val api: Api) {
         dir.deleteRecursively()
         dir.parentFile?.mkdirs()
         if (!tmp.renameTo(dir)) throw java.io.IOException("Could not save ${n.name}")
-        state = state.copy(etags = state.etags + (n.id to n.etag))
+        update { it.copy(etags = it.etags + (n.id to n.etag)) }
         return File(dir, SafeName.segment(n.name))
     }
 
@@ -140,21 +180,21 @@ class Offline(context: Context, private val api: Api) {
             if (state.pinned.isEmpty()) {
                 File(root, "files").deleteRecursively()
                 File(root, "dirs").deleteRecursively()
-                state = State()
+                update { if (it.pinned.isEmpty()) State() else it } // something pinned meanwhile keeps its pin
                 save()
             }
         }
         File(root, "tmp").deleteRecursively() // downloads that were interrupted
         File(root, "files").listFiles()?.forEach { f -> if (f.name.toLongOrNull() !in live) f.deleteRecursively() }
         File(root, "dirs").listFiles()?.forEach { f -> if (f.nameWithoutExtension.toLongOrNull() !in live) f.delete() }
-        state = state.copy(etags = state.etags.filterKeys { it in live }, nodes = state.nodes.filterKeys { it in live })
+        update { it.copy(etags = it.etags.filterKeys { id -> id in live }, nodes = it.nodes.filterKeys { id -> id in live }) }
         save()
     }
 
     /** Removes every offline copy and listing (the account was deleted). */
     suspend fun clearAll() = io {
         root.deleteRecursively()
-        state = State()
+        update { State() }
     }
 
     /** Walks the whole offline folder: call from a background thread. */

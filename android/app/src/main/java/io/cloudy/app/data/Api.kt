@@ -1,8 +1,11 @@
 package io.cloudy.app.data
 
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -11,11 +14,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.encodeToString
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -24,9 +29,14 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /** [twoFactor] is true when the server asks for (or rejected) a two-factor code. */
 class ApiException(val status: Int, message: String, val twoFactor: Boolean = false) : Exception(message)
+
+/** The file being uploaded could not be read to its end: a problem of that file, not of the network. */
+class SourceException(message: String) : IOException(message)
 
 /** Client for the Cloudy JSON API. All calls run on the IO dispatcher. */
 class Api(private val session: Session) {
@@ -34,6 +44,8 @@ class Api(private val session: Session) {
         const val CHUNK_FALLBACK = 8L * 1024 * 1024
         /** 409s of `PUT /api/uploads/:id` that mean "check the position and go on" (server/src/api/files.ts). */
         val RETRY_409 = setOf("Offset mismatch", "Chunk already in progress")
+        /** Numbers the temporary files of downloads, so no two downloads ever write into the same one. */
+        val partNumber = AtomicLong()
     }
     val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     var onUnauthorized: () -> Unit = {}
@@ -189,27 +201,60 @@ class Api(private val session: Session) {
         decode(send("PUT", "/api/nodes/$id/content", text.toRequestBody("text/plain; charset=utf-8".toMediaType()),
             if (etag != null) mapOf("If-Match" to "\"$etag\"") else emptyMap()))
 
-    /** Downloads a Cloudy server URL (sends our credentials, so never use it for other hosts). */
-    suspend fun downloadUrlTo(absoluteUrl: String, dest: File, onProgress: (Long) -> Unit = {}) = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url(absoluteUrl).build()
-        http.newCall(req).execute().use { res ->
+    /**
+     * Runs [call] and hands its answer to [block], both on an IO thread, and closes the connection as soon as the
+     * coroutine is cancelled. A blocking read doesn't notice a cancel by itself: a download went on to its end after
+     * its screen was left, and the live-update stream stayed open for good, holding a thread and a server connection.
+     */
+    private suspend fun <T> execute(call: Call, block: (Response) -> T): T = withContext(Dispatchers.IO) {
+        val done = AtomicBoolean()
+        // Started at once (not dispatched), so it is already waiting when the request begins.
+        val watch = launch(start = CoroutineStart.UNDISPATCHED) {
+            try { awaitCancellation() } finally { if (!done.get()) call.cancel() }
+        }
+        try {
+            call.execute().use(block)
+        } catch (e: IOException) {
+            ensureActive() // closed by the cancel above: that is a cancel, not a network error
+            throw e
+        } finally {
+            done.set(true)
+            watch.cancel()
+        }
+    }
+
+    /**
+     * Downloads a Cloudy server URL (sends our credentials, so never use it for other hosts). Stops when the
+     * coroutine is cancelled. [dest] appears only when complete: the data goes to a temporary file next to it, which
+     * is removed when the download fails or is cancelled.
+     */
+    suspend fun downloadUrlTo(absoluteUrl: String, dest: File, onProgress: (Long) -> Unit = {}) {
+        execute(http.newCall(Request.Builder().url(absoluteUrl).build())) { res ->
             if (!res.isSuccessful) throw ApiException(res.code, "Download failed (HTTP ${res.code})")
             dest.parentFile?.mkdirs()
-            val tmp = File(dest.path + ".part")
-            res.body.byteStream().use { input ->
-                tmp.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n < 0) break
-                        out.write(buf, 0, n)
-                        total += n
-                        onProgress(total)
+            // Its own temporary file: two downloads of one file (a preview closed and opened again) shared a single
+            // ".part" and spoiled each other.
+            val tmp = File(dest.path + ".${partNumber.incrementAndGet()}.part")
+            var saved = false
+            try {
+                res.body.byteStream().use { input ->
+                    tmp.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            total += n
+                            onProgress(total)
+                        }
                     }
                 }
+                if (!tmp.renameTo(dest)) throw IOException("Could not save file")
+                saved = true
+            } finally {
+                if (!saved) tmp.delete()
             }
-            if (!tmp.renameTo(dest)) throw IOException("Could not save file")
         }
     }
 
@@ -217,33 +262,28 @@ class Api(private val session: Session) {
     suspend fun office(): OfficeInfo = decode(send("GET", "/api/office"))
     fun previewUrl(id: Long) = url("/api/nodes/$id/preview")
 
-    // ---- live updates (Server-Sent Events); blocks until the stream ends
-    suspend fun streamEvents(onOpen: () -> Unit = {}, onEvent: (ChangeEvent) -> Unit) = withContext(Dispatchers.IO) {
+    // ---- live updates (Server-Sent Events); returns when the stream ends, and closes it when cancelled
+    suspend fun streamEvents(onOpen: () -> Unit = {}, onEvent: (ChangeEvent) -> Unit) {
         val client = http.newBuilder().readTimeout(70, TimeUnit.SECONDS).build() // server pings every 25 s
         val call = client.newCall(Request.Builder().url(url("/api/events")).header("Accept", "text/event-stream").build())
-        val cancel = coroutineContext[Job]?.invokeOnCompletion { call.cancel() } // reads block: cancel closes the socket
-        try {
-            call.execute().use { res ->
-                if (!res.isSuccessful) throw ApiException(res.code, "HTTP ${res.code}")
-                onOpen()
-                val src = res.body.source()
-                var event = ""
-                val data = StringBuilder()
-                while (true) {
-                    val line = src.readUtf8Line() ?: break
-                    when {
-                        line.isEmpty() -> {
-                            if (event == "change" && data.isNotEmpty()) runCatching { onEvent(json.decodeFromString<ChangeEvent>(data.toString())) }
-                            event = ""
-                            data.clear()
-                        }
-                        line.startsWith("event:") -> event = line.substring(6).trim()
-                        line.startsWith("data:") -> data.append(line.substring(5).trim())
+        execute(call) { res ->
+            if (!res.isSuccessful) throw ApiException(res.code, "HTTP ${res.code}")
+            onOpen()
+            val src = res.body.source()
+            var event = ""
+            val data = StringBuilder()
+            while (true) {
+                val line = src.readUtf8Line() ?: break
+                when {
+                    line.isEmpty() -> {
+                        if (event == "change" && data.isNotEmpty()) runCatching { onEvent(json.decodeFromString<ChangeEvent>(data.toString())) }
+                        event = ""
+                        data.clear()
                     }
+                    line.startsWith("event:") -> event = line.substring(6).trim()
+                    line.startsWith("data:") -> data.append(line.substring(5).trim())
                 }
             }
-        } finally {
-            cancel?.dispose()
         }
     }
 
@@ -284,28 +324,36 @@ class Api(private val session: Session) {
         }
     }
 
+    /** Failures of reading the file itself become a [SourceException]: callers tell them from network failures. */
+    private inline fun <T> reading(block: () -> T): T =
+        try { block() } catch (e: SourceException) { throw e } catch (e: IOException) { throw SourceException(e.message ?: "Cannot read the file").apply { initCause(e) } }
+
     private suspend fun uploadChunks(sessionId: String, chunkSize: Long, start: Long, size: Long, open: () -> InputStream, onProgress: (Long) -> Unit): Long {
         var offset = start
         return withContext(Dispatchers.IO) {
-            open().use { input ->
-                var skip = offset
-                while (skip > 0) {
-                    val k = input.skip(skip)
-                    if (k <= 0) { if (input.read() < 0) throw IOException("File ended before the declared size") else skip-- } else skip -= k
+            reading(open).use { input ->
+                reading {
+                    var skip = offset
+                    while (skip > 0) {
+                        val k = input.skip(skip)
+                        if (k <= 0) { if (input.read() < 0) throw SourceException("File ended before the declared size") else skip-- } else skip -= k
+                    }
                 }
                 val buf = ByteArray(chunkSize.toInt())
                 while (true) {
                     var n = 0
-                    while (n < buf.size) {
-                        val r = input.read(buf, n, buf.size - n)
-                        if (r < 0) break
-                        n += r
+                    reading {
+                        while (n < buf.size) {
+                            val r = input.read(buf, n, buf.size - n)
+                            if (r < 0) break
+                            n += r
+                        }
                     }
                     val result = putChunk(sessionId, buf, n, offset, size)
                     offset = result.received
                     onProgress(offset)
                     if (result.done) return@withContext result.node?.id ?: 0L
-                    if (n == 0) throw IOException("File ended before the declared size")
+                    if (n == 0) throw SourceException("File ended before the declared size")
                 }
                 @Suppress("UNREACHABLE_CODE")
                 error("unreachable")

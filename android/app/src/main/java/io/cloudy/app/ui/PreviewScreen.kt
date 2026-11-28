@@ -125,7 +125,7 @@ fun PreviewScreen(nav: NavController, id: Long) {
             .onSuccess { node = it.node; canEdit = it.perm != "read" }
             .onFailure { e ->
                 // No connection: open the downloaded copy of an "available offline" file, read-only.
-                val saved = Services.offline.savedNode(id)
+                val saved = withContext(Dispatchers.IO) { Services.offline.ready(); Services.offline.savedNode(id) }
                 if (saved == null) error = e.message else { node = saved; toast(context, context.getString(R.string.offline_saved_copy)) }
             }
     }
@@ -154,7 +154,7 @@ fun PreviewScreen(nav: NavController, id: Long) {
                         FileTile(n, 88.dp)
                         Text(n.name, style = MaterialTheme.typography.titleLarge, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 20.dp))
                         Text(formatSize(n.size), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-                        Button(onClick = { scope.launch { runCatching { openExternally(context, n) }.onFailure { toast(context, it.message ?: context.getString(R.string.failed)) } } },
+                        Button(onClick = { scope.launch { runCatching { openExternally(context, n) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; toast(context, it.message ?: context.getString(R.string.failed)) } } },
                             modifier = Modifier.padding(top = 16.dp)) {
                             Icon(Icons.AutoMirrored.Outlined.OpenInNew, null); Text("  " + stringResource(R.string.open_with))
                         }

@@ -66,6 +66,7 @@
     <string name="backup_wifi">Only on Wi-Fi</string>
     <string name="backup_folder">Upload folder</string>
     <string name="backup_started">Backup started</string>
+    <string name="backup_waits_wifi">Backup starts when Wi-Fi is connected</string>
     <string name="backup_now">Back up now</string>
     <string name="backup_last_run">Last run: %1$s — %2$s</string>
     <string name="backup_existing_title">Existing photos</string>
@@ -73,6 +74,8 @@
     <string name="backup_upload_all">Upload all</string>
     <string name="backup_only_new">Only new ones</string>
     <string name="backup_result_uploaded">Uploaded %1$d new item(s)</string>
+    <string name="backup_result_some_failed">Uploaded %1$d new item(s). %2$d could not be uploaded and will be tried again once a day.</string>
+    <string name="backup_result_some_failed_why">Uploaded %1$d new item(s). %2$d could not be uploaded (%3$s) and will be tried again once a day.</string>
     <string name="backup_result_failed">Failed: %1$s</string>
     <string name="login_server">Server address</string>
     <string name="login_password">Password</string>
